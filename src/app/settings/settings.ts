@@ -29,6 +29,7 @@ export class Settings {
 
   selectKokoroVoice(id: string) {
     this.ttsService.setKokoroVoice(id);
+    this.previewVoice.emit(id);
   }
 
   @Output() close = new EventEmitter<void>();
@@ -36,6 +37,7 @@ export class Settings {
   @Output() createGarden = new EventEmitter<{name: string; description?: string}>();
   @Output() updateGarden = new EventEmitter<{id: string; name: string; description?: string}>();
   @Output() deleteGarden = new EventEmitter<string>();
+  @Output() previewVoice = new EventEmitter<string>();
 
   // Local form state
   newGardenName = '';
