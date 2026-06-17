@@ -5,6 +5,8 @@ import { pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
+import { LlmService, ChatTurn } from './services/llm';
+import { AgentsService } from './services/agents';
 
 interface Message {
   role: 'user' | 'ava';
@@ -23,6 +25,8 @@ export class App {
 
   private readonly gardensService = inject(GardensService);
   private readonly tts = inject(TtsService);
+  private readonly llm = inject(LlmService);
+  private readonly agents = inject(AgentsService);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
 
@@ -48,10 +52,15 @@ export class App {
     return all[gardenId] ?? [];
   });
 
+  // Background agent tasks (Qwen) surfaced for the UI.
+  protected readonly agentTasks = this.agents.tasks;
+  protected readonly hasActiveAgents = this.agents.hasActiveTasks;
+
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
     this.preloadModel().catch(() => {});
     this.preloadKokoro().catch(() => {});
+    this.preloadLlm().catch(() => {});
     this.loadMessagesFromStorage();
 
     // Auto-scroll chat when new messages arrive
@@ -241,6 +250,20 @@ export class App {
       this.kokoroLoadInfo.set('fallback');
     } finally {
       this.isKokoroLoading.set(false);
+    }
+  }
+
+  /**
+   * Warms up the Gemma instant-reply model in the background so the first
+   * spoken answer is fast. The Qwen agent model is loaded lazily on demand.
+   */
+  private async preloadLlm() {
+    if (typeof window === 'undefined') return;
+    try {
+      await this.llm.autoSelectModel();
+      await this.llm.ensureLoaded();
+    } catch (e) {
+      console.warn('Gemma preload failed; will retry on first use', e);
     }
   }
 
@@ -565,25 +588,97 @@ export class App {
     currentMsgs.push(userMsg);
     this.setGardenMessages(gardenId, currentMsgs);
 
-    // Simulate "thinking" + proactive gentle response
-    await this.delay(650 + Math.random() * 650);
+    // 1) Explicit agent / background-task request → hand off to Qwen.
+    if (this.detectAgentRequest(text)) {
+      await this.handleAgentRequest(gardenId, text);
+      return;
+    }
 
-    const response = this.generateAvaResponse(text);
+    // 2) Fast hard-coded reply for common phrases.
+    const fixed = this.generateAvaResponse(text);
+    if (fixed) {
+      await this.delay(350 + Math.random() * 350);
+      this.respond(gardenId, fixed);
+      return;
+    }
+
+    // 3) Anything else → Gemma. Acknowledge immediately, then think.
+    await this.handleLlmReply(gardenId, text);
+  }
+
+  /** Detects when the user is explicitly asking for a background agent/task. */
+  private detectAgentRequest(text: string): boolean {
+    const lower = text.toLowerCase();
+    return /\b(agent|background task|in the background|run a task|keep working on|work on (this|that|it)|go (and )?(research|find|look into|investigate)|research .+ for me|monitor|keep an eye on|while i('m| am)? (away|gone|busy))\b/.test(
+      lower
+    );
+  }
+
+  /** Speaks a final reply, stores it, and returns to idle after the spoken duration. */
+  private respond(gardenId: string, response: string) {
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date() };
     currentMsgs.push(avaMsg);
     this.setGardenMessages(gardenId, currentMsgs);
 
     this.isThinking.set(false);
     this.status.set('speaking');
-
-    // Speak using synthesis if available
     this.speak(response);
 
-    // Return to idle after speaking approx duration
     const speakDuration = Math.max(1400, response.length * 55);
     setTimeout(() => {
       if (this.status() === 'speaking') this.status.set('idle');
     }, speakDuration);
+  }
+
+  /** Routes an open-ended question to Gemma, speaking a filler line first. */
+  private async handleLlmReply(gardenId: string, text: string) {
+    // Speak the filler immediately so the user knows Ava is working.
+    this.status.set('speaking');
+    this.speak(this.pickThinkingFiller());
+
+    try {
+      const history = this.buildChatHistory(gardenId);
+      const reply = (await this.llm.generate(text, history)).trim();
+      this.respond(gardenId, reply || 'I am not sure how to answer that just yet.');
+    } catch (e) {
+      console.error('Gemma reply failed', e);
+      this.respond(gardenId, 'Sorry, I could not think that through just now.');
+    }
+  }
+
+  /** Hands the request to a Qwen background agent and confirms by voice. */
+  private async handleAgentRequest(gardenId: string, text: string) {
+    this.agents.runTask(text);
+
+    // Kick off model loading in the background if it is not ready yet.
+    this.agents.ensureLoaded().catch(() => {});
+
+    const ack =
+      'Okay, I will work on that in the background and let you know when it is ready.';
+    this.respond(gardenId, ack);
+  }
+
+  /** A few natural "give me a second" lines spoken before Gemma answers. */
+  private pickThinkingFiller(): string {
+    const fillers = [
+      'Let me think about that, one second…',
+      'Give me a moment to think about that…',
+      'Hmm, let me think for a second…',
+      'One moment while I think that through…',
+    ];
+    return fillers[Math.floor(Math.random() * fillers.length)];
+  }
+
+  /** Builds recent conversation history (excluding the latest user turn) for the LLM. */
+  private buildChatHistory(gardenId: string, maxTurns = 6): ChatTurn[] {
+    const msgs = this.messagesByGarden()[gardenId] || [];
+    // Drop the just-added user message; it is passed separately.
+    const prior = msgs.slice(0, -1).slice(-maxTurns);
+    return prior.map<ChatTurn>(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.text,
+    }));
   }
 
   private currentAudio: HTMLAudioElement | null = null;
@@ -688,7 +783,7 @@ export class App {
     }
   }
 
-  private generateAvaResponse(input: string): string {
+  private generateAvaResponse(input: string): string | null {
     const lower = input.toLowerCase().trim();
 
     if (lower.includes('hello') || lower.includes('hi ') || lower === 'hi') {
@@ -709,20 +804,9 @@ export class App {
     if (lower.includes('thank')) {
       return 'You are welcome. I am here whenever you need.';
     }
-    if (lower.length < 12) {
-      return 'I am listening.';
-    }
 
-    // Gentle, curious default responses that feel alive
-    const responses = [
-      'Tell me more about that.',
-      'That resonates. What does it mean for you?',
-      'I am here with you in this moment.',
-      'Interesting. How does that make you feel?',
-      'I am thinking with you.',
-      'Would you like to explore that together?'
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
+    // No fixed match — defer to the Gemma language model.
+    return null;
   }
 
   private simulateVoiceInput() {
