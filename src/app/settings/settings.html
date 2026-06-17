@@ -1,75 +1,126 @@
 <div class="settings-content">
-  <div class="settings-header">
-    <h2>Settings &amp; Gardens</h2>
-    <button class="close-btn" (click)="close.emit()" aria-label="Close settings">×</button>
-  </div>
+  <header class="settings-header">
+    <div>
+      <p class="overline">Ava</p>
+      <h2>Settings</h2>
+    </div>
+    <button class="close-btn" (click)="close.emit()" aria-label="Close settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18 6 6 18"></path>
+        <path d="m6 6 12 12"></path>
+      </svg>
+    </button>
+  </header>
 
-  <div class="section">
-    <h3>Gardens</h3>
-    <p class="hint">Gardens let you keep separate conversations and memories (e.g. Work, Personal, Creative).</p>
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Memory spaces</p>
+        <h3>Gardens</h3>
+      </div>
+      <span>{{ gardenList().length }}</span>
+    </div>
+    <p class="hint">Separate contexts for work, private thoughts, creative ideas, and anything else Ava should hold with care.</p>
 
-    <!-- Garden list -->
     <div class="garden-list">
-      @for (garden of gardens; track garden.id) {
-        <div class="garden-item" [class.active]="garden.id === currentGardenId" [class.editing]="editingId === garden.id">
+      @for (garden of gardenList(); track garden.id) {
+        <article class="garden-item" [class.active]="garden.id === currentGarden()?.id" [class.editing]="editingId === garden.id">
           @if (editingId !== garden.id) {
-            <div class="garden-info" (click)="select(garden.id)">
-              <div class="garden-name">{{ garden.name }}</div>
-              @if (garden.description) {
-                <div class="garden-desc">{{ garden.description }}</div>
-              }
-            </div>
+            <button class="garden-info" (click)="select(garden.id)">
+              <span class="garden-mark" aria-hidden="true"></span>
+              <span>
+                <strong>{{ garden.name }}</strong>
+                @if (garden.description) {
+                  <small>{{ garden.description }}</small>
+                } @else {
+                  <small>No description yet</small>
+                }
+              </span>
+            </button>
 
             <div class="garden-actions">
-              <button class="icon-btn" (click)="startEdit(garden)" title="Edit">✎</button>
-              @if (gardens.length > 1) {
-                <button class="icon-btn danger" (click)="remove(garden.id)" title="Delete">🗑</button>
+              <button class="icon-btn" (click)="startEdit(garden)" title="Edit garden" aria-label="Edit garden">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m16.5 3.5 4 4L8 20H4v-4L16.5 3.5Z"></path>
+                  <path d="m14 6 4 4"></path>
+                </svg>
+              </button>
+              @if (gardenList().length > 1) {
+                <button class="icon-btn danger" (click)="remove(garden.id)" title="Delete garden" aria-label="Delete garden">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="M19 6l-1 14H6L5 6"></path>
+                    <path d="M10 11v5"></path>
+                    <path d="M14 11v5"></path>
+                  </svg>
+                </button>
               }
             </div>
           } @else {
             <div class="edit-form">
-              <div class="edit-header">Editing “{{ garden.name }}”</div>
-              <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
-              <input [(ngModel)]="editDescription" placeholder="Description (optional)" (keyup.enter)="saveEdit()" />
+              <label>
+                <span>Name</span>
+                <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
+              </label>
+              <label>
+                <span>Description</span>
+                <input [(ngModel)]="editDescription" placeholder="What belongs here?" (keyup.enter)="saveEdit()" />
+              </label>
               <div class="edit-buttons">
-                <button (click)="saveEdit()">Save</button>
-                <button (click)="cancelEdit()">Cancel</button>
+                <button class="save-btn" (click)="saveEdit()">Save</button>
+                <button class="ghost-btn" (click)="cancelEdit()">Cancel</button>
               </div>
             </div>
           }
-        </div>
+        </article>
       }
     </div>
+  </section>
 
-    <!-- Create new garden -->
-    <div class="create-header">Create new garden</div>
+  <section class="section create-section">
+    <div>
+      <p class="overline">New garden</p>
+      <h3>Create a space</h3>
+    </div>
     <div class="create-garden">
-      <input 
-        [(ngModel)]="newGardenName" 
-        placeholder="Garden name" 
-        (keyup.enter)="create()" />
-      <input 
-        [(ngModel)]="newGardenDescription" 
-        placeholder="Description (optional)" 
-        (keyup.enter)="create()" />
-      <button (click)="create()" [disabled]="!newGardenName.trim()">+ Create</button>
+      <label>
+        <span>Name</span>
+        <input [(ngModel)]="newGardenName" placeholder="Creative Garden" (keyup.enter)="create()" />
+      </label>
+      <label>
+        <span>Description</span>
+        <input [(ngModel)]="newGardenDescription" placeholder="Notes, plans, and ideas" (keyup.enter)="create()" />
+      </label>
+      <button class="create-btn" (click)="create()" [disabled]="!newGardenName.trim()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </button>
     </div>
-  </div>
+  </section>
 
-  <div class="section">
-    <h3>Other Settings</h3>
+  <section class="section settings-grid">
     <div class="setting-item">
-      <label>Voice (TTS)</label>
-      <span class="setting-value">Kokoro 82M (local)</span>
+      <span>Voice</span>
+      <strong>Kokoro 82M</strong>
+      <small>Local TTS</small>
     </div>
     <div class="setting-item">
-      <label>Speech Recognition</label>
-      <span class="setting-value">Moonshine Base (local)</span>
+      <span>Speech recognition</span>
+      <strong>Moonshine Base</strong>
+      <small>Local STT</small>
     </div>
-    <p class="hint">More preferences coming soon (theme, model settings, export, etc.)</p>
-  </div>
+    <div class="setting-item">
+      <span>Storage</span>
+      <strong>Local first</strong>
+      <small>Gardens in this device</small>
+    </div>
+  </section>
 
-  <div class="settings-footer">
+  <footer class="settings-footer">
     <button class="done-btn" (click)="close.emit()">Done</button>
-  </div>
+  </footer>
 </div>

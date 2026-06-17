@@ -1,86 +1,155 @@
 <main class="ava-root">
-  <!-- Minimal calm header -->
-  <header class="ava-header">
-    <div class="ava-brand">
-      <div class="ava-orb-small"></div>
-      <span class="ava-name">{{ title() }}</span>
-    </div>
-    <div class="ava-meta">
-      <span class="status-pill" [class.active]="status() !== 'idle'">{{ statusLabel() }}</span>
-      <span class="garden" (click)="openSettings()" style="cursor: pointer;" title="Click to manage gardens">
-        {{ currentGarden()?.name || 'Garden' }}
-      </span>
-    </div>
-  </header>
-
-  <!-- Central voice experience -->
-  <section class="voice-area">
-    <div class="orb-container" (click)="toggleVoice()" (keydown.enter)="toggleVoice()" tabindex="0" role="button" [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
-      <div class="orb"
-           [class.listening]="isListening() || isLoadingModel()"
-           [class.thinking]="isThinking()"
-           [class.speaking]="status() === 'speaking'"
-           [class.loading]="isLoadingModel()">
-        <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1v11" />
-          <path d="M8 5a4 4 0 0 0 8 0" />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" y1="19" x2="12" y2="23" />
-          <line x1="8" y1="23" x2="16" y2="23" />
-        </svg>
-      </div>
-    </div>
-
-    <div class="voice-hint">
-      @if (isLoadingModel()) {
-        <span>Loading Moonshine Base ({{ modelLoadInfo() || '...' }})…</span>
-      } @else if (isListening()) {
-        <span>Speak now… <span class="engine">Moonshine Base ({{ modelLoadInfo() || 'auto' }})</span></span>
-      } @else if (isThinking()) {
-        <span>Ava is reflecting…</span>
-      } @else if (status() === 'speaking') {
-        <span>Listening with care</span>
-      } @else {
-        <span>Tap the circle to speak <span class="engine">• Moonshine Base</span></span>
-      }
-    </div>
-
-    @if (currentTranscript()) {
-      <div class="live-transcript">{{ currentTranscript() }}</div>
-    }
-  </section>
-
-  <!-- Conversation transcript (calm, minimal) -->
-  <section class="transcript" aria-live="polite" #transcript>
-    @for (msg of messages(); track msg.timestamp) {
-      <div class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
-        <div class="message-bubble">
-          <div class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</div>
-          <div class="message-text">{{ msg.text }}</div>
-          <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
+  <div class="app-frame">
+    <header class="ava-header">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+        </div>
+        <div>
+          <div class="ava-name">{{ title() }}</div>
+          <div class="ava-tagline">Speak. Feel. Evolve.</div>
         </div>
       </div>
-    }
-  </section>
 
-  <!-- Minimal bottom actions -->
-  <footer class="ava-footer">
-    <button class="action-btn" (click)="clearConversation()" aria-label="Clear conversation">Clear</button>
-    <button class="action-btn" (click)="toggleVoice()" aria-label="Toggle voice">
-      {{ isListening() ? 'Stop' : 'Speak' }}
-    </button>
-    <button class="action-btn" (click)="openSettings()" title="Manage Gardens and Settings">Gardens</button>
-    <span class="stt-engine" title="Using Moonshine Base for STT">Moonshine</span>
-    <span class="stt-engine" title="Using Kokoro 82M for TTS (local)">Kokoro</span>
-  </footer>
+      <div class="header-actions">
+        <span class="status-pill" [class.active]="status() !== 'idle' || isLoadingModel()">
+          <span class="status-dot"></span>
+          {{ statusLabel() }}
+        </span>
+        <button class="garden-chip" (click)="openSettings()" title="Manage gardens">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 21c4-4 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 7 7 11Z"></path>
+            <path d="M12 12.2A2.2 2.2 0 1 0 12 7.8a2.2 2.2 0 0 0 0 4.4Z"></path>
+          </svg>
+          <span>{{ currentGarden()?.name || 'Garden' }}</span>
+        </button>
+      </div>
+    </header>
 
-  <!-- Settings Modal -->
+    <section class="companion-grid">
+      <section class="voice-console" aria-labelledby="voice-title">
+        <div class="voice-copy">
+          <p class="eyebrow">{{ currentGarden()?.name || 'Personal Garden' }}</p>
+          <h1 id="voice-title">
+            @if (isListening()) {
+              I am listening.
+            } @else if (isThinking()) {
+              Let me think.
+            } @else if (status() === 'speaking') {
+              Speaking with you.
+            } @else {
+              I am here.
+            }
+          </h1>
+        </div>
+
+        <button
+          class="orb-container"
+          (click)="toggleVoice()"
+          (keydown.enter)="toggleVoice()"
+          [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
+          <span class="orb-ring"></span>
+          <span
+            class="orb"
+            [class.listening]="isListening() || isLoadingModel()"
+            [class.thinking]="isThinking()"
+            [class.speaking]="status() === 'speaking'"
+            [class.loading]="isLoadingModel()">
+            <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2v10"></path>
+              <path d="M8 6a4 4 0 0 0 8 0"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <path d="M12 19v3"></path>
+              <path d="M8 22h8"></path>
+            </svg>
+          </span>
+        </button>
+
+        <div class="voice-status">
+          @if (isLoadingModel()) {
+            <span>Loading Moonshine Base</span>
+            <small>{{ modelLoadInfo() || 'preparing local model' }}</small>
+          } @else if (isListening()) {
+            <span>Voice channel open</span>
+            <small>Moonshine Base ({{ modelLoadInfo() || 'auto' }})</small>
+          } @else if (isThinking()) {
+            <span>Ava is reflecting</span>
+            <small>Working inside {{ currentGarden()?.name || 'this garden' }}</small>
+          } @else if (status() === 'speaking') {
+            <span>Kokoro voice active</span>
+            <small>Local speech synthesis</small>
+          } @else {
+            <span>Ready when you are</span>
+            <small>Local speech and voice</small>
+          }
+        </div>
+
+        @if (currentTranscript()) {
+          <div class="live-transcript">{{ currentTranscript() }}</div>
+        }
+      </section>
+
+      <section class="history-panel" aria-label="Conversation history">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Conversation</p>
+            <h2>{{ messages().length }} moments</h2>
+          </div>
+          <span class="privacy-badge">Local first</span>
+        </div>
+
+        <div class="transcript" aria-live="polite" #transcript>
+          @for (msg of messages(); track msg.timestamp) {
+            <article class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
+              <div class="message-bubble">
+                <div class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</div>
+                <div class="message-text">{{ msg.text }}</div>
+                <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
+              </div>
+            </article>
+          }
+        </div>
+      </section>
+    </section>
+
+    <footer class="ava-footer" aria-label="Conversation actions">
+      <button class="tool-btn" (click)="clearConversation()" aria-label="Clear conversation">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 6h18"></path>
+          <path d="M8 6V4h8v2"></path>
+          <path d="M19 6l-1 14H6L5 6"></path>
+          <path d="M10 11v5"></path>
+          <path d="M14 11v5"></path>
+        </svg>
+        <span>Clear</span>
+      </button>
+      <button class="primary-tool" (click)="toggleVoice()" aria-label="Toggle voice">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          @if (isListening()) {
+            <path d="M8 8h8v8H8z"></path>
+          } @else {
+            <path d="M12 2v10"></path>
+            <path d="M8 6a4 4 0 0 0 8 0"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <path d="M12 19v3"></path>
+          }
+        </svg>
+        <span>{{ isListening() ? 'Stop' : 'Speak' }}</span>
+      </button>
+      <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .1l-.3.2a1.7 1.7 0 0 0-.9 1.6v.3H10v-.3a1.7 1.7 0 0 0-.9-1.6l-.3-.2a1.7 1.7 0 0 0-2-.1l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 5 15l-.1-.4a1.7 1.7 0 0 0-1.4-1.1H3v-4h.5a1.7 1.7 0 0 0 1.4-1.1L5 8a1.7 1.7 0 0 0-.3-1.9L4.6 6l2-3.4.2.1a1.7 1.7 0 0 0 2-.1l.3-.2A1.7 1.7 0 0 0 10 1h4a1.7 1.7 0 0 0 .9 1.4l.3.2a1.7 1.7 0 0 0 2 .1l.2-.1 2 3.4-.1.1A1.7 1.7 0 0 0 19 8l.1.4a1.7 1.7 0 0 0 1.4 1.1h.5v4h-.5a1.7 1.7 0 0 0-1.4 1.1l-.1.4Z"></path>
+        </svg>
+        <span>Settings</span>
+      </button>
+    </footer>
+  </div>
+
   @if (showSettings()) {
     <div class="settings-overlay" (click)="closeSettings()">
       <div class="settings-modal" (click)="$event.stopPropagation()">
         <app-settings
-          [gardens]="gardens()"
-          [currentGardenId]="currentGarden()?.id || ''"
           (close)="closeSettings()"
           (selectGarden)="selectGarden($event)"
           (createGarden)="onCreateGarden($event)"

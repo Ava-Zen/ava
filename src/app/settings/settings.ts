@@ -1,7 +1,7 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Garden } from '../services/gardens';
+import { Garden, GardensService } from '../services/gardens';
 
 @Component({
   selector: 'app-settings',
@@ -11,8 +11,9 @@ import { Garden } from '../services/gardens';
   styleUrl: './settings.css'
 })
 export class Settings {
-  @Input() gardens: Garden[] = [];
-  @Input() currentGardenId: string = '';
+  private readonly gardensService = inject(GardensService);
+  protected readonly gardenList = this.gardensService.gardens;
+  protected readonly currentGarden = this.gardensService.currentGarden;
 
   @Output() close = new EventEmitter<void>();
   @Output() selectGarden = new EventEmitter<string>();

@@ -115,7 +115,17 @@ export class App {
     try {
       const saved = localStorage.getItem('ava-messages-by-garden');
       if (saved) {
-        this.messagesByGarden.set(JSON.parse(saved));
+        const parsed = JSON.parse(saved) as Record<string, Message[]>;
+        const hydrated = Object.fromEntries(
+          Object.entries(parsed).map(([gardenId, messages]) => [
+            gardenId,
+            messages.map(msg => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp as unknown as string)
+            }))
+          ])
+        );
+        this.messagesByGarden.set(hydrated);
       }
     } catch {}
   }
@@ -701,7 +711,8 @@ export class App {
     });
   }
 
-  protected formatTime(date: Date): string {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  protected formatTime(date: Date | string): string {
+    const value = date instanceof Date ? date : new Date(date);
+    return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 }
