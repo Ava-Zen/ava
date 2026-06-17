@@ -56,10 +56,9 @@
             [class.speaking]="status() === 'speaking'"
             [class.loading]="isLoadingModel()">
             <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 2v10"></path>
-              <path d="M8 6a4 4 0 0 0 8 0"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <path d="M12 19v3"></path>
+              <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+              <path d="M5 11a7 7 0 0 0 14 0"></path>
+              <path d="M12 18v4"></path>
               <path d="M8 22h8"></path>
             </svg>
           </span>
@@ -126,12 +125,12 @@
       <button class="primary-tool" (click)="toggleVoice()" aria-label="Toggle voice">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           @if (isListening()) {
-            <path d="M8 8h8v8H8z"></path>
+            <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
           } @else {
-            <path d="M12 2v10"></path>
-            <path d="M8 6a4 4 0 0 0 8 0"></path>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-            <path d="M12 19v3"></path>
+            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+            <path d="M5 11a7 7 0 0 0 14 0"></path>
+            <path d="M12 18v4"></path>
+            <path d="M8 22h8"></path>
           }
         </svg>
         <span>{{ isListening() ? 'Stop' : 'Speak' }}</span>
