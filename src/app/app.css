@@ -42,8 +42,6 @@
   gap: clamp(14px, 1.8vw, 22px);
 }
 
-.ava-header,
-.ava-footer,
 .voice-console,
 .history-panel {
   border: 1px solid var(--line);
@@ -611,12 +609,16 @@
 
 /* ---------- Footer ---------- */
 .ava-footer {
-  border-radius: 26px;
-  padding: 14px;
+  padding: 4px 0 2px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .tool-btn,
 .primary-tool {
