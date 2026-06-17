@@ -256,8 +256,8 @@
 .voice-copy h1 {
   margin: 0;
   font-size: clamp(1.9rem, 7vmin, 5.5rem);
-  line-height: 1.08;
-  padding-bottom: 0.06em;
+  line-height: 1.1;
+  padding-bottom: 0.14em;
   letter-spacing: -0.02em;
   font-weight: 800;
   background: linear-gradient(180deg, #ffffff, #cfe6ff 70%, #9fc6e6);
@@ -400,17 +400,18 @@
 /* ---------- Voice console: minimized when a chat is active (narrow only) ---------- */
 @media (max-width: 899px) {
 .voice-console.mini {
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-flow: row nowrap;
   justify-content: flex-start;
   align-items: center;
   gap: 16px;
   padding: 14px clamp(16px, 2.4vw, 22px);
+  min-height: 92px;
   text-align: left;
 }
 .voice-console.mini .orb-container {
   order: -1;
   width: 62px;
+  flex: 0 0 auto;
 }
 .voice-console.mini .orb {
   inset: 8px;
@@ -420,9 +421,16 @@
 }
 .voice-console.mini .voice-copy {
   gap: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .voice-console.mini .voice-copy h1 {
   font-size: 1.5rem;
+  line-height: 1.15;
+  padding-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
@@ -521,7 +529,7 @@
 }
 .message-bubble {
   max-width: min(84%, 640px);
-  padding: 18px 20px 14px;
+  padding: 13px 18px 14px;
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.065);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -535,6 +543,13 @@
   border-color: rgba(94, 234, 219, 0.24);
   border-top-right-radius: 8px;
 }
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 5px;
+}
 .message-role {
   color: var(--muted);
   font-size: 0.82rem;
@@ -543,15 +558,13 @@
   letter-spacing: 0.1em;
 }
 .message-text {
-  margin-top: 8px;
-  font-size: 1.22rem;
-  line-height: 1.55;
+  font-size: 1.18rem;
+  line-height: 1.5;
 }
 .message-time {
-  margin-top: 10px;
   color: var(--soft);
-  font-size: 0.88rem;
-  text-align: right;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 @keyframes rise {
   from {

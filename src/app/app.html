@@ -84,9 +84,11 @@
           @for (msg of messages(); track msg.timestamp) {
             <article class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
               <div class="message-bubble">
-                <div class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</div>
+                <div class="message-meta">
+                  <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
+                  <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
+                </div>
                 <div class="message-text">{{ msg.text }}</div>
-                <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
               </div>
             </article>
           }
