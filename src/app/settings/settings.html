@@ -1,0 +1,71 @@
+<div class="settings-content">
+  <div class="settings-header">
+    <h2>Settings &amp; Gardens</h2>
+    <button class="close-btn" (click)="close.emit()" aria-label="Close settings">×</button>
+  </div>
+
+  <div class="section">
+    <h3>Gardens</h3>
+    <p class="hint">Gardens let you keep separate conversations and memories (e.g. Work, Personal, Creative).</p>
+
+    <!-- Garden list -->
+    <div class="garden-list">
+      @for (garden of gardens; track garden.id) {
+        <div class="garden-item" [class.active]="garden.id === currentGardenId">
+          <div class="garden-info" (click)="select(garden.id)">
+            <div class="garden-name">{{ garden.name }}</div>
+            @if (garden.description) {
+              <div class="garden-desc">{{ garden.description }}</div>
+            }
+          </div>
+
+          <div class="garden-actions">
+            @if (editingId === garden.id) {
+              <div class="edit-form">
+                <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
+                <input [(ngModel)]="editDescription" placeholder="Description (optional)" (keyup.enter)="saveEdit()" />
+                <button (click)="saveEdit()">Save</button>
+                <button (click)="cancelEdit()">Cancel</button>
+              </div>
+            } @else {
+              <button class="icon-btn" (click)="startEdit(garden)" title="Edit">✎</button>
+              @if (gardens.length > 1) {
+                <button class="icon-btn danger" (click)="remove(garden.id)" title="Delete">🗑</button>
+              }
+            }
+          </div>
+        </div>
+      }
+    </div>
+
+    <!-- Create new garden -->
+    <div class="create-garden">
+      <input 
+        [(ngModel)]="newGardenName" 
+        placeholder="New garden name" 
+        (keyup.enter)="create()" />
+      <input 
+        [(ngModel)]="newGardenDescription" 
+        placeholder="Optional description" 
+        (keyup.enter)="create()" />
+      <button (click)="create()" [disabled]="!newGardenName.trim()">Create Garden</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Other Settings</h3>
+    <div class="setting-item">
+      <label>Voice (TTS)</label>
+      <span class="setting-value">Kokoro 82M (local)</span>
+    </div>
+    <div class="setting-item">
+      <label>Speech Recognition</label>
+      <span class="setting-value">Moonshine Base (local)</span>
+    </div>
+    <p class="hint">More preferences coming soon (theme, model settings, export, etc.)</p>
+  </div>
+
+  <div class="settings-footer">
+    <button class="done-btn" (click)="close.emit()">Done</button>
+  </div>
+</div>

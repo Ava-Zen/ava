@@ -281,6 +281,29 @@
   padding-left: 0.25rem;
 }
 
+/* Settings Modal */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.settings-modal {
+  background: #141419;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px -15px rgba(0,0,0,0.5);
+}
+
 /* Mobile friendly */
 @media (max-width: 480px) {
   .ava-root {
@@ -292,5 +315,15 @@
   }
   .message-bubble {
     max-width: 86%;
+  }
+
+  /* Settings modal on small screens */
+  .settings-overlay {
+    padding: 0.5rem;
+  }
+
+  .settings-modal {
+    max-height: 85vh;
+    border-radius: 12px;
   }
 }

@@ -7,7 +7,9 @@
     </div>
     <div class="ava-meta">
       <span class="status-pill" [class.active]="status() !== 'idle'">{{ statusLabel() }}</span>
-      <span class="garden">Personal Garden</span>
+      <span class="garden" (click)="openSettings()" style="cursor: pointer;" title="Click to manage gardens">
+        {{ currentGarden()?.name || 'Garden' }}
+      </span>
     </div>
   </header>
 
@@ -67,10 +69,27 @@
     <button class="action-btn" (click)="toggleVoice()" aria-label="Toggle voice">
       {{ isListening() ? 'Stop' : 'Speak' }}
     </button>
-    <button class="action-btn" disabled title="Coming soon">Gardens</button>
+    <button class="action-btn" (click)="openSettings()" title="Manage Gardens and Settings">Gardens</button>
     <span class="stt-engine" title="Using Moonshine Base for STT">Moonshine</span>
     <span class="stt-engine" title="Using Kokoro 82M for TTS (local)">Kokoro</span>
   </footer>
+
+  <!-- Settings Modal -->
+  @if (showSettings()) {
+    <div class="settings-overlay" (click)="closeSettings()">
+      <div class="settings-modal" (click)="$event.stopPropagation()">
+        <app-settings
+          [gardens]="gardens()"
+          [currentGardenId]="currentGarden()?.id || ''"
+          (close)="closeSettings()"
+          (selectGarden)="selectGarden($event)"
+          (createGarden)="onCreateGarden($event)"
+          (updateGarden)="onUpdateGarden($event)"
+          (deleteGarden)="onDeleteGarden($event)"
+        ></app-settings>
+      </div>
+    </div>
+  }
 
   <router-outlet />
 </main>

@@ -1,7 +1,9 @@
-import { Component, signal, computed, effect, ViewChild, ElementRef } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { Settings } from './settings/settings';
 import { pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
+import { GardensService, Garden } from './services/gardens';
 
 interface Message {
   role: 'user' | 'ava';
@@ -11,34 +13,123 @@ interface Message {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, Settings],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
 export class App {
   protected readonly title = signal('Ava');
 
+  private readonly gardensService = inject(GardensService);
+
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
+
+  // Gardens
+  protected readonly gardens = this.gardensService.gardens;
+  protected readonly currentGarden = this.gardensService.currentGarden;
+  protected showSettings = signal(false);
+
+  // Per-garden message storage (keyed by garden id)
+  private messagesByGarden = signal<Record<string, Message[]>>({});
+
+  protected readonly messages = computed(() => {
+    const gardenId = this.currentGarden()?.id || 'default';
+    const all = this.messagesByGarden();
+    const gardenMsgs = all[gardenId];
+    if (gardenMsgs && gardenMsgs.length > 0) {
+      return gardenMsgs;
+    }
+    return [{ role: 'ava' as const, text: 'Hello. I am here.', timestamp: new Date() }];
+  });
 
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
     this.preloadModel().catch(() => {});
     this.preloadKokoro().catch(() => {});
+    this.loadMessagesFromStorage();
 
     // Auto-scroll chat when new messages arrive
     effect(() => {
       this.messages(); // track changes
       this.scrollToBottom();
     });
+
+    // When garden changes, ensure it has initial message if empty
+    effect(() => {
+      const garden = this.currentGarden();
+      if (garden) {
+        const currentMessages = this.messagesByGarden()[garden.id];
+        if (!currentMessages || currentMessages.length === 0) {
+          this.setGardenMessages(garden.id, [
+            { role: 'ava', text: 'Hello. I am here in this garden.', timestamp: new Date() }
+          ]);
+        }
+      }
+    });
+  }
+
+  protected selectGarden(id: string) {
+    this.gardensService.selectGarden(id);
+    this.currentTranscript.set('');
+  }
+
+  protected openSettings() {
+    this.showSettings.set(true);
+  }
+
+  protected closeSettings() {
+    this.showSettings.set(false);
+  }
+
+  // Garden management handlers (called from Settings component)
+  protected onCreateGarden(data: { name: string; description?: string }) {
+    const garden = this.gardensService.createGarden(data.name, data.description);
+    // Initialize empty messages for new garden
+    this.setGardenMessages(garden.id, []);
+  }
+
+  protected onUpdateGarden(data: { id: string; name: string; description?: string }) {
+    this.gardensService.updateGarden(data.id, { name: data.name, description: data.description });
+  }
+
+  protected onDeleteGarden(id: string) {
+    this.gardensService.deleteGarden(id);
+    // Clean up messages for deleted garden
+    this.messagesByGarden.update(all => {
+      const copy = { ...all };
+      delete copy[id];
+      return copy;
+    });
+    this.saveMessagesToStorage();
+  }
+
+  private setGardenMessages(gardenId: string, msgs: Message[]) {
+    this.messagesByGarden.update(all => ({
+      ...all,
+      [gardenId]: msgs
+    }));
+    this.saveMessagesToStorage();
+  }
+
+  private loadMessagesFromStorage() {
+    try {
+      const saved = localStorage.getItem('ava-messages-by-garden');
+      if (saved) {
+        this.messagesByGarden.set(JSON.parse(saved));
+      }
+    } catch {}
+  }
+
+  private saveMessagesToStorage() {
+    try {
+      localStorage.setItem('ava-messages-by-garden', JSON.stringify(this.messagesByGarden()));
+    } catch {}
   }
 
   // Voice / conversation state
   protected readonly isListening = signal(false);
   protected readonly isThinking = signal(false);
   protected readonly status = signal<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
-  protected readonly messages = signal<Message[]>([
-    { role: 'ava', text: 'Hello. I am here.', timestamp: new Date() }
-  ]);
   protected readonly currentTranscript = signal('');
 
   protected readonly statusLabel = computed(() => {
@@ -444,18 +535,23 @@ export class App {
     this.status.set('thinking');
     this.isThinking.set(true);
 
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+
     // Add user message
     const userMsg: Message = { role: 'user', text, timestamp: new Date() };
-    this.messages.update(msgs => [...msgs, userMsg]);
-    this.scrollToBottom();
+    currentMsgs.push(userMsg);
+    this.setGardenMessages(gardenId, currentMsgs);
 
     // Simulate "thinking" + proactive gentle response
     await this.delay(650 + Math.random() * 650);
 
     const response = this.generateAvaResponse(text);
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date() };
-    this.messages.update(msgs => [...msgs, avaMsg]);
-    this.scrollToBottom();
+    currentMsgs.push(avaMsg);
+    this.setGardenMessages(gardenId, currentMsgs);
 
     this.isThinking.set(false);
     this.status.set('speaking');
@@ -581,7 +677,12 @@ export class App {
   }
 
   protected clearConversation() {
-    this.messages.set([{ role: 'ava', text: 'Hello. I am here.', timestamp: new Date() }]);
+    const gardenId = this.currentGarden()?.id;
+    if (gardenId) {
+      this.setGardenMessages(gardenId, [
+        { role: 'ava', text: 'Hello. I am here.', timestamp: new Date() }
+      ]);
+    }
     this.currentTranscript.set('');
     this.status.set('idle');
     if (this.synth) this.synth.cancel();

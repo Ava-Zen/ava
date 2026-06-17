@@ -1,0 +1,300 @@
+.settings-content {
+  padding: 1.5rem;
+  color: #e6e6ea;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 0.75rem;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #fff;
+}
+
+.section {
+  margin-bottom: 1.5rem;
+}
+
+.section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hint {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-bottom: 0.75rem;
+}
+
+.garden-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.garden-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  background: #1a1a22;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
+  transition: all 0.1s ease;
+  min-width: 0; /* allow shrinking */
+}
+
+.garden-item.active {
+  border-color: #6366f1;
+  background: #1f1f2b;
+}
+
+.garden-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.garden-name {
+  font-weight: 500;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.garden-desc {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-top: 0.1rem;
+}
+
+.garden-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #aaa;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.icon-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+}
+
+.icon-btn.danger:hover {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.edit-form {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.edit-form input {
+  background: #111;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+
+.edit-form button {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.create-garden {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.create-garden input {
+  flex: 1;
+  background: #111;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.create-garden button {
+  background: #6366f1;
+  color: white;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.create-garden button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 0.85rem;
+}
+
+.setting-value {
+  opacity: 0.7;
+}
+
+.settings-footer {
+  text-align: right;
+  margin-top: 1rem;
+}
+
+.done-btn {
+  background: #27272a;
+  color: #eee;
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.done-btn:hover {
+  background: #3a3a3f;
+}
+
+/* Responsive improvements for smaller screens */
+@media (max-width: 420px) {
+  .settings-content {
+    padding: 1rem;
+  }
+
+  .settings-header h2 {
+    font-size: 1rem;
+  }
+
+  .section {
+    margin-bottom: 1.25rem;
+  }
+
+  .hint {
+    font-size: 0.7rem;
+  }
+
+  .garden-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+    padding: 0.65rem 0.7rem;
+  }
+
+  .garden-info {
+    min-width: 0;
+  }
+
+  .garden-name {
+    font-size: 0.95rem;
+    word-break: break-word;
+  }
+
+  .garden-desc {
+    font-size: 0.7rem;
+    line-height: 1.3;
+  }
+
+  .garden-actions {
+    align-self: flex-end;
+    margin-top: 0.1rem;
+  }
+
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1rem;
+    min-width: 40px;
+  }
+
+  .edit-form {
+    flex-direction: column;
+    gap: 0.35rem;
+    width: 100%;
+  }
+
+  .edit-form input {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .edit-form button {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .create-garden {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .create-garden input {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .create-garden button {
+    width: 100%;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .setting-item {
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.8rem;
+  }
+}
