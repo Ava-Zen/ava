@@ -91,7 +91,11 @@
                   <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
                   <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
                 </div>
-                <div class="message-text">{{ msg.text }}</div>
+                @if (msg.role === 'ava') {
+                  <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                } @else {
+                  <div class="message-text">{{ msg.text }}</div>
+                }
               </div>
             </article>
           }

@@ -1,5 +1,6 @@
 import { Component, signal, computed, effect, ViewChild, ElementRef, inject, HostListener } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Settings } from './settings/settings';
 import { pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
@@ -7,6 +8,7 @@ import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn } from './services/llm';
 import { AgentsService } from './services/agents';
+import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 
 interface Message {
   role: 'user' | 'ava';
@@ -27,6 +29,7 @@ export class App {
   private readonly tts = inject(TtsService);
   private readonly llm = inject(LlmService);
   private readonly agents = inject(AgentsService);
+  private readonly sanitizer = inject(DomSanitizer);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
 
@@ -614,8 +617,8 @@ export class App {
     );
   }
 
-  /** Speaks a final reply, stores it, and returns to idle after the spoken duration. */
-  private respond(gardenId: string, response: string) {
+  /** Speaks a final reply, stores it, and returns to idle when speech finishes. */
+  private async respond(gardenId: string, response: string) {
     const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date() };
     currentMsgs.push(avaMsg);
@@ -623,12 +626,11 @@ export class App {
 
     this.isThinking.set(false);
     this.status.set('speaking');
-    this.speak(response);
+    this.scrollToBottom();
 
-    const speakDuration = Math.max(1400, response.length * 55);
-    setTimeout(() => {
-      if (this.status() === 'speaking') this.status.set('idle');
-    }, speakDuration);
+    await this.speak(response);
+
+    if (this.status() === 'speaking') this.status.set('idle');
   }
 
   /** Routes an open-ended question to Gemma, speaking a filler line first. */
@@ -682,49 +684,127 @@ export class App {
   }
 
   private currentAudio: HTMLAudioElement | null = null;
+  /** Increments on every new speak() call so stale chunk playback can self-cancel. */
+  private speechGen = 0;
 
-  private async speak(text: string) {
-    if (this.tts.selectedVoiceId() === 'kokoro' && (await this.speakWithKokoro(text))) {
-      return;
+  private async speak(text: string): Promise<void> {
+    const id = ++this.speechGen;
+
+    // Interrupt anything already speaking.
+    this.stopCurrentAudio();
+    if (this.synth) this.synth.cancel();
+
+    if (this.tts.selectedVoiceId() === 'kokoro') {
+      const handled = await this.speakWithKokoro(text, id);
+      if (handled || this.speechGen !== id) return;
     }
 
-    // 'system' voice, or graceful fallback when Kokoro is unavailable
-    this.speakWithSystem(text);
+    if (this.speechGen !== id) return;
+    await this.speakWithSystem(text, id);
   }
 
-  private async speakWithKokoro(text: string): Promise<boolean> {
+  /**
+   * Speaks long replies as a sequence of small chunks. The next chunk is
+   * synthesised while the current one plays, so there is no audible gap between
+   * sentences. Returns true when it handled playback (including when it was
+   * interrupted by a newer utterance), false only on a genuine failure that
+   * should fall back to the system voice.
+   */
+  private async speakWithKokoro(text: string, id: number): Promise<boolean> {
     if (!this.kokoro) {
       await this.preloadKokoro().catch(() => {});
     }
     if (!this.kokoro) return false;
+
+    const spoken = markdownToPlainText(text);
+    const chunks = splitIntoSpeechChunks(spoken);
+    if (chunks.length === 0) return true;
+
     try {
       const voice = this.tts.selectedKokoroVoiceId();
-      const audio = await this.kokoro.generate(text, { voice, speed: 0.98 });
-      return await this.playAudioBlob(audio.toBlob());
+      const synth = (chunk: string) => this.kokoro.generate(chunk, { voice, speed: 0.98 });
+
+      // Pre-generate the first chunk, then keep one chunk ahead of playback.
+      let pending: Promise<any> | null = synth(chunks[0]);
+
+      for (let i = 0; i < chunks.length; i++) {
+        if (this.speechGen !== id) return true; // superseded
+
+        let audio: any;
+        try {
+          audio = await pending;
+        } catch (e) {
+          if (i === 0) return false; // first chunk failed → fall back
+          console.warn('Kokoro chunk synthesis failed, stopping playback', e);
+          break;
+        }
+
+        // Kick off synthesis of the next chunk before playing this one.
+        pending = i + 1 < chunks.length ? synth(chunks[i + 1]) : null;
+
+        if (this.speechGen !== id) return true; // superseded while synthesising
+
+        const ok = await this.playChunk(audio.toBlob(), id);
+        if (!ok) {
+          if (this.speechGen !== id) return true; // interrupted
+          if (i === 0) return false;              // playback error on first chunk
+          break;
+        }
+      }
+      return true;
     } catch (e) {
       console.warn('Kokoro TTS failed, falling back', e);
       return false;
     }
   }
 
-  private speakWithSystem(text: string) {
-    if (!this.synth) {
-      setTimeout(() => this.status.set('idle'), 1600);
-      return;
-    }
-    try {
-      this.synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.96;
-      utterance.pitch = 1.02;
-      utterance.volume = 0.92;
-      utterance.onend = () => {
-        if (this.status() === 'speaking') this.status.set('idle');
+  private speakWithSystem(text: string, id: number): Promise<void> {
+    return new Promise<void>(resolve => {
+      if (!this.synth) {
+        resolve();
+        return;
+      }
+      try {
+        this.synth.cancel();
+        const utterance = new SpeechSynthesisUtterance(markdownToPlainText(text));
+        utterance.rate = 0.96;
+        utterance.pitch = 1.02;
+        utterance.volume = 0.92;
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        if (this.speechGen !== id) {
+          resolve();
+          return;
+        }
+        this.synth.speak(utterance);
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  /** Plays a single pre-generated audio chunk, resolving when it finishes. */
+  private playChunk(blob: Blob, id: number): Promise<boolean> {
+    return new Promise<boolean>(resolve => {
+      const url = URL.createObjectURL(blob);
+      const player = new Audio(url);
+      this.currentAudio = player;
+
+      let done = false;
+      const finish = (result: boolean) => {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        if (this.currentAudio === player) this.currentAudio = null;
+        resolve(result);
       };
-      this.synth.speak(utterance);
-    } catch (e) {
-      setTimeout(() => this.status.set('idle'), 1600);
-    }
+
+      player.onended = () => finish(true);
+      player.onerror = () => finish(false);
+      player.onpause = () => finish(false); // fired when interrupted via stopCurrentAudio
+
+      player.play().catch(() => finish(false));
+    });
   }
 
   /** Plays a short spoken sample of a Kokoro speaker when it is selected. */
@@ -748,7 +828,7 @@ export class App {
       }
     }
     // Fallback so the sample is still heard even if Kokoro is unavailable
-    this.speakWithSystem(text);
+    this.speakWithSystem(text, ++this.speechGen);
   }
 
   private stopCurrentAudio() {
@@ -842,20 +922,29 @@ export class App {
     }
     this.currentTranscript.set('');
     this.status.set('idle');
+    this.speechGen++;
+    this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
     this.scrollToBottom();
   }
 
   private scrollToBottom() {
-    // Double rAF ensures layout has settled after the @for / @if render before scrolling
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const el = this.transcriptEl?.nativeElement;
-        if (el) {
-          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-        }
-      });
-    });
+    const doScroll = () => {
+      const el = this.transcriptEl?.nativeElement;
+      if (el) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }
+    };
+    // Double rAF handles the common case once layout has settled…
+    requestAnimationFrame(() => requestAnimationFrame(doScroll));
+    // …and a short delayed pass corrects for long replies whose height keeps
+    // growing after the first paint (e.g. multi-paragraph Ava answers).
+    setTimeout(doScroll, 160);
+  }
+
+  /** Renders an Ava reply's markdown into sanitized HTML for display. */
+  protected formatMessage(text: string): SafeHtml {
+    return this.sanitizer.bypassSecurityTrustHtml(markdownToHtml(text));
   }
 
   protected formatTime(date: Date | string): string {
