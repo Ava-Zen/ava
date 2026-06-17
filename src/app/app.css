@@ -130,6 +130,16 @@
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
 }
 
+.orb.loading {
+  border-color: #a5b4fc;
+  box-shadow: 0 0 0 6px rgba(165, 180, 252, 0.15);
+  animation: spin 1.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .orb .mic-icon {
   width: 52px;
   height: 52px;
@@ -167,6 +177,13 @@
   padding: 0 1rem;
   text-align: center;
   max-width: 280px;
+}
+
+.engine {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-left: 0.35rem;
+  font-weight: 400;
 }
 
 /* Transcript */
@@ -255,6 +272,13 @@
 .action-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+.stt-engine {
+  font-size: 0.65rem;
+  opacity: 0.4;
+  align-self: center;
+  padding-left: 0.25rem;
 }
 
 /* Mobile friendly */

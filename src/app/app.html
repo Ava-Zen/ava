@@ -15,9 +15,10 @@
   <section class="voice-area">
     <div class="orb-container" (click)="toggleVoice()" (keydown.enter)="toggleVoice()" tabindex="0" role="button" [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
       <div class="orb"
-           [class.listening]="isListening()"
+           [class.listening]="isListening() || isLoadingModel()"
            [class.thinking]="isThinking()"
-           [class.speaking]="status() === 'speaking'">
+           [class.speaking]="status() === 'speaking'"
+           [class.loading]="isLoadingModel()">
         <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 1v11" />
           <path d="M8 5a4 4 0 0 0 8 0" />
@@ -29,14 +30,16 @@
     </div>
 
     <div class="voice-hint">
-      @if (isListening()) {
-        <span>Speak now…</span>
+      @if (isLoadingModel()) {
+        <span>Loading Moonshine Base ({{ modelLoadInfo() || '...' }})…</span>
+      } @else if (isListening()) {
+        <span>Speak now… <span class="engine">Moonshine Base ({{ modelLoadInfo() || 'auto' }})</span></span>
       } @else if (isThinking()) {
         <span>Ava is reflecting…</span>
       } @else if (status() === 'speaking') {
         <span>Listening with care</span>
       } @else {
-        <span>Tap the circle to speak</span>
+        <span>Tap the circle to speak <span class="engine">• Moonshine Base</span></span>
       }
     </div>
 
@@ -65,6 +68,7 @@
       {{ isListening() ? 'Stop' : 'Speak' }}
     </button>
     <button class="action-btn" disabled title="Coming soon">Gardens</button>
+    <span class="stt-engine" title="Using Moonshine Base for on-device continuous STT via ONNX Runtime">Moonshine Base</span>
   </footer>
 
   <router-outlet />
