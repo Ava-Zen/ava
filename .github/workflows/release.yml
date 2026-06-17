@@ -34,8 +34,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 22
+          # cache: 'npm'   # Re-enable after committing package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,8 @@ jobs:
             patchelf
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
+        # Use 'npm ci' once you have committed a package-lock.json for reproducible builds
 
       - name: Get version from package.json
         id: get_version

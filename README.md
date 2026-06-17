@@ -26,7 +26,7 @@ See:
 
 ### Prerequisites
 
-- Node 20+
+- Node 22+ (LTS recommended)
 - Rust **stable** (use `rustup default stable` — nightly may cause dependency issues with current Tauri)
 - For Android: Android SDK + NDK (the project was scaffolded with Android support)
 - For iOS: macOS + Xcode (run `npm run tauri:ios:init` on a Mac)
