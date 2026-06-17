@@ -22,6 +22,9 @@
               I am here.
             }
           </h1>
+          @if (currentTranscript()) {
+            <p class="mini-live">{{ currentTranscript() }}</p>
+          }
         </div>
 
         <button
