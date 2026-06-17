@@ -17,7 +17,8 @@
     "tauri:android:build": "tauri android build",
     "tauri:ios:init": "tauri ios init",
     "tauri:ios:dev": "tauri ios dev",
-    "tauri:ios:build": "tauri ios build"
+    "tauri:ios:build": "tauri ios build",
+    "version:patch": "npm version patch --no-git-tag-version && node -e \"const fs=require('fs');const pkg=require('./package.json');const conf=JSON.parse(fs.readFileSync('./src-tauri/tauri.conf.json','utf8'));conf.version=pkg.version;fs.writeFileSync('./src-tauri/tauri.conf.json',JSON.stringify(conf,null,2)+'\\n');console.log('Version bumped to', pkg.version, 'and synced to tauri.conf.json');\""
   },
   "private": true,
   "dependencies": {
