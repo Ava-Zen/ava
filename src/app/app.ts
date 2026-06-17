@@ -1,6 +1,7 @@
-import { Component, signal, computed } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { pipeline } from '@huggingface/transformers';
+import { KokoroTTS } from 'kokoro-js';
 
 interface Message {
   role: 'user' | 'ava';
@@ -16,6 +17,20 @@ interface Message {
 })
 export class App {
   protected readonly title = signal('Ava');
+
+  @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
+
+  constructor() {
+    this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    this.preloadModel().catch(() => {});
+    this.preloadKokoro().catch(() => {});
+
+    // Auto-scroll chat when new messages arrive
+    effect(() => {
+      this.messages(); // track changes
+      this.scrollToBottom();
+    });
+  }
 
   // Voice / conversation state
   protected readonly isListening = signal(false);
@@ -52,16 +67,15 @@ export class App {
   private silenceSamples = 0;
   private lastLiveUpdate = 0;
   private readonly SAMPLE_RATE = 16000;
+
+  // Kokoro 82M TTS
+  private kokoro: any = null;
+  private isKokoroLoading = signal(false);
+  private kokoroLoadInfo = signal('');
   private readonly CHUNK_SIZE = 4096;
   private readonly SPEECH_THRESHOLD = 0.015; // simple energy VAD
   private readonly MIN_SPEECH_SAMPLES = 16000 * 0.6; // ~0.6s min
   private readonly SILENCE_FOR_COMMIT = 16000 * 0.7; // ~0.7s silence to commit
-
-  constructor() {
-    this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
-    // Eagerly start loading Moonshine Base in background for faster first use
-    this.preloadModel().catch(() => {});
-  }
 
   private async preloadModel() {
     if (this.transcriber || typeof window === 'undefined') return;
@@ -90,6 +104,33 @@ export class App {
       }
     } catch {
       this.transcriber = null;
+    }
+  }
+
+  private async preloadKokoro() {
+    if (this.kokoro || typeof window === 'undefined') return;
+    try {
+      this.isKokoroLoading.set(true);
+      this.kokoroLoadInfo.set('loading...');
+
+      // Use quantized for speed/size, fp32 for quality on WebGPU
+      const hasWebGPU = await this.supportsWebGPU();
+      const dtype = hasWebGPU ? 'fp32' : 'q8';
+      const device = hasWebGPU ? 'webgpu' : 'wasm';
+
+      this.kokoro = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-ONNX', {
+        dtype,
+        device,
+      });
+
+      this.kokoroLoadInfo.set(`${device}/${dtype}`);
+      console.info(`[Kokoro] Loaded ${this.kokoroLoadInfo()}`);
+    } catch (e) {
+      console.warn('Failed to load Kokoro TTS, will fallback to browser speechSynthesis', e);
+      this.kokoro = null;
+      this.kokoroLoadInfo.set('fallback');
+    } finally {
+      this.isKokoroLoading.set(false);
     }
   }
 
@@ -406,6 +447,7 @@ export class App {
     // Add user message
     const userMsg: Message = { role: 'user', text, timestamp: new Date() };
     this.messages.update(msgs => [...msgs, userMsg]);
+    this.scrollToBottom();
 
     // Simulate "thinking" + proactive gentle response
     await this.delay(650 + Math.random() * 650);
@@ -413,6 +455,7 @@ export class App {
     const response = this.generateAvaResponse(text);
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date() };
     this.messages.update(msgs => [...msgs, avaMsg]);
+    this.scrollToBottom();
 
     this.isThinking.set(false);
     this.status.set('speaking');
@@ -427,8 +470,38 @@ export class App {
     }, speakDuration);
   }
 
-  private speak(text: string) {
-    if (!this.synth) return;
+  private async speak(text: string) {
+    if (this.kokoro) {
+      try {
+        // Use a calm, natural voice suitable for companion
+        const voice = 'af_bella'; // soft female; alternatives: af_nicole, am_michael, etc.
+        const audio = await this.kokoro.generate(text, { voice, speed: 0.98 });
+
+        const blob = audio.toBlob();
+        const url = URL.createObjectURL(blob);
+        const player = new Audio(url);
+
+        player.onended = () => {
+          URL.revokeObjectURL(url);
+          if (this.status() === 'speaking') this.status.set('idle');
+        };
+        player.onerror = () => {
+          URL.revokeObjectURL(url);
+          if (this.status() === 'speaking') this.status.set('idle');
+        };
+
+        await player.play();
+        return;
+      } catch (e) {
+        console.warn('Kokoro TTS failed, falling back to browser synth', e);
+      }
+    }
+
+    // Fallback to browser SpeechSynthesis
+    if (!this.synth) {
+      setTimeout(() => this.status.set('idle'), 1600);
+      return;
+    }
     try {
       this.synth.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
@@ -440,7 +513,6 @@ export class App {
       };
       this.synth.speak(utterance);
     } catch (e) {
-      // fallback silently
       setTimeout(() => this.status.set('idle'), 1600);
     }
   }
@@ -513,6 +585,19 @@ export class App {
     this.currentTranscript.set('');
     this.status.set('idle');
     if (this.synth) this.synth.cancel();
+    this.scrollToBottom();
+  }
+
+  private scrollToBottom() {
+    // Use microtask + small delay to ensure DOM is updated after signal change / @for
+    queueMicrotask(() => {
+      setTimeout(() => {
+        const el = this.transcriptEl?.nativeElement;
+        if (el) {
+          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        }
+      }, 50);
+    });
   }
 
   protected formatTime(date: Date): string {

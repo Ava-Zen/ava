@@ -49,7 +49,7 @@
   </section>
 
   <!-- Conversation transcript (calm, minimal) -->
-  <section class="transcript" aria-live="polite">
+  <section class="transcript" aria-live="polite" #transcript>
     @for (msg of messages(); track msg.timestamp) {
       <div class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
         <div class="message-bubble">
@@ -68,7 +68,8 @@
       {{ isListening() ? 'Stop' : 'Speak' }}
     </button>
     <button class="action-btn" disabled title="Coming soon">Gardens</button>
-    <span class="stt-engine" title="Using Moonshine Base for on-device continuous STT via ONNX Runtime">Moonshine Base</span>
+    <span class="stt-engine" title="Using Moonshine Base for STT">Moonshine</span>
+    <span class="stt-engine" title="Using Kokoro 82M for TTS (local)">Kokoro</span>
   </footer>
 
   <router-outlet />
