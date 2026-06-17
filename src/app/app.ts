@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, ViewChild, ElementRef, inject } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef, inject, HostListener } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { Settings } from './settings/settings';
 import { pipeline } from '@huggingface/transformers';
@@ -29,17 +29,16 @@ export class App {
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected showSettings = signal(false);
 
+  /** Becomes true once a conversation begins, collapsing the voice hero to the top. */
+  protected readonly chatStarted = signal(false);
+
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
 
   protected readonly messages = computed(() => {
     const gardenId = this.currentGarden()?.id || 'default';
     const all = this.messagesByGarden();
-    const gardenMsgs = all[gardenId];
-    if (gardenMsgs && gardenMsgs.length > 0) {
-      return gardenMsgs;
-    }
-    return [{ role: 'ava' as const, text: 'Hello. I am here.', timestamp: new Date() }];
+    return all[gardenId] ?? [];
   });
 
   constructor() {
@@ -54,16 +53,10 @@ export class App {
       this.scrollToBottom();
     });
 
-    // When garden changes, ensure it has initial message if empty
+    // Reveal the conversation card once it has any content
     effect(() => {
-      const garden = this.currentGarden();
-      if (garden) {
-        const currentMessages = this.messagesByGarden()[garden.id];
-        if (!currentMessages || currentMessages.length === 0) {
-          this.setGardenMessages(garden.id, [
-            { role: 'ava', text: 'Hello. I am here in this garden.', timestamp: new Date() }
-          ]);
-        }
+      if (this.messages().length > 0) {
+        this.chatStarted.set(true);
       }
     });
   }
@@ -71,10 +64,28 @@ export class App {
   protected selectGarden(id: string) {
     this.gardensService.selectGarden(id);
     this.currentTranscript.set('');
+    const msgs = this.messagesByGarden()[id];
+    this.chatStarted.set(!!msgs && msgs.length > 0);
   }
 
   protected openSettings() {
     this.showSettings.set(true);
+  }
+
+  /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
+  @HostListener('document:keydown', ['$event'])
+  protected onGlobalKeydown(event: KeyboardEvent) {
+    if (event.code !== 'Space' || event.repeat) return;
+    if (this.showSettings()) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+
+    event.preventDefault();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    this.toggleVoice();
   }
 
   protected closeSettings() {
@@ -314,6 +325,7 @@ export class App {
 
   private async startMoonshineListening() {
     try {
+      this.chatStarted.set(true);
       this.currentTranscript.set('');
       this.moonshineBuffer = new Float32Array(0);
       this.isSpeechActive = false;
@@ -689,10 +701,9 @@ export class App {
   protected clearConversation() {
     const gardenId = this.currentGarden()?.id;
     if (gardenId) {
-      this.setGardenMessages(gardenId, [
-        { role: 'ava', text: 'Hello. I am here.', timestamp: new Date() }
-      ]);
+      this.setGardenMessages(gardenId, []);
     }
+    this.chatStarted.set(false);
     this.currentTranscript.set('');
     this.status.set('idle');
     if (this.synth) this.synth.cancel();

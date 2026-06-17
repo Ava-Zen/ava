@@ -38,7 +38,7 @@
   height: calc(100dvh - clamp(28px, 4.4vw, 52px));
   margin: 0 auto;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: clamp(14px, 1.8vw, 22px);
 }
 
@@ -176,11 +176,11 @@
   font-size: 1.04rem;
 }
 
-/* ---------- Main grid ---------- */
+/* ---------- Main stack ---------- */
 .companion-grid {
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(340px, 0.96fr) minmax(380px, 1.04fr);
+  display: flex;
+  flex-direction: column;
   gap: clamp(14px, 1.8vw, 22px);
 }
 
@@ -191,20 +191,63 @@
   position: relative;
   overflow: hidden;
 }
+.voice-console {
+  flex: 6 1 0;
+  transition: flex-grow 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.history-panel {
+  flex: 4 1 0;
+  transition: flex-grow 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: panelInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.companion-grid.chat-active .voice-console {
+  flex-grow: 0;
+}
+.companion-grid.chat-active .history-panel {
+  flex-grow: 1;
+}
 
 /* ---------- Voice console ---------- */
 .voice-console {
-  padding: clamp(26px, 4vw, 52px);
+  padding: clamp(18px, 3.5vmin, 44px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: clamp(20px, 3vw, 36px);
+  justify-content: center;
+  gap: clamp(12px, 2.4vmin, 28px);
   text-align: center;
   background:
     radial-gradient(120% 80% at 50% -10%, rgba(94, 234, 219, 0.18), transparent 55%),
     radial-gradient(120% 90% at 50% 120%, rgba(255, 147, 166, 0.12), transparent 55%),
     var(--panel);
+}
+.garden-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 17px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 720;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.garden-eyebrow svg {
+  width: 17px;
+  height: 17px;
+  color: var(--gold);
+}
+.garden-eyebrow:hover {
+  transform: translateY(-1px);
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.1);
 }
 .voice-copy {
   display: grid;
@@ -212,7 +255,7 @@
 }
 .voice-copy h1 {
   margin: 0;
-  font-size: clamp(3rem, 6.5vw, 6rem);
+  font-size: clamp(1.9rem, 7vmin, 5.5rem);
   line-height: 0.95;
   letter-spacing: -0.02em;
   font-weight: 800;
@@ -220,6 +263,7 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  transition: font-size 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .eyebrow {
   margin: 0;
@@ -227,7 +271,7 @@
 }
 
 .orb-container {
-  width: clamp(210px, 30vw, 320px);
+  width: clamp(120px, 34vmin, 300px);
   aspect-ratio: 1;
   border: 0;
   border-radius: 50%;
@@ -238,6 +282,7 @@
   position: relative;
   cursor: pointer;
   outline: none;
+  transition: width 0.55s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .orb-container:focus-visible {
   box-shadow: 0 0 0 5px rgba(94, 234, 219, 0.45);
@@ -311,19 +356,19 @@
   width: min(460px, 100%);
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 22px;
+  padding: clamp(12px, 2vmin, 18px) clamp(14px, 2.4vmin, 22px);
   border-radius: 22px;
   background: rgba(4, 8, 13, 0.5);
   border: 1px solid var(--line);
   text-align: left;
 }
 .voice-status span {
-  font-size: 1.28rem;
+  font-size: clamp(1rem, 2.4vmin, 1.28rem);
   font-weight: 780;
 }
 .voice-status small {
   color: var(--muted);
-  font-size: 1rem;
+  font-size: clamp(0.82rem, 1.8vmin, 1rem);
   text-align: right;
 }
 .live-transcript {
@@ -335,6 +380,81 @@
   color: #f8fcff;
   font-size: 1.34rem;
   line-height: 1.5;
+}
+
+/* ---------- Voice console: minimized when a chat is active (narrow only) ---------- */
+@media (max-width: 899px) {
+.voice-console.mini {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 16px;
+  padding: 14px clamp(16px, 2.4vw, 22px);
+  text-align: left;
+}
+.voice-console.mini .orb-container {
+  order: -1;
+  width: 62px;
+}
+.voice-console.mini .orb {
+  inset: 8px;
+}
+.voice-console.mini .orb-ring {
+  filter: blur(7px);
+}
+.voice-console.mini .voice-copy {
+  gap: 0;
+}
+.voice-console.mini .voice-copy h1 {
+  font-size: 1.5rem;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--text);
+}
+.voice-console.mini .garden-eyebrow {
+  order: 5;
+  margin-left: auto;
+}
+.voice-console.mini .voice-status,
+.voice-console.mini .live-transcript {
+  display: none;
+}
+}
+
+/* ---------- Wide screens: voice console left, conversation right ---------- */
+@media (min-width: 900px) {
+  .companion-grid {
+    flex-direction: row;
+    align-items: stretch;
+  }
+  .voice-console {
+    flex: 1 1 0;
+  }
+  .history-panel {
+    flex: 1.2 1 0;
+    animation-name: panelInRight;
+  }
+  .companion-grid.chat-active .voice-console {
+    flex-grow: 1;
+  }
+  .companion-grid.chat-active .history-panel {
+    flex-grow: 1.2;
+  }
+}
+
+@keyframes panelInUp {
+  from {
+    opacity: 0;
+    transform: translateY(26px) scale(0.99);
+  }
+}
+@keyframes panelInRight {
+  from {
+    opacity: 0;
+    transform: translateX(36px) scale(0.99);
+  }
 }
 
 /* ---------- History panel ---------- */
@@ -500,27 +620,6 @@
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 880px) {
-  .ava-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .header-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .companion-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .voice-console {
-    min-height: 0;
-  }
-  .history-panel {
-    min-height: 0;
-  }
-}
 @media (max-width: 540px) {
   :host {
     font-size: 16px;
@@ -531,22 +630,12 @@
   .app-frame {
     gap: 12px;
   }
-  .ava-header,
   .ava-footer,
   .voice-console,
   .history-panel {
     border-radius: 24px;
   }
-  .status-pill {
-    display: none;
-  }
-  .garden-chip {
-    max-width: none;
-    width: 100%;
-    justify-content: center;
-  }
   .voice-console {
-    min-height: 0;
     padding: 26px 18px;
   }
   .voice-status {

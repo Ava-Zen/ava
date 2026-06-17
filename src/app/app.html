@@ -1,35 +1,16 @@
 <main class="ava-root">
-  <div class="app-frame">
-    <header class="ava-header">
-      <div class="brand-lockup">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span>
-        </div>
-        <div>
-          <div class="ava-name">{{ title() }}</div>
-          <div class="ava-tagline">Speak. Feel. Evolve.</div>
-        </div>
-      </div>
-
-      <div class="header-actions">
-        <span class="status-pill" [class.active]="status() !== 'idle' || isLoadingModel()">
-          <span class="status-dot"></span>
-          {{ statusLabel() }}
-        </span>
-        <button class="garden-chip" (click)="openSettings()" title="Manage gardens">
+  <div class="app-frame" [class.chat-active]="chatStarted()">
+    <section class="companion-grid" [class.chat-active]="chatStarted()">
+      <section class="voice-console" [class.mini]="chatStarted()" aria-labelledby="voice-title">
+        <button type="button" class="garden-eyebrow" (click)="openSettings()" title="Switch garden">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 21c4-4 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 7 7 11Z"></path>
             <path d="M12 12.2A2.2 2.2 0 1 0 12 7.8a2.2 2.2 0 0 0 0 4.4Z"></path>
           </svg>
-          <span>{{ currentGarden()?.name || 'Garden' }}</span>
+          <span>{{ currentGarden()?.name || 'Personal Garden' }}</span>
         </button>
-      </div>
-    </header>
 
-    <section class="companion-grid">
-      <section class="voice-console" aria-labelledby="voice-title">
         <div class="voice-copy">
-          <p class="eyebrow">{{ currentGarden()?.name || 'Personal Garden' }}</p>
           <h1 id="voice-title">
             @if (isListening()) {
               I am listening.
@@ -47,6 +28,7 @@
           class="orb-container"
           (click)="toggleVoice()"
           (keydown.enter)="toggleVoice()"
+          title="Toggle listening (Space)"
           [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
           <span class="orb-ring"></span>
           <span
@@ -88,6 +70,7 @@
         }
       </section>
 
+      @if (chatStarted()) {
       <section class="history-panel" aria-label="Conversation history">
         <div class="panel-header">
           <div>
@@ -109,6 +92,7 @@
           }
         </div>
       </section>
+      }
     </section>
 
     <footer class="ava-footer" aria-label="Conversation actions">
