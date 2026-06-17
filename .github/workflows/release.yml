@@ -39,7 +39,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
+          # cache: 'npm'   # Uncomment after you commit a package-lock.json
+          # cache-dependency-path: package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -57,8 +58,9 @@ jobs:
             patchelf
 
       - name: Install dependencies
-        run: npm ci
-        # Requires package-lock.json to be committed (recommended for CI)
+        run: npm install
+        # TODO: Change to 'npm ci' and re-enable cache above once package-lock.json is committed
+
 
       - name: Get version from package.json
         id: get_version
