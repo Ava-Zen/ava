@@ -2,6 +2,7 @@ import { Component, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Garden, GardensService } from '../services/gardens';
+import { TtsService, TtsEngine } from '../services/tts';
 
 @Component({
   selector: 'app-settings',
@@ -12,8 +13,17 @@ import { Garden, GardensService } from '../services/gardens';
 })
 export class Settings {
   private readonly gardensService = inject(GardensService);
+  private readonly ttsService = inject(TtsService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
+
+  // Text-to-speech configuration
+  protected readonly voices = this.ttsService.voices;
+  protected readonly selectedVoiceId = this.ttsService.selectedVoiceId;
+
+  selectVoice(id: TtsEngine) {
+    this.ttsService.setVoice(id);
+  }
 
   @Output() close = new EventEmitter<void>();
   @Output() selectGarden = new EventEmitter<string>();

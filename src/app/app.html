@@ -60,8 +60,8 @@
             <span>Ava is reflecting</span>
             <small>Working inside {{ currentGarden()?.name || 'this garden' }}</small>
           } @else if (status() === 'speaking') {
-            <span>Kokoro voice active</span>
-            <small>Local speech synthesis</small>
+            <span>{{ voiceName() }} speaking</span>
+            <small>Ava voice active</small>
           } @else {
             <span>Ready when you are</span>
             <small>Local speech and voice</small>

@@ -4,6 +4,7 @@ import { Settings } from './settings/settings';
 import { pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
+import { TtsService } from './services/tts';
 
 interface Message {
   role: 'user' | 'ava';
@@ -21,6 +22,7 @@ export class App {
   protected readonly title = signal('Ava');
 
   private readonly gardensService = inject(GardensService);
+  private readonly tts = inject(TtsService);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
 
@@ -33,6 +35,9 @@ export class App {
   protected readonly chatStarted = computed(() =>
     this.messages().length > 0 || this.isListening() || this.isModelLoading()
   );
+
+  /** Name of the currently selected text-to-speech voice. */
+  protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
 
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
@@ -582,33 +587,31 @@ export class App {
   }
 
   private async speak(text: string) {
-    if (this.kokoro) {
-      try {
-        // Use a calm, natural voice suitable for companion
-        const voice = 'af_bella'; // soft female; alternatives: af_nicole, am_michael, etc.
-        const audio = await this.kokoro.generate(text, { voice, speed: 0.98 });
-
-        const blob = audio.toBlob();
-        const url = URL.createObjectURL(blob);
-        const player = new Audio(url);
-
-        player.onended = () => {
-          URL.revokeObjectURL(url);
-          if (this.status() === 'speaking') this.status.set('idle');
-        };
-        player.onerror = () => {
-          URL.revokeObjectURL(url);
-          if (this.status() === 'speaking') this.status.set('idle');
-        };
-
-        await player.play();
-        return;
-      } catch (e) {
-        console.warn('Kokoro TTS failed, falling back to browser synth', e);
-      }
+    if (this.tts.selectedVoiceId() === 'kokoro' && (await this.speakWithKokoro(text))) {
+      return;
     }
 
-    // Fallback to browser SpeechSynthesis
+    // 'system' voice, or graceful fallback when Kokoro is unavailable
+    this.speakWithSystem(text);
+  }
+
+  private async speakWithKokoro(text: string): Promise<boolean> {
+    if (!this.kokoro) {
+      await this.preloadKokoro().catch(() => {});
+    }
+    if (!this.kokoro) return false;
+    try {
+      // Use a calm, natural voice suitable for companion
+      const voice = 'af_bella'; // soft female; alternatives: af_nicole, am_michael, etc.
+      const audio = await this.kokoro.generate(text, { voice, speed: 0.98 });
+      return await this.playAudioBlob(audio.toBlob());
+    } catch (e) {
+      console.warn('Kokoro TTS failed, falling back', e);
+      return false;
+    }
+  }
+
+  private speakWithSystem(text: string) {
     if (!this.synth) {
       setTimeout(() => this.status.set('idle'), 1600);
       return;
@@ -625,6 +628,24 @@ export class App {
       this.synth.speak(utterance);
     } catch (e) {
       setTimeout(() => this.status.set('idle'), 1600);
+    }
+  }
+
+  private async playAudioBlob(blob: Blob): Promise<boolean> {
+    const url = URL.createObjectURL(blob);
+    const player = new Audio(url);
+    const settle = () => {
+      URL.revokeObjectURL(url);
+      if (this.status() === 'speaking') this.status.set('idle');
+    };
+    player.onended = settle;
+    player.onerror = settle;
+    try {
+      await player.play();
+      return true;
+    } catch {
+      settle();
+      return false;
     }
   }
 

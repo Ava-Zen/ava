@@ -102,12 +102,34 @@
     </div>
   </section>
 
-  <section class="section settings-grid">
-    <div class="setting-item">
-      <span>Voice</span>
-      <strong>Kokoro 82M</strong>
-      <small>Local TTS</small>
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Voice</p>
+        <h3>Speech model</h3>
+      </div>
     </div>
+    <p class="hint">Choose how Ava speaks. Both voices run fully on this device.</p>
+
+    <div class="voice-list">
+      @for (voice of voices; track voice.id) {
+        <article class="voice-item" [class.active]="voice.id === selectedVoiceId()">
+          <button class="voice-info" (click)="selectVoice(voice.id)">
+            <span class="voice-radio" aria-hidden="true"></span>
+            <span>
+              <strong>
+                {{ voice.name }}
+                <em class="tag on-device">On-device</em>
+              </strong>
+              <small>{{ voice.description }}</small>
+            </span>
+          </button>
+        </article>
+      }
+    </div>
+  </section>
+
+  <section class="section settings-grid">
     <div class="setting-item">
       <span>Speech recognition</span>
       <strong>Moonshine Base</strong>
