@@ -1,21 +1,22 @@
 .settings-content {
-  padding: 1.5rem;
-  color: #e6e6ea;
+  padding: 1.65rem;
+  color: #e8e8ec;
 }
 
 .settings-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  padding-bottom: 0.75rem;
+  margin-bottom: 1.15rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 0.85rem;
 }
 
 .settings-header h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.35rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
@@ -36,17 +37,19 @@
 }
 
 .section h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
-  opacity: 0.8;
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+  opacity: 0.85;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 .hint {
-  font-size: 0.75rem;
-  opacity: 0.6;
-  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  opacity: 0.65;
+  margin-bottom: 0.85rem;
+  line-height: 1.4;
 }
 
 .garden-list {
@@ -61,18 +64,24 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.35rem 0.5rem;
-  background: #1a1a22;
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 10px;
-  padding: 0.6rem 0.85rem;
-  transition: all 0.1s ease;
-  min-width: 0; /* allow shrinking */
+  gap: 0.4rem 0.6rem;
+  background: rgba(26, 26, 34, 0.7);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  transition: all 0.15s ease;
+  min-width: 0;
+}
+
+.garden-item.editing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
 }
 
 .garden-item.active {
   border-color: #6366f1;
-  background: #1f1f2b;
+  background: rgba(31, 31, 43, 0.85);
 }
 
 .garden-info {
@@ -82,15 +91,17 @@
 }
 
 .garden-name {
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 1.05rem;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
 
 .garden-desc {
-  font-size: 0.75rem;
-  opacity: 0.6;
-  margin-top: 0.1rem;
+  font-size: 0.88rem;
+  opacity: 0.65;
+  margin-top: 0.2rem;
+  line-height: 1.35;
 }
 
 .garden-actions {
@@ -101,13 +112,13 @@
 
 .icon-btn {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
   color: #aaa;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -126,50 +137,89 @@
 
 .edit-form {
   display: flex;
-  gap: 0.4rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.2rem 0;
+}
+
+.edit-header {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
 }
 
 .edit-form input {
-  background: #111;
-  border: 1px solid #333;
+  background: rgba(17, 17, 17, 0.8);
+  border: 1px solid rgba(80, 80, 85, 0.6);
   color: #eee;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  width: 100%;
 }
 
-.edit-form button {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+.edit-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.edit-buttons button {
+  flex: 1;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.9rem;
   white-space: nowrap;
+  background: rgba(60, 60, 65, 0.6);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.edit-buttons button:hover {
+  background: rgba(70, 70, 75, 0.8);
+}
+
+.create-header {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-top: 0.8rem;
+  margin-bottom: 0.35rem;
+  font-weight: 500;
 }
 
 .create-garden {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: 0.6rem;
+  margin-top: 0.2rem;
 }
 
 .create-garden input {
   flex: 1;
-  background: #111;
-  border: 1px solid #333;
+  background: rgba(17, 17, 17, 0.8);
+  border: 1px solid rgba(80, 80, 85, 0.6);
   color: #eee;
-  padding: 0.45rem 0.6rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
 }
 
 .create-garden button {
   background: #6366f1;
   color: white;
   border: none;
-  padding: 0.45rem 0.9rem;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.create-garden button:hover:not(:disabled) {
+  background: #7478f5;
 }
 
 .create-garden button:disabled {
@@ -180,56 +230,59 @@
 .setting-item {
   display: flex;
   justify-content: space-between;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-  font-size: 0.85rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.95rem;
 }
 
 .setting-value {
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .settings-footer {
   text-align: right;
-  margin-top: 1rem;
+  margin-top: 1.1rem;
 }
 
 .done-btn {
-  background: #27272a;
+  background: rgba(39, 39, 42, 0.8);
   color: #eee;
-  border: 1px solid rgba(255,255,255,0.1);
-  padding: 0.5rem 1.25rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 0.6rem 1.4rem;
   border-radius: 999px;
+  font-size: 0.95rem;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .done-btn:hover {
-  background: #3a3a3f;
+  background: rgba(58, 58, 63, 0.9);
+  border-color: rgba(255,255,255,0.2);
 }
 
 /* Responsive improvements for smaller screens */
 @media (max-width: 420px) {
   .settings-content {
-    padding: 1rem;
+    padding: 1.1rem;
   }
 
   .settings-header h2 {
-    font-size: 1rem;
+    font-size: 1.2rem;
   }
 
   .section {
-    margin-bottom: 1.25rem;
+    margin-bottom: 1.1rem;
   }
 
   .hint {
-    font-size: 0.7rem;
+    font-size: 0.82rem;
   }
 
   .garden-item {
     flex-direction: column;
     align-items: stretch;
-    gap: 0.4rem;
-    padding: 0.65rem 0.7rem;
+    gap: 0.35rem;
+    padding: 0.75rem 0.8rem;
   }
 
   .garden-info {
@@ -237,64 +290,56 @@
   }
 
   .garden-name {
-    font-size: 0.95rem;
+    font-size: 1rem;
     word-break: break-word;
   }
 
   .garden-desc {
-    font-size: 0.7rem;
-    line-height: 1.3;
+    font-size: 0.82rem;
+    line-height: 1.35;
   }
 
   .garden-actions {
     align-self: flex-end;
-    margin-top: 0.1rem;
+    margin-top: 0.15rem;
   }
 
   .icon-btn {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     font-size: 1rem;
-    min-width: 40px;
-  }
-
-  .edit-form {
-    flex-direction: column;
-    gap: 0.35rem;
-    width: 100%;
   }
 
   .edit-form input {
-    width: 100%;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.85rem;
+    padding: 0.45rem 0.6rem;
+    font-size: 0.92rem;
   }
 
-  .edit-form button {
-    padding: 0.35rem 0.6rem;
-    font-size: 0.8rem;
+  .edit-buttons button {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.85rem;
   }
 
   .create-garden {
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.45rem;
   }
 
   .create-garden input {
     width: 100%;
-    padding: 0.5rem 0.6rem;
-    font-size: 0.85rem;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.92rem;
   }
 
   .create-garden button {
     width: 100%;
-    padding: 0.55rem 0.9rem;
-    font-size: 0.85rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.92rem;
   }
 
   .setting-item {
     flex-direction: column;
-    gap: 0.15rem;
-    font-size: 0.8rem;
+    gap: 0.1rem;
+    font-size: 0.9rem;
   }
 }

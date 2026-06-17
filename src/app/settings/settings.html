@@ -11,44 +11,48 @@
     <!-- Garden list -->
     <div class="garden-list">
       @for (garden of gardens; track garden.id) {
-        <div class="garden-item" [class.active]="garden.id === currentGardenId">
-          <div class="garden-info" (click)="select(garden.id)">
-            <div class="garden-name">{{ garden.name }}</div>
-            @if (garden.description) {
-              <div class="garden-desc">{{ garden.description }}</div>
-            }
-          </div>
+        <div class="garden-item" [class.active]="garden.id === currentGardenId" [class.editing]="editingId === garden.id">
+          @if (editingId !== garden.id) {
+            <div class="garden-info" (click)="select(garden.id)">
+              <div class="garden-name">{{ garden.name }}</div>
+              @if (garden.description) {
+                <div class="garden-desc">{{ garden.description }}</div>
+              }
+            </div>
 
-          <div class="garden-actions">
-            @if (editingId === garden.id) {
-              <div class="edit-form">
-                <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
-                <input [(ngModel)]="editDescription" placeholder="Description (optional)" (keyup.enter)="saveEdit()" />
-                <button (click)="saveEdit()">Save</button>
-                <button (click)="cancelEdit()">Cancel</button>
-              </div>
-            } @else {
+            <div class="garden-actions">
               <button class="icon-btn" (click)="startEdit(garden)" title="Edit">✎</button>
               @if (gardens.length > 1) {
                 <button class="icon-btn danger" (click)="remove(garden.id)" title="Delete">🗑</button>
               }
-            }
-          </div>
+            </div>
+          } @else {
+            <div class="edit-form">
+              <div class="edit-header">Editing “{{ garden.name }}”</div>
+              <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
+              <input [(ngModel)]="editDescription" placeholder="Description (optional)" (keyup.enter)="saveEdit()" />
+              <div class="edit-buttons">
+                <button (click)="saveEdit()">Save</button>
+                <button (click)="cancelEdit()">Cancel</button>
+              </div>
+            </div>
+          }
         </div>
       }
     </div>
 
     <!-- Create new garden -->
+    <div class="create-header">Create new garden</div>
     <div class="create-garden">
       <input 
         [(ngModel)]="newGardenName" 
-        placeholder="New garden name" 
+        placeholder="Garden name" 
         (keyup.enter)="create()" />
       <input 
         [(ngModel)]="newGardenDescription" 
-        placeholder="Optional description" 
+        placeholder="Description (optional)" 
         (keyup.enter)="create()" />
-      <button (click)="create()" [disabled]="!newGardenName.trim()">Create Garden</button>
+      <button (click)="create()" [disabled]="!newGardenName.trim()">+ Create</button>
     </div>
   </div>
 
