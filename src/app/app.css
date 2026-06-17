@@ -541,12 +541,13 @@
 }
 .transcript {
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: scroll;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 6px 6px 4px;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
   scrollbar-width: none;
   scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
   transition: scrollbar-color 0.3s ease;
@@ -695,6 +696,19 @@
   :host {
     font-size: 16px;
   }
+  .settings-overlay {
+    padding: 0;
+  }
+  .settings-modal {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
   .ava-root {
     padding: 10px;
   }
@@ -717,6 +731,14 @@
   }
   .voice-status small {
     text-align: center;
+  }
+  .garden-eyebrow span {
+    display: none;
+  }
+  .garden-eyebrow {
+    min-width: 48px;
+    padding-inline: 0;
+    justify-content: center;
   }
   .message-bubble {
     max-width: 92%;
