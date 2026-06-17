@@ -29,8 +29,10 @@ export class App {
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected showSettings = signal(false);
 
-  /** Becomes true once a conversation begins, collapsing the voice hero to the top. */
-  protected readonly chatStarted = signal(false);
+  /** Reactive: the conversation card is shown while there is content or active voice. */
+  protected readonly chatStarted = computed(() =>
+    this.messages().length > 0 || this.isListening() || this.isModelLoading()
+  );
 
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
@@ -52,20 +54,11 @@ export class App {
       this.messages(); // track changes
       this.scrollToBottom();
     });
-
-    // Reveal the conversation card once it has any content
-    effect(() => {
-      if (this.messages().length > 0) {
-        this.chatStarted.set(true);
-      }
-    });
   }
 
   protected selectGarden(id: string) {
     this.gardensService.selectGarden(id);
     this.currentTranscript.set('');
-    const msgs = this.messagesByGarden()[id];
-    this.chatStarted.set(!!msgs && msgs.length > 0);
   }
 
   protected openSettings() {
@@ -325,7 +318,6 @@ export class App {
 
   private async startMoonshineListening() {
     try {
-      this.chatStarted.set(true);
       this.currentTranscript.set('');
       this.moonshineBuffer = new Float32Array(0);
       this.isSpeechActive = false;
@@ -508,7 +500,8 @@ export class App {
     this.isListening.set(false);
 
     // Attempt to commit any remaining speech
-    if (wasListening && this.transcriber && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES) {
+    const willCommit = wasListening && !!this.transcriber && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES;
+    if (willCommit) {
       const trans = this.transcriber;
       // fire and forget
       this.commitCurrentUtterance(trans).catch(() => {});
@@ -703,7 +696,6 @@ export class App {
     if (gardenId) {
       this.setGardenMessages(gardenId, []);
     }
-    this.chatStarted.set(false);
     this.currentTranscript.set('');
     this.status.set('idle');
     if (this.synth) this.synth.cancel();

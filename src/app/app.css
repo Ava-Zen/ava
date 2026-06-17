@@ -477,6 +477,9 @@
     flex: 1.2 1 0;
     animation-name: panelInRight;
   }
+  .history-panel.panel-leave {
+    animation-name: panelOutRight;
+  }
   .companion-grid.chat-active .voice-console {
     flex-grow: 1;
   }
@@ -495,6 +498,21 @@
   from {
     opacity: 0;
     transform: translateX(36px) scale(0.99);
+  }
+}
+.history-panel.panel-leave {
+  animation: panelOutDown 0.42s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes panelOutDown {
+  to {
+    opacity: 0;
+    transform: translateY(28px) scale(0.985);
+  }
+}
+@keyframes panelOutRight {
+  to {
+    opacity: 0;
+    transform: translateX(40px) scale(0.985);
   }
 }
 
