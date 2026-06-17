@@ -684,6 +684,8 @@ export class App {
   }
 
   private currentAudio: HTMLAudioElement | null = null;
+  /** Resolver for the in-flight chunk, invoked when playback is interrupted. */
+  private currentChunkSettle: ((result: boolean) => void) | null = null;
   /** Increments on every new speak() call so stale chunk playback can self-cancel. */
   private speechGen = 0;
 
@@ -794,14 +796,19 @@ export class App {
       const finish = (result: boolean) => {
         if (done) return;
         done = true;
+        this.currentChunkSettle = null;
         URL.revokeObjectURL(url);
         if (this.currentAudio === player) this.currentAudio = null;
         resolve(result);
       };
 
+      // Interruptions are signalled explicitly via stopCurrentAudio(), not via
+      // the 'pause' event — Chromium fires 'pause' at natural end-of-media too,
+      // which would otherwise be mistaken for an interruption.
+      this.currentChunkSettle = () => finish(false);
+
       player.onended = () => finish(true);
       player.onerror = () => finish(false);
-      player.onpause = () => finish(false); // fired when interrupted via stopCurrentAudio
 
       player.play().catch(() => finish(false));
     });
@@ -839,6 +846,12 @@ export class App {
         // ignore
       }
       this.currentAudio = null;
+    }
+    // Resolve any awaiting chunk as interrupted so its loop can exit cleanly.
+    if (this.currentChunkSettle) {
+      const settle = this.currentChunkSettle;
+      this.currentChunkSettle = null;
+      settle(false);
     }
   }
 
