@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist/ava/browser",
     "devUrl": "http://localhost:4200",
-    "beforeDevCommand": "pnpm start",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "npm run start",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [

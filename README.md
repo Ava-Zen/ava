@@ -26,22 +26,19 @@ See:
 
 ### Prerequisites
 
-- Node 20+ (pnpm recommended)
+- Node 20+
 - Rust **stable** (use `rustup default stable` — nightly may cause dependency issues with current Tauri)
 - For Android: Android SDK + NDK (the project was scaffolded with Android support)
-- For iOS: macOS + Xcode (run `pnpm tauri ios init` on a Mac)
+- For iOS: macOS + Xcode (run `npm run tauri:ios:init` on a Mac)
 
 ### Install & Run (Desktop)
 
 ```bash
 # install dependencies
-pnpm install
+npm install
 
 # desktop dev
-pnpm tauri dev
-
-# or using the alias
-pnpm run tauri:dev
+npm run tauri:dev
 ```
 
 The Angular dev server runs on http://localhost:4200. Tauri wraps it.
@@ -50,24 +47,24 @@ The Angular dev server runs on http://localhost:4200. Tauri wraps it.
 
 ```bash
 # Android (after first init)
-pnpm run tauri:android:dev
+npm run tauri:android:dev
 
 # Build production Android
-pnpm run tauri:android:build
+npm run tauri:android:build
 ```
 
 On macOS:
 
 ```bash
-pnpm tauri ios init
-pnpm tauri ios dev
+npm run tauri:ios:init
+npm run tauri:ios:dev
 ```
 
 ### Build
 
 ```bash
-pnpm run build            # Angular production build
-pnpm run tauri:build      # Full Tauri bundles for current platform
+npm run build            # Angular production build
+npm run tauri:build      # Full Tauri bundles for current platform
 ```
 
 ## Project Structure
