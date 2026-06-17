@@ -601,8 +601,7 @@ export class App {
     }
     if (!this.kokoro) return false;
     try {
-      // Use a calm, natural voice suitable for companion
-      const voice = 'af_bella'; // soft female; alternatives: af_nicole, am_michael, etc.
+      const voice = this.tts.selectedKokoroVoiceId();
       const audio = await this.kokoro.generate(text, { voice, speed: 0.98 });
       return await this.playAudioBlob(audio.toBlob());
     } catch (e) {

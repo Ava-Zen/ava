@@ -124,6 +124,23 @@
               <small>{{ voice.description }}</small>
             </span>
           </button>
+
+          @if (voice.id === 'kokoro' && selectedVoiceId() === 'kokoro') {
+            <div class="speaker-picker">
+              <span class="speaker-label">Speaker</span>
+              <div class="speaker-chips">
+                @for (speaker of kokoroVoices; track speaker.id) {
+                  <button
+                    class="speaker-chip"
+                    [class.active]="speaker.id === selectedKokoroVoiceId()"
+                    (click)="selectKokoroVoice(speaker.id)"
+                    [title]="speaker.accent">
+                    {{ speaker.name }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
         </article>
       }
     </div>

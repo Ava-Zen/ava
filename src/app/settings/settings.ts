@@ -20,9 +20,15 @@ export class Settings {
   // Text-to-speech configuration
   protected readonly voices = this.ttsService.voices;
   protected readonly selectedVoiceId = this.ttsService.selectedVoiceId;
+  protected readonly kokoroVoices = this.ttsService.kokoroVoices;
+  protected readonly selectedKokoroVoiceId = this.ttsService.selectedKokoroVoiceId;
 
   selectVoice(id: TtsEngine) {
     this.ttsService.setVoice(id);
+  }
+
+  selectKokoroVoice(id: string) {
+    this.ttsService.setKokoroVoice(id);
   }
 
   @Output() close = new EventEmitter<void>();

@@ -322,18 +322,43 @@ input:focus {
   background: rgba(155,227,124,.13);
   border: 1px solid rgba(155,227,124,.3);
 }
-.tag.server {
-  color: #ffd687;
-  background: rgba(255,214,135,.12);
-  border: 1px solid rgba(255,214,135,.3);
-}
-.endpoint-field {
+.speaker-picker {
   display: grid;
-  gap: 7px;
+  gap: 9px;
   padding: 4px 12px 12px;
-  color: #b8c4d4;
+}
+.speaker-label {
+  color: #aeb9c9;
+  font-size: .82rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.speaker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.speaker-chip {
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: #e6edf7;
+  border-radius: 999px;
+  padding: 9px 16px;
   font-size: 1rem;
   font-weight: 740;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .2s ease, background .2s ease;
+}
+.speaker-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.28);
+  background: rgba(255,255,255,.1);
+}
+.speaker-chip.active {
+  color: #061013;
+  background: linear-gradient(135deg, #5eeadb, #b69bff);
+  border-color: transparent;
 }
 
 .settings-footer {
