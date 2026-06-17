@@ -160,6 +160,7 @@ export class App {
   // Voice / conversation state
   protected readonly isListening = signal(false);
   protected readonly isThinking = signal(false);
+  protected readonly isPaused = signal(false);
   protected readonly status = signal<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   protected readonly currentTranscript = signal('');
 
@@ -693,6 +694,7 @@ export class App {
     const id = ++this.speechGen;
 
     // Interrupt anything already speaking.
+    this.isPaused.set(false);
     this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
 
@@ -855,6 +857,59 @@ export class App {
     }
   }
 
+  /** Toggles pause/resume of Ava's current speech. */
+  protected togglePause() {
+    if (this.isPaused()) {
+      this.resumeSpeaking();
+    } else {
+      this.pauseSpeaking();
+    }
+  }
+
+  /** Pauses the current spoken reply without discarding the rest of it. */
+  protected pauseSpeaking() {
+    if (this.status() !== 'speaking' || this.isPaused()) return;
+    this.isPaused.set(true);
+    // Pause directly (not via stopCurrentAudio) so the chunk promise stays
+    // pending and resumes from where it left off.
+    try {
+      this.currentAudio?.pause();
+    } catch {
+      // ignore
+    }
+    try {
+      this.synth?.pause();
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Resumes a paused reply. */
+  protected resumeSpeaking() {
+    if (!this.isPaused()) return;
+    this.isPaused.set(false);
+    try {
+      void this.currentAudio?.play()?.catch(() => {});
+    } catch {
+      // ignore
+    }
+    try {
+      this.synth?.resume();
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Stops Ava speaking entirely and discards any remaining chunks. */
+  protected stopSpeaking() {
+    // Supersede the active chunk loop so no further chunks are played.
+    this.speechGen++;
+    this.isPaused.set(false);
+    this.stopCurrentAudio();
+    if (this.synth) this.synth.cancel();
+    if (this.status() === 'speaking') this.status.set('idle');
+  }
+
   private async playAudioBlob(blob: Blob): Promise<boolean> {
     this.stopCurrentAudio();
     const url = URL.createObjectURL(blob);
@@ -936,6 +991,7 @@ export class App {
     this.currentTranscript.set('');
     this.status.set('idle');
     this.speechGen++;
+    this.isPaused.set(false);
     this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
     this.scrollToBottom();

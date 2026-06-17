@@ -698,6 +698,15 @@
 .primary-tool:hover {
   box-shadow: 0 20px 48px rgba(94, 234, 219, 0.26);
 }
+.tool-btn.stop {
+  color: #ffd7d2;
+  border-color: rgba(255, 122, 110, 0.4);
+  background: rgba(255, 99, 88, 0.12);
+}
+.tool-btn.stop:hover {
+  border-color: rgba(255, 122, 110, 0.65);
+  background: rgba(255, 99, 88, 0.2);
+}
 
 /* ---------- Settings overlay ---------- */
 .settings-overlay {

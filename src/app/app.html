@@ -17,7 +17,11 @@
             } @else if (isThinking()) {
               Let me think.
             } @else if (status() === 'speaking') {
-              Speaking with you.
+              @if (isPaused()) {
+                Paused.
+              } @else {
+                Speaking with you.
+              }
             } @else {
               I am here.
             }
@@ -115,6 +119,25 @@
         </svg>
         <span>Clear</span>
       </button>
+      @if (status() === 'speaking') {
+        <button class="tool-btn" (click)="togglePause()" [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            @if (isPaused()) {
+              <path d="M8 5v14l11-7z"></path>
+            } @else {
+              <rect x="7" y="5" width="4" height="14" rx="1"></rect>
+              <rect x="13" y="5" width="4" height="14" rx="1"></rect>
+            }
+          </svg>
+          <span>{{ isPaused() ? 'Resume' : 'Pause' }}</span>
+        </button>
+        <button class="tool-btn stop" (click)="stopSpeaking()" aria-label="Stop speaking">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+          </svg>
+          <span>Stop</span>
+        </button>
+      }
       <button class="primary-tool" (click)="toggleVoice()" aria-label="Toggle voice">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           @if (isListening()) {
