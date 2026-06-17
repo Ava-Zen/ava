@@ -34,10 +34,21 @@ a {
   width: 10px;
 }
 
-.transcript::-webkit-scrollbar-thumb,
 .settings-modal::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,.2);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: padding-box;
+}
+
+/* Auto-hidden scrollbar: invisible until you hover the conversation */
+.transcript::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.3s ease;
+}
+.transcript:hover::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.24);
 }

@@ -256,7 +256,8 @@
 .voice-copy h1 {
   margin: 0;
   font-size: clamp(1.9rem, 7vmin, 5.5rem);
-  line-height: 0.95;
+  line-height: 1.08;
+  padding-bottom: 0.06em;
   letter-spacing: -0.02em;
   font-weight: 800;
   background: linear-gradient(180deg, #ffffff, #cfe6ff 70%, #9fc6e6);
@@ -301,6 +302,7 @@
   filter: blur(12px);
   opacity: 0.6;
   animation: spin 9s linear infinite;
+  transition: opacity 0.35s ease, filter 0.35s ease;
 }
 .orb {
   inset: 20px;
@@ -330,6 +332,19 @@
   width: 44%;
   height: 44%;
   color: #f0f8ff;
+  transition: transform 0.3s ease;
+}
+.orb-container:hover .orb {
+  transform: scale(1.04);
+  box-shadow: 0 0 0 12px rgba(94, 234, 219, 0.1), 0 0 64px rgba(94, 234, 219, 0.34), inset 0 2px rgba(255, 255, 255, 0.2);
+}
+.orb-container:hover .orb-ring {
+  opacity: 0.92;
+  filter: blur(17px);
+}
+.orb-container:hover .mic-icon {
+  transform: scale(1.08);
+  color: #ffffff;
 }
 @keyframes pulse {
   50% {
@@ -489,8 +504,13 @@
   flex-direction: column;
   gap: 16px;
   padding: 6px 6px 4px;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+  transition: scrollbar-color 0.3s ease;
+}
+.transcript:hover {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 .message {
   display: flex;

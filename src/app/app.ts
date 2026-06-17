@@ -711,14 +711,14 @@ export class App {
   }
 
   private scrollToBottom() {
-    // Use microtask + small delay to ensure DOM is updated after signal change / @for
-    queueMicrotask(() => {
-      setTimeout(() => {
+    // Double rAF ensures layout has settled after the @for / @if render before scrolling
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
         const el = this.transcriptEl?.nativeElement;
         if (el) {
           el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
         }
-      }, 50);
+      });
     });
   }
 
