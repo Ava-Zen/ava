@@ -146,6 +146,158 @@
     </div>
   </section>
 
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Connections</p>
+        <h3>MCP servers</h3>
+      </div>
+      <span>{{ mcpServers().length }}</span>
+    </div>
+    <p class="hint">Connect Ava to Model Context Protocol servers so she can use their tools. Add any server, or start with GitHub.</p>
+
+    @if (mcpError) {
+      <p class="mcp-error">{{ mcpError }}</p>
+    }
+
+    <div class="mcp-presets">
+      @for (preset of mcpPresets; track preset.url) {
+        @if (!presetAdded(preset)) {
+          <button class="ghost-btn" (click)="addPreset(preset)">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14"></path>
+              <path d="M5 12h14"></path>
+            </svg>
+            <span>Add {{ preset.name }}</span>
+          </button>
+        }
+      }
+    </div>
+
+    <div class="mcp-list">
+      @for (server of mcpServers(); track server.id) {
+        <article class="mcp-item">
+          <div class="mcp-head">
+            <div class="mcp-title">
+              <strong>{{ server.name }}</strong>
+              <small>{{ server.url }}</small>
+            </div>
+            @let status = statusFor(server.id);
+            <span class="mcp-badge" [attr.data-state]="status?.state || 'disconnected'">
+              {{ status?.state || 'disconnected' }}
+            </span>
+          </div>
+
+          @if (status?.state === 'connected') {
+            <p class="mcp-tools">{{ toolCount(server.id) }} tool{{ toolCount(server.id) === 1 ? '' : 's' }} available</p>
+          }
+          @if (status?.error) {
+            <p class="mcp-error">{{ status?.error }}</p>
+          }
+
+          <label class="mcp-field">
+            <span>Authentication</span>
+            <select [ngModel]="server.auth" (ngModelChange)="setServerAuth(server, $event)">
+              <option value="none">Public (no auth)</option>
+              <option value="pat">Personal access token</option>
+              <option value="oauth">OAuth (sign in)</option>
+            </select>
+          </label>
+
+          @if (server.auth === 'pat') {
+            <label class="mcp-field">
+              <span>Personal access token</span>
+              <input
+                type="password"
+                [(ngModel)]="patDrafts[server.id]"
+                [placeholder]="server.pat ? 'Token saved — enter a new one to replace' : 'Paste token'"
+                (keyup.enter)="savePat(server.id)" />
+            </label>
+          }
+
+          @if (server.auth === 'oauth') {
+            <label class="mcp-field">
+              <span>OAuth client ID</span>
+              <input
+                [(ngModel)]="oauthClientDrafts[server.id]"
+                placeholder="e.g. Ov23li…"
+                (keyup.enter)="saveOAuth(server)" />
+            </label>
+            <label class="mcp-field">
+              <span>Scopes (space-separated)</span>
+              <input
+                [(ngModel)]="oauthScopeDrafts[server.id]"
+                placeholder="repo read:org read:user" />
+            </label>
+            <p class="mcp-hint">Set your OAuth app's callback URL to <code>ava://oauth/callback</code>. PKCE is used, so no client secret is needed.</p>
+          }
+
+          <div class="mcp-actions">
+            @if (server.auth === 'pat') {
+              <button class="save-btn" (click)="savePat(server.id)" [disabled]="!(patDrafts[server.id] || '').trim() || mcpBusy[server.id]">
+                Save &amp; connect
+              </button>
+            }
+            @if (server.auth === 'oauth') {
+              <button class="ghost-btn" (click)="saveOAuth(server)" [disabled]="!(oauthClientDrafts[server.id] || '').trim()">
+                Save client ID
+              </button>
+              <button class="save-btn" (click)="authenticateMcp(server.id)" [disabled]="!server.oauth?.clientId || mcpBusy[server.id]">
+                {{ server.oauth?.tokens ? 'Re-authenticate' : 'Sign in' }}
+              </button>
+            }
+            @if (status?.state === 'connected') {
+              <button class="ghost-btn" (click)="disconnectMcp(server.id)">Disconnect</button>
+            } @else {
+              <button class="ghost-btn" (click)="connectMcp(server.id)" [disabled]="mcpBusy[server.id]">
+                {{ mcpBusy[server.id] ? 'Working…' : 'Connect' }}
+              </button>
+            }
+            <button class="icon-btn danger" (click)="removeMcp(server.id)" title="Remove server" aria-label="Remove server">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h18"></path>
+                <path d="M8 6V4h8v2"></path>
+                <path d="M19 6l-1 14H6L5 6"></path>
+              </svg>
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+
+    <div class="create-garden mcp-add">
+      <label>
+        <span>Name</span>
+        <input [(ngModel)]="newMcpName" placeholder="My MCP server" />
+      </label>
+      <label>
+        <span>Server URL</span>
+        <input [(ngModel)]="newMcpUrl" placeholder="https://example.com/mcp/" />
+      </label>
+      <label>
+        <span>Authentication</span>
+        <select [(ngModel)]="newMcpAuth">
+          <option value="none">Public (no auth)</option>
+          <option value="pat">Personal access token</option>
+          <option value="oauth">OAuth (sign in)</option>
+        </select>
+      </label>
+      @if (newMcpAuth === 'pat') {
+        <label>
+          <span>Token</span>
+          <input type="password" [(ngModel)]="newMcpPat" placeholder="Paste token (optional now)" />
+        </label>
+      }
+      <button class="create-btn" (click)="addMcpServer()" [disabled]="!newMcpName.trim() || !newMcpUrl.trim()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Add server</span>
+      </button>
+    </div>
+  </section>
+
   <section class="section settings-grid">
     <div class="setting-item">
       <span>Speech recognition</span>

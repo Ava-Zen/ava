@@ -7,7 +7,8 @@ import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn } from './services/llm';
-import { AgentsService } from './services/agents';
+import { AgentsService, AgentToolDef } from './services/agents';
+import { McpService } from './services/mcp';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 
 interface Message {
@@ -29,6 +30,7 @@ export class App {
   private readonly tts = inject(TtsService);
   private readonly llm = inject(LlmService);
   private readonly agents = inject(AgentsService);
+  private readonly mcp = inject(McpService);
   private readonly sanitizer = inject(DomSanitizer);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
@@ -64,6 +66,7 @@ export class App {
     this.preloadModel().catch(() => {});
     this.preloadKokoro().catch(() => {});
     this.preloadLlm().catch(() => {});
+    this.mcp.connectAll().catch(() => {});
     this.loadMessagesFromStorage();
 
     // Auto-scroll chat when new messages arrive
@@ -652,7 +655,17 @@ export class App {
 
   /** Hands the request to a Qwen background agent and confirms by voice. */
   private async handleAgentRequest(gardenId: string, text: string) {
-    this.agents.runTask(text);
+    const tools = this.mcp.tools();
+    if (tools.length) {
+      const toolDefs: AgentToolDef[] = tools.map(t => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      }));
+      this.agents.runTask(text, toolDefs, (name, args) => this.runMcpTool(name, args));
+    } else {
+      this.agents.runTask(text);
+    }
 
     // Kick off model loading in the background if it is not ready yet.
     this.agents.ensureLoaded().catch(() => {});
@@ -660,6 +673,14 @@ export class App {
     const ack =
       'Okay, I will work on that in the background and let you know when it is ready.';
     this.respond(gardenId, ack);
+  }
+
+  /** Resolves an MCP tool by name and invokes it, returning text for the agent. */
+  private async runMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
+    const tool = this.mcp.findTool(name);
+    if (!tool) return `Tool "${name}" is not available.`;
+    const result = await this.mcp.callTool(tool.serverId, name, args);
+    return result.text || (result.isError ? 'The tool reported an error.' : 'Done.');
   }
 
   /** A few natural "give me a second" lines spoken before Gemma answers. */

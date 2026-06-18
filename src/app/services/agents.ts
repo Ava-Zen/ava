@@ -5,6 +5,19 @@ import { ChatTurn, LlmModelOption } from './llm';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 
+/** A tool the agent may call while working on a task. */
+export interface AgentToolDef {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+/** Executes a tool call and returns a textual result for the model. */
+export type AgentToolExecutor = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<string>;
+
 export interface AgentTask {
   id: string;
   /** Natural-language instruction the user gave for this agent. */
@@ -81,6 +94,11 @@ export class AgentsService {
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** Optional tool context per task (not persisted). */
+  private readonly toolContext = new Map<
+    string,
+    { tools: AgentToolDef[]; exec: AgentToolExecutor }
+  >();
 
   async autoSelectModel(): Promise<void> {
     if (this.hasUserOverride()) return;
@@ -104,8 +122,11 @@ export class AgentsService {
   /**
    * Enqueues a background agent task. Tasks run sequentially so a single device
    * is never overloaded by concurrent model inference. Returns the task id.
+   *
+   * Optionally provide `tools` plus an `exec` callback so the agent can call
+   * MCP tools while working on the task.
    */
-  runTask(prompt: string): string {
+  runTask(prompt: string, tools?: AgentToolDef[], exec?: AgentToolExecutor): string {
     const task: AgentTask = {
       id: this.generateId(),
       prompt,
@@ -114,6 +135,9 @@ export class AgentsService {
       updatedAt: new Date(),
     };
     this.tasks.update(list => [...list, task]);
+    if (tools && tools.length && exec) {
+      this.toolContext.set(task.id, { tools, exec });
+    }
 
     // Chain onto the queue so tasks execute one at a time.
     this.queue = this.queue.then(() => this.execute(task.id));
@@ -125,7 +149,10 @@ export class AgentsService {
     try {
       const task = this.tasks().find(t => t.id === taskId);
       if (!task) return;
-      const result = await this.generate(task.prompt);
+      const ctx = this.toolContext.get(taskId);
+      const result = ctx
+        ? await this.generateWithTools(task.prompt, ctx.tools, ctx.exec)
+        : await this.generate(task.prompt);
       this.patchTask(taskId, { status: 'done', result });
     } catch (err: any) {
       console.error('[Qwen agent] task failed', err);
@@ -133,6 +160,8 @@ export class AgentsService {
         status: 'error',
         error: err?.message ?? 'Agent task failed.',
       });
+    } finally {
+      this.toolContext.delete(taskId);
     }
   }
 
@@ -209,6 +238,134 @@ export class AgentsService {
     });
 
     return this.extractText(output);
+  }
+
+  /**
+   * Runs an agent task with a bounded tool-use loop. The model may request a
+   * tool call by emitting a JSON object `{ "tool": name, "arguments": {...} }`;
+   * Ava executes it and feeds the result back. After a few rounds (or when the
+   * model stops requesting tools) the final plain-text answer is returned.
+   */
+  async generateWithTools(
+    prompt: string,
+    tools: AgentToolDef[],
+    exec: AgentToolExecutor,
+    maxRounds = 4,
+  ): Promise<string> {
+    const generator = await this.ensureLoaded();
+
+    const toolList = tools
+      .map(t => `- ${t.name}: ${t.description ?? 'no description'}\n  input schema: ${JSON.stringify(t.inputSchema ?? {})}`)
+      .join('\n');
+
+    const systemPrompt =
+      AGENT_SYSTEM_PROMPT +
+      '\n\nYou can use the following tools to gather information or take actions:\n' +
+      toolList +
+      '\n\nTo call a tool, reply with ONLY a single JSON object on its own line, ' +
+      'no other text: {"tool": "<tool_name>", "arguments": { ... }}. ' +
+      'You will then receive the tool result and may call another tool or finish. ' +
+      'When you have enough information, reply with the final answer as plain ' +
+      'text (no JSON, no tool call).';
+
+    const messages: ChatTurn[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt },
+    ];
+
+    let lastText = '';
+    for (let round = 0; round < maxRounds; round++) {
+      const output: any = await generator(messages, {
+        max_new_tokens: 1024,
+        do_sample: true,
+        temperature: 0.6,
+        top_p: 0.95,
+      });
+      const text = this.extractText(output);
+      lastText = text;
+
+      const call = this.parseToolCall(text);
+      if (!call) return text;
+
+      const known = tools.find(t => t.name === call.tool);
+      messages.push({ role: 'assistant', content: text });
+      if (!known) {
+        messages.push({
+          role: 'user',
+          content: `Tool "${call.tool}" is not available. Available tools: ${tools.map(t => t.name).join(', ')}. Try another tool or give your final answer.`,
+        });
+        continue;
+      }
+
+      let resultText: string;
+      try {
+        resultText = await exec(call.tool, call.arguments);
+      } catch (err: any) {
+        resultText = `Error: ${err?.message ?? String(err)}`;
+      }
+      messages.push({
+        role: 'user',
+        content: `Result of ${call.tool}:\n${resultText}\n\nUse this to continue, or give your final answer.`,
+      });
+    }
+
+    // Ran out of rounds — return the last text, stripped of any trailing tool JSON.
+    const trailing = this.parseToolCall(lastText);
+    return trailing ? 'I gathered some information but could not finish the task in time.' : lastText;
+  }
+
+  /** Extracts a `{ "tool": ..., "arguments": {...} }` directive from model text. */
+  private parseToolCall(text: string): { tool: string; arguments: Record<string, unknown> } | null {
+    const stripped = this.stripThinking(text);
+    for (const candidate of this.balancedJsonObjects(stripped)) {
+      if (!/"tool"\s*:/.test(candidate)) continue;
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed.tool === 'string') {
+          return {
+            tool: parsed.tool,
+            arguments:
+              parsed.arguments && typeof parsed.arguments === 'object'
+                ? parsed.arguments
+                : {},
+          };
+        }
+      } catch {
+        // try the next candidate
+      }
+    }
+    return null;
+  }
+
+  /** Yields top-level brace-balanced `{...}` substrings (handles nesting + strings). */
+  private *balancedJsonObjects(text: string): Generator<string> {
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (ch === '}') {
+        if (depth > 0) {
+          depth--;
+          if (depth === 0 && start >= 0) {
+            yield text.slice(start, i + 1);
+            start = -1;
+          }
+        }
+      }
+    }
   }
 
   clearCompleted(): void {

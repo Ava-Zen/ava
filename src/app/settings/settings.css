@@ -376,3 +376,113 @@ input:focus {
   .create-section, .settings-grid { grid-template-columns: 1fr; }
   .settings-footer .done-btn { width: 100%; }
 }
+
+/* MCP servers */
+.mcp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.mcp-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.mcp-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 22px;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.11);
+}
+.mcp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mcp-title { min-width: 0; display: grid; gap: 3px; }
+.mcp-title strong { font-size: 1.1rem; }
+.mcp-title small {
+  color: #9fb0c5;
+  word-break: break-all;
+  font-size: .9rem;
+}
+.mcp-badge {
+  flex-shrink: 0;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: .8rem;
+  font-weight: 800;
+  text-transform: capitalize;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.16);
+  color: #c3cedb;
+}
+.mcp-badge[data-state="connected"] {
+  background: rgba(88,230,217,.16);
+  border-color: rgba(88,230,217,.32);
+  color: #8ff4e8;
+}
+.mcp-badge[data-state="connecting"] { color: #ffe39a; }
+.mcp-badge[data-state="needs-auth"] {
+  background: rgba(255,196,84,.14);
+  border-color: rgba(255,196,84,.3);
+  color: #ffce7a;
+}
+.mcp-badge[data-state="error"] {
+  background: rgba(255,107,107,.14);
+  border-color: rgba(255,107,107,.3);
+  color: #ff9d9d;
+}
+.mcp-tools { margin: 0; color: #8ff4e8; font-size: .95rem; }
+.mcp-error { margin: 0; color: #ff9d9d; font-size: .95rem; }
+.mcp-field { display: grid; gap: 6px; }
+.mcp-field span { color: #b7c2d1; font-size: .9rem; }
+.mcp-field input {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: rgba(0,0,0,.24);
+  border: 1px solid rgba(255,255,255,.14);
+  color: #f6f8fb;
+  font-size: 1rem;
+}
+.mcp-field select {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: rgba(0,0,0,.24);
+  border: 1px solid rgba(255,255,255,.14);
+  color: #f6f8fb;
+  font-size: 1rem;
+}
+.mcp-hint {
+  margin: 0;
+  color: #9fb0c5;
+  font-size: .88rem;
+  line-height: 1.5;
+}
+.mcp-hint code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.1);
+  font-size: .85rem;
+}
+.mcp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mcp-add select {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 14px;
+  background: rgba(0,0,0,.24);
+  border: 1px solid rgba(255,255,255,.14);
+  color: #f6f8fb;
+  font-size: 1rem;
+}
