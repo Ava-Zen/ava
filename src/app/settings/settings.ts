@@ -24,6 +24,7 @@ export class Settings {
   protected readonly mcpServers = this.mcp.servers;
   protected readonly mcpStatuses = this.mcp.statuses;
   protected readonly mcpPresets = MCP_PRESETS;
+  protected readonly builtInMcpServers = this.mcp.builtInServers;
 
   newMcpName = '';
   newMcpUrl = '';

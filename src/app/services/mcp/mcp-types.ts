@@ -45,6 +45,8 @@ export interface McpServerConfig {
   enabled: boolean;
   /** Marks built-in presets (e.g. GitHub) so the UI can label them. */
   preset?: string;
+  /** Short human description (used for built-in servers in the UI). */
+  description?: string;
 }
 
 export type McpConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error' | 'needs-auth';

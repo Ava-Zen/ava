@@ -160,6 +160,33 @@
       <p class="mcp-error">{{ mcpError }}</p>
     }
 
+    @if (builtInMcpServers().length) {
+      <div class="mcp-builtins">
+        <p class="overline">Built in</p>
+        @for (server of builtInMcpServers(); track server.id) {
+          <article class="mcp-builtin">
+            <div class="mcp-title">
+              <strong>{{ server.name }}</strong>
+              @if (server.description) {
+                <small>{{ server.description }}</small>
+              }
+            </div>
+            <span class="mcp-badge" [attr.data-state]="server.state">
+              @if (server.state === 'connected') {
+                {{ server.toolCount }} tools · ready
+              } @else if (server.state === 'connecting') {
+                connecting…
+              } @else if (server.state === 'error') {
+                unavailable
+              } @else {
+                {{ server.state }}
+              }
+            </span>
+          </article>
+        }
+      </div>
+    }
+
     <div class="mcp-presets">
       @for (preset of mcpPresets; track preset.url) {
         @if (!presetAdded(preset)) {

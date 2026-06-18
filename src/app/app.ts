@@ -8,7 +8,7 @@ import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn } from './services/llm';
 import { AgentsService, AgentToolDef } from './services/agents';
-import { McpService } from './services/mcp';
+import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 
 interface Message {
@@ -601,7 +601,13 @@ export class App {
       return;
     }
 
-    // 2) Fast hard-coded reply for common phrases.
+    // 2) Weather questions → answer right now with the built-in weather tools.
+    if (this.detectWeatherRequest(text)) {
+      await this.handleWeatherRequest(gardenId, text);
+      return;
+    }
+
+    // 3) Fast hard-coded reply for common phrases.
     const fixed = this.generateAvaResponse(text);
     if (fixed) {
       await this.delay(350 + Math.random() * 350);
@@ -609,7 +615,7 @@ export class App {
       return;
     }
 
-    // 3) Anything else → Gemma. Acknowledge immediately, then think.
+    // 4) Anything else → Gemma. Acknowledge immediately, then think.
     await this.handleLlmReply(gardenId, text);
   }
 
@@ -619,6 +625,57 @@ export class App {
     return /\b(agent|background task|in the background|run a task|keep working on|work on (this|that|it)|go (and )?(research|find|look into|investigate)|research .+ for me|monitor|keep an eye on|while i('m| am)? (away|gone|busy))\b/.test(
       lower
     );
+  }
+
+  /** Detects when the user is asking about the weather. */
+  private detectWeatherRequest(text: string): boolean {
+    const lower = text.toLowerCase();
+    return /\b(weather|forecast|temperature|how (hot|cold|warm)|will it (rain|snow)|is it (raining|snowing|sunny)|do i need (an? )?(umbrella|jacket|coat))\b/.test(
+      lower
+    );
+  }
+
+  /** Answers a weather question now using the built-in weather tools + Qwen. */
+  private async handleWeatherRequest(gardenId: string, text: string) {
+    const weatherTools = this.mcp.tools().filter((t) => t.serverId === WEATHER_SERVER_ID);
+    if (!weatherTools.length) {
+      await this.handleLlmReply(gardenId, text);
+      return;
+    }
+
+    // Speak a filler immediately; looking up + reasoning takes a moment.
+    this.status.set('speaking');
+    this.speak(this.pickThinkingFiller());
+
+    const toolDefs: AgentToolDef[] = weatherTools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }));
+
+    const instructions =
+      'You are Ava, a warm and concise voice companion answering a weather question. ' +
+      'When the user names a place, first call search_location to get its latitude and longitude, ' +
+      'then call get_forecast (works worldwide) for that location. Use get_current_conditions or ' +
+      'get_alerts only for US locations. Once you have the data, reply in one or two short, natural ' +
+      'spoken sentences the way a friend would — mention the location plus the key details (temperature ' +
+      'and conditions). Do not read out tables, coordinates, or long lists of numbers.';
+
+    try {
+      const reply = (
+        await this.agents.generateWithTools(
+          text,
+          toolDefs,
+          (name, args) => this.runMcpTool(name, args),
+          4,
+          instructions,
+        )
+      ).trim();
+      this.respond(gardenId, reply || 'I could not get the weather just now.');
+    } catch (e) {
+      console.error('Weather request failed', e);
+      this.respond(gardenId, 'Sorry, I could not get the weather right now.');
+    }
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */

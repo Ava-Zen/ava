@@ -384,6 +384,22 @@ input:focus {
   gap: 10px;
   margin-bottom: 14px;
 }
+.mcp-builtins {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.mcp-builtins .overline { margin: 0 0 2px; }
+.mcp-builtin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.09);
+}
 .mcp-list {
   display: grid;
   gap: 12px;

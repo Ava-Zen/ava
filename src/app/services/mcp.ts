@@ -10,6 +10,32 @@ import {
 
 const STORAGE_KEY = 'ava-mcp-servers';
 
+/** Stable id for the built-in (hosted) weather server. */
+export const WEATHER_SERVER_ID = 'weather';
+
+/**
+ * Servers that ship with Ava and are always present. The user does not add or
+ * remove these; they are connected automatically at startup. They are kept out
+ * of the user-managed list and surfaced separately as "built in".
+ */
+const DEFAULT_SERVERS: ReadonlyArray<McpServerConfig> = [
+  {
+    id: WEATHER_SERVER_ID,
+    name: 'Weather',
+    description: 'Current conditions, forecasts, and alerts (global).',
+    url: 'https://weather.nostria.app/mcp',
+    auth: 'none',
+    enabled: true,
+    preset: 'weather',
+  },
+];
+
+/** Presets considered built-in/managed (not shown in the user-managed list). */
+const MANAGED_PRESETS = new Set(['weather']);
+
+const isManaged = (s: McpServerConfig): boolean =>
+  !!s.preset && MANAGED_PRESETS.has(s.preset);
+
 /** GitHub's fixed OAuth endpoints (no discovery / dynamic registration). */
 export const GITHUB_OAUTH_DEFAULTS = {
   authorizationEndpoint: 'https://github.com/login/oauth/authorize',
@@ -34,16 +60,33 @@ export class McpService {
   private readonly _statuses = signal<Record<string, McpServerStatus>>({});
   private readonly clients = new Map<string, McpClient>();
 
-  /** Configured servers. */
-  readonly servers = this._servers.asReadonly();
+  /** User-managed (non built-in) servers. */
+  readonly servers = computed<McpServerConfig[]>(() =>
+    this._servers().filter((s) => !isManaged(s)),
+  );
   /** Per-server connection status + discovered tools. */
   readonly statuses = this._statuses.asReadonly();
 
-  /** All tools across connected servers. */
-  readonly tools = computed<McpTool[]>(() => {
-    const statuses = this._statuses();
-    return Object.values(statuses).flatMap((s) => s.tools);
-  });
+  /** Built-in servers with live connection state + tool counts (for the UI). */
+  readonly builtInServers = computed(() =>
+    this._servers()
+      .filter(isManaged)
+      .map((s) => {
+        const status = this._statuses()[s.id];
+        return {
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          state: status?.state ?? 'disconnected',
+          toolCount: status?.tools.length ?? 0,
+        };
+      }),
+  );
+
+  /** All tools across every connected server (built-in + user-managed). */
+  readonly tools = computed<McpTool[]>(() =>
+    Object.values(this._statuses()).flatMap((s) => s.tools),
+  );
 
   readonly hasTools = computed(() => this.tools().length > 0);
   readonly connectedCount = computed(
@@ -217,13 +260,17 @@ export class McpService {
   }
 
   private load(): McpServerConfig[] {
+    let stored: McpServerConfig[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) stored = parsed;
     } catch {
-      return [];
+      stored = [];
     }
+    // Built-in servers are always defined by code (authoritative), so drop any
+    // persisted copies and re-seed them fresh alongside the user's servers.
+    const userServers = stored.filter((s) => !isManaged(s));
+    return [...DEFAULT_SERVERS.map((s) => ({ ...s })), ...userServers];
   }
 }

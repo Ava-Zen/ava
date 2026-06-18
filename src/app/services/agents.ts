@@ -251,6 +251,7 @@ export class AgentsService {
     tools: AgentToolDef[],
     exec: AgentToolExecutor,
     maxRounds = 4,
+    baseInstructions: string = AGENT_SYSTEM_PROMPT,
   ): Promise<string> {
     const generator = await this.ensureLoaded();
 
@@ -259,7 +260,7 @@ export class AgentsService {
       .join('\n');
 
     const systemPrompt =
-      AGENT_SYSTEM_PROMPT +
+      baseInstructions +
       '\n\nYou can use the following tools to gather information or take actions:\n' +
       toolList +
       '\n\nTo call a tool, reply with ONLY a single JSON object on its own line, ' +
