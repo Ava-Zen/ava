@@ -653,6 +653,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 12px;
   background: transparent;
   border: 0;
@@ -706,6 +707,43 @@
 .tool-btn.stop:hover {
   border-color: rgba(255, 122, 110, 0.65);
   background: rgba(255, 99, 88, 0.2);
+}
+
+/* ---------- Footer: compact controls on small screens ---------- */
+@media (max-width: 720px) {
+  .ava-footer {
+    gap: 8px;
+  }
+  .tool-btn,
+  .primary-tool {
+    min-height: 54px;
+    padding: 0 16px;
+    font-size: 1rem;
+    gap: 8px;
+  }
+  .primary-tool {
+    min-width: 132px;
+    font-size: 1.05rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .tool-btn {
+    width: 52px;
+    min-width: 52px;
+    min-height: 52px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 16px;
+  }
+  /* Icon-only on narrow screens; aria-labels keep them accessible. */
+  .tool-btn span {
+    display: none;
+  }
+  .primary-tool {
+    flex: 1 1 132px;
+    min-height: 52px;
+  }
 }
 
 /* ---------- Settings overlay ---------- */

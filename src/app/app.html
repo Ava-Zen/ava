@@ -135,7 +135,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="6" y="6" width="12" height="12" rx="2"></rect>
           </svg>
-          <span>Stop</span>
+          <span>Stop voice</span>
         </button>
       }
       <button class="primary-tool" (click)="toggleVoice()" aria-label="Toggle voice">
@@ -149,7 +149,7 @@
             <path d="M8 22h8"></path>
           }
         </svg>
-        <span>{{ isListening() ? 'Stop' : 'Speak' }}</span>
+        <span>{{ isListening() ? 'Stop mic' : 'Speak' }}</span>
       </button>
       <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
         <svg viewBox="0 0 24 24" aria-hidden="true">
