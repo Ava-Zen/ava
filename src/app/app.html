@@ -170,11 +170,14 @@
                   aria-haspopup="menu"
                   aria-label="Send manual prompt"
                   (click)="onPrimaryActionClick()"
-                  (contextmenu)="openComposerMenu($event)"
-                  (pointerdown)="onPrimaryActionPointerDown($event)"
-                  (pointerup)="onPrimaryActionPointerEnd()"
-                  (pointerleave)="onPrimaryActionPointerEnd()"
-                  (pointercancel)="onPrimaryActionPointerEnd()">
+                  (contextmenu)="$event.preventDefault()"
+                  (mousedown)="onPrimaryActionMouseDown($event)"
+                  (mouseup)="onPrimaryActionPressEnd()"
+                  (mouseleave)="onPrimaryActionPressEnd()"
+                  (touchstart)="onPrimaryActionTouchStart($event)"
+                  (touchmove)="onPrimaryActionTouchMove()"
+                  (touchend)="onPrimaryActionPressEnd()"
+                  (touchcancel)="onPrimaryActionPressEnd()">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M4 12 20 4 15 20 11 13 4 12Z"></path>
                   </svg>
@@ -188,11 +191,14 @@
                   aria-haspopup="menu"
                   aria-label="Toggle voice"
                   (click)="onPrimaryActionClick()"
-                  (contextmenu)="openComposerMenu($event)"
-                  (pointerdown)="onPrimaryActionPointerDown($event)"
-                  (pointerup)="onPrimaryActionPointerEnd()"
-                  (pointerleave)="onPrimaryActionPointerEnd()"
-                  (pointercancel)="onPrimaryActionPointerEnd()">
+                  (contextmenu)="$event.preventDefault()"
+                  (mousedown)="onPrimaryActionMouseDown($event)"
+                  (mouseup)="onPrimaryActionPressEnd()"
+                  (mouseleave)="onPrimaryActionPressEnd()"
+                  (touchstart)="onPrimaryActionTouchStart($event)"
+                  (touchmove)="onPrimaryActionTouchMove()"
+                  (touchend)="onPrimaryActionPressEnd()"
+                  (touchcancel)="onPrimaryActionPressEnd()">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     @if (isListening()) {
                       <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>

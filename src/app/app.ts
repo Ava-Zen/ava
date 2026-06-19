@@ -142,15 +142,14 @@ export class App {
     this.toggleVoice();
   }
 
-  @HostListener('document:pointerdown', ['$event'])
-  protected onDocumentPointerDown(event: PointerEvent) {
-    if (!this.composerMenuOpen()) return;
+  @HostListener('document:mousedown', ['$event'])
+  protected onDocumentMouseDown(event: MouseEvent) {
+    this.closeComposerMenuIfOutside(event.target);
+  }
 
-    const shell = this.primaryActionShellEl?.nativeElement;
-    const target = event.target as Node | null;
-    if (shell && target && !shell.contains(target)) {
-      this.composerMenuOpen.set(false);
-    }
+  @HostListener('document:touchstart', ['$event'])
+  protected onDocumentTouchStart(event: TouchEvent) {
+    this.closeComposerMenuIfOutside(event.target);
   }
 
   protected closeSettings() {
@@ -163,22 +162,32 @@ export class App {
 
   protected openComposerMenu(event?: Event) {
     event?.preventDefault();
+    event?.stopPropagation();
     this.clearPrimaryActionPress();
     this.suppressPrimaryActionClick = true;
     this.composerMenuOpen.set(true);
   }
 
-  protected onPrimaryActionPointerDown(event: PointerEvent) {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+  protected onPrimaryActionMouseDown(event: MouseEvent) {
+    if (event.button === 2) {
+      this.openComposerMenu(event);
+      return;
+    }
 
-    this.clearPrimaryActionPress();
-    this.primaryMenuPressTimer = setTimeout(() => {
-      this.suppressPrimaryActionClick = true;
-      this.composerMenuOpen.set(true);
-    }, this.PRIMARY_MENU_PRESS_MS);
+    if (event.button !== 0) return;
+    this.startPrimaryActionPressTimer();
   }
 
-  protected onPrimaryActionPointerEnd() {
+  protected onPrimaryActionTouchStart(event: TouchEvent) {
+    event.stopPropagation();
+    this.startPrimaryActionPressTimer();
+  }
+
+  protected onPrimaryActionTouchMove() {
+    this.clearPrimaryActionPress();
+  }
+
+  protected onPrimaryActionPressEnd() {
     this.clearPrimaryActionPress();
   }
 
@@ -1212,6 +1221,24 @@ export class App {
   private appendToManualPrompt(text: string) {
     const current = this.manualPrompt().trim();
     this.manualPrompt.set(current ? `${current}\n\n${text}` : text);
+  }
+
+  private closeComposerMenuIfOutside(target: EventTarget | null) {
+    if (!this.composerMenuOpen()) return;
+
+    const shell = this.primaryActionShellEl?.nativeElement;
+    const node = target as Node | null;
+    if (shell && node && !shell.contains(node)) {
+      this.composerMenuOpen.set(false);
+    }
+  }
+
+  private startPrimaryActionPressTimer() {
+    this.clearPrimaryActionPress();
+    this.primaryMenuPressTimer = setTimeout(() => {
+      this.suppressPrimaryActionClick = true;
+      this.composerMenuOpen.set(true);
+    }, this.PRIMARY_MENU_PRESS_MS);
   }
 
   private clearPrimaryActionPress() {
