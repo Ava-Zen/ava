@@ -16,6 +16,11 @@ interface Message {
   timestamp: Date;
 }
 
+interface QuickPrompt {
+  label: string;
+  text: string;
+}
+
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Settings],
@@ -24,6 +29,28 @@ interface Message {
 })
 export class App {
   protected readonly title = signal('Ava');
+  protected readonly quickPrompts: QuickPrompt[] = [
+    {
+      label: 'Summarize this',
+      text: 'Please summarize this and pull out the key points.'
+    },
+    {
+      label: 'Action items',
+      text: 'Please turn this into a short action list with priorities.'
+    },
+    {
+      label: 'Draft reply',
+      text: 'Please help me draft a clear and thoughtful reply.'
+    },
+    {
+      label: 'Explain simply',
+      text: 'Please explain this in plain language and keep it concise.'
+    },
+  ];
+  private readonly MAX_FILE_CHARS = 12000;
+  private readonly TEXT_FILE_EXTENSIONS = new Set([
+    'txt', 'md', 'markdown', 'json', 'csv', 'ts', 'tsx', 'js', 'jsx', 'html', 'css', 'scss', 'xml', 'yml', 'yaml', 'log'
+  ]);
 
   private readonly gardensService = inject(GardensService);
   private readonly tts = inject(TtsService);
@@ -32,6 +59,8 @@ export class App {
   private readonly sanitizer = inject(DomSanitizer);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
+  @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
 
   // Gardens
   protected readonly gardens = this.gardensService.gardens;
@@ -45,6 +74,16 @@ export class App {
 
   /** Name of the currently selected text-to-speech voice. */
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
+  protected readonly manualInputEnabled = signal(false);
+  protected readonly composerMenuOpen = signal(false);
+  protected readonly manualPrompt = signal('');
+  protected readonly composerNotice = signal('');
+  protected readonly canSubmitManualPrompt = computed(() =>
+    this.manualPrompt().trim().length > 0 && !this.isThinking()
+  );
+  private primaryMenuPressTimer: ReturnType<typeof setTimeout> | null = null;
+  private suppressPrimaryActionClick = false;
+  private readonly PRIMARY_MENU_PRESS_MS = 460;
 
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
@@ -85,6 +124,11 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && this.composerMenuOpen()) {
+      this.composerMenuOpen.set(false);
+      return;
+    }
+
     if (event.code !== 'Space' || event.repeat) return;
     if (this.showSettings()) return;
 
@@ -98,8 +142,150 @@ export class App {
     this.toggleVoice();
   }
 
+  @HostListener('document:pointerdown', ['$event'])
+  protected onDocumentPointerDown(event: PointerEvent) {
+    if (!this.composerMenuOpen()) return;
+
+    const shell = this.primaryActionShellEl?.nativeElement;
+    const target = event.target as Node | null;
+    if (shell && target && !shell.contains(target)) {
+      this.composerMenuOpen.set(false);
+    }
+  }
+
   protected closeSettings() {
     this.showSettings.set(false);
+  }
+
+  protected toggleComposerMenu() {
+    this.composerMenuOpen.update(open => !open);
+  }
+
+  protected openComposerMenu(event?: Event) {
+    event?.preventDefault();
+    this.clearPrimaryActionPress();
+    this.suppressPrimaryActionClick = true;
+    this.composerMenuOpen.set(true);
+  }
+
+  protected onPrimaryActionPointerDown(event: PointerEvent) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+    this.clearPrimaryActionPress();
+    this.primaryMenuPressTimer = setTimeout(() => {
+      this.suppressPrimaryActionClick = true;
+      this.composerMenuOpen.set(true);
+    }, this.PRIMARY_MENU_PRESS_MS);
+  }
+
+  protected onPrimaryActionPointerEnd() {
+    this.clearPrimaryActionPress();
+  }
+
+  protected onPrimaryActionClick() {
+    if (this.suppressPrimaryActionClick) {
+      this.suppressPrimaryActionClick = false;
+      return;
+    }
+
+    this.composerMenuOpen.set(false);
+
+    if (this.manualInputEnabled()) {
+      void this.submitManualPrompt();
+      return;
+    }
+
+    void this.toggleVoice();
+  }
+
+  protected setManualInputMode(enabled: boolean) {
+    if (enabled && this.isListening()) {
+      this.stopMoonshineListening();
+    }
+
+    this.manualInputEnabled.set(enabled);
+    this.composerMenuOpen.set(false);
+    if (!enabled) {
+      this.composerNotice.set('');
+    }
+  }
+
+  protected onManualPromptInput(event: Event) {
+    const target = event.target as HTMLTextAreaElement | null;
+    this.manualPrompt.set(target?.value ?? '');
+  }
+
+  protected onManualPromptKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+
+    event.preventDefault();
+    this.submitManualPrompt();
+  }
+
+  protected async submitManualPrompt() {
+    const text = this.manualPrompt().trim();
+    if (!text || this.isThinking()) return;
+
+    this.manualPrompt.set('');
+    this.composerNotice.set('');
+    await this.handleUserSpeech(text);
+  }
+
+  protected queueQuickPrompt(prompt: string) {
+    this.setManualInputMode(true);
+    this.appendToManualPrompt(prompt);
+    this.composerNotice.set('Quick prompt added. You can edit it before sending.');
+  }
+
+  protected openFilePicker() {
+    this.setManualInputMode(true);
+    this.filePickerEl?.nativeElement.click();
+  }
+
+  protected async onFilesSelected(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    const files = Array.from(input?.files ?? []);
+    if (files.length === 0) return;
+
+    const segments: string[] = [];
+
+    for (const file of files) {
+      if (!this.isTextFile(file)) {
+        segments.push(`[${file.name}] could not be added because it does not look like a text file.`);
+        continue;
+      }
+
+      try {
+        const raw = await file.text();
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          segments.push(`File: ${file.name}\n\n[empty file]`);
+          continue;
+        }
+
+        const clipped = trimmed.length > this.MAX_FILE_CHARS
+          ? `${trimmed.slice(0, this.MAX_FILE_CHARS)}\n\n[truncated to ${this.MAX_FILE_CHARS.toLocaleString()} characters]`
+          : trimmed;
+
+        segments.push(`Use this file as context:\nFile: ${file.name}\n\n${clipped}`);
+      } catch {
+        segments.push(`File: ${file.name}\n\n[could not read this file]`);
+      }
+    }
+
+    for (const segment of segments) {
+      this.appendToManualPrompt(segment);
+    }
+
+    this.composerNotice.set(
+      files.length === 1
+        ? `Added ${files[0].name} to the manual prompt.`
+        : `Added ${files.length} files to the manual prompt.`
+    );
+
+    if (input) {
+      input.value = '';
+    }
   }
 
   // Garden management handlers (called from Settings component)
@@ -989,6 +1175,8 @@ export class App {
       this.setGardenMessages(gardenId, []);
     }
     this.currentTranscript.set('');
+    this.manualPrompt.set('');
+    this.composerNotice.set('');
     this.status.set('idle');
     this.speechGen++;
     this.isPaused.set(false);
@@ -1019,5 +1207,26 @@ export class App {
   protected formatTime(date: Date | string): string {
     const value = date instanceof Date ? date : new Date(date);
     return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  private appendToManualPrompt(text: string) {
+    const current = this.manualPrompt().trim();
+    this.manualPrompt.set(current ? `${current}\n\n${text}` : text);
+  }
+
+  private clearPrimaryActionPress() {
+    if (this.primaryMenuPressTimer !== null) {
+      clearTimeout(this.primaryMenuPressTimer);
+      this.primaryMenuPressTimer = null;
+    }
+  }
+
+  private isTextFile(file: File): boolean {
+    const type = file.type.toLowerCase();
+    if (type.startsWith('text/')) return true;
+    if (/(json|javascript|typescript|xml|yaml)/.test(type)) return true;
+
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    return extension ? this.TEXT_FILE_EXTENSIONS.has(extension) : false;
   }
 }
