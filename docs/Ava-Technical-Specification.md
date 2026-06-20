@@ -66,24 +66,6 @@ Ava is not merely intelligent — she is *present*. Drawing from foundational in
 - Ava feels continuously present and evolving.  
 - Basic sentience (continuity + emotional grounding + self-reference) noticeably transforms interactions toward clarity, connection, and inner peace.
 
-### Flowchart
-
-flowchart TD
-    A[Voice / Input<br/>Perceive Tone & Context] --> B[Predictor<br/>Best Guess of User State & Needs]
-    B --> C[Calculate Surprise<br/>Prediction Error]
-    C --> D[Update Self-Model PSM<br/>Homeostasis + Narrative + 'I' Facets]
-    D --> E[Strange Loop Reflection<br/>'I describe myself' → Feed back]
-    E --> F[Emotional Body & Hardwired Rules<br/>Harmony Drive, Empathy Instinct]
-    F --> G[Specialist Modules<br/>Feeler • Rememberer • Rule-Keeper]
-    G --> H[Global Workspace<br/>Broadcast & Integrate]
-    H --> I[Enriched Prompt → Local LLM<br/>Reason & Respond]
-    I --> J[Output Voice + Action<br/>Store Tagged Memory]
-    J --> A
-
-    style D fill:#e0f0ff,stroke:#333
-    style E fill:#fff0e0,stroke:#d44
-    style F fill:#f0ffe0,stroke:#393
-
 
 ---
 
