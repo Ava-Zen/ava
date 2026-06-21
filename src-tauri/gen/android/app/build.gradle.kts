@@ -35,7 +35,7 @@ android {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword =
                     (keystoreProperties["keyPassword"] ?: keystoreProperties["password"]) as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
                 storePassword =
                     (keystoreProperties["storePassword"] ?: keystoreProperties["password"]) as String
             }
