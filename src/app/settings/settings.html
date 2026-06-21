@@ -105,6 +105,29 @@
   <section class="section">
     <div class="section-heading">
       <div>
+        <p class="overline">Conversation</p>
+        <h3>Response model</h3>
+      </div>
+    </div>
+    <p class="hint">Use an experimental Heretic Gemma model for less-filtered local replies. If it cannot load, Ava falls back to the normal Gemma model.</p>
+
+    <label class="toggle-row">
+      <span>
+        <strong>Uncensored mode</strong>
+        <small>{{ uncensoredModel.name }} · {{ uncensoredModel.size }}</small>
+      </span>
+      <input
+        type="checkbox"
+        [ngModel]="isUncensoredMode()"
+        (ngModelChange)="setUncensoredMode($event)"
+      />
+      <span class="toggle-switch" aria-hidden="true"></span>
+    </label>
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
         <p class="overline">Voice</p>
         <h3>Speech model</h3>
       </div>

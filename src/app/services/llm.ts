@@ -46,6 +46,13 @@ const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
   },
 };
 
+const UNCENSORED_GEMMA_MODEL: LlmModelOption = {
+  id: 'DavidAU/gemma-3-1b-it-heretic-abliterated-uncensored',
+  name: 'Gemma Heretic 1B',
+  size: '~1 GB',
+  tier: 'medium',
+};
+
 const SYSTEM_PROMPT =
   'You are Ava, a calm, warm and concise voice companion. ' +
   'Answer in a natural, spoken style. Keep replies short — usually one or two ' +
@@ -55,6 +62,7 @@ const SYSTEM_PROMPT =
 @Injectable({ providedIn: 'root' })
 export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
+  private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
 
   /** All available Gemma options, one recommended per device tier. */
   readonly models: LlmModelOption[] = [
@@ -65,10 +73,15 @@ export class LlmService {
 
   /** The chosen model id (auto-selected by hardware, user-overridable). */
   private readonly modelId = signal<string>(this.loadStoredModel());
+  private readonly uncensoredMode = signal<boolean>(this.loadStoredUncensoredMode());
 
   readonly selectedModel = computed(
-    () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+    () => this.uncensoredMode()
+      ? UNCENSORED_GEMMA_MODEL
+      : this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
+  readonly isUncensoredMode = computed(() => this.uncensoredMode());
+  readonly uncensoredModel = UNCENSORED_GEMMA_MODEL;
 
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
@@ -99,6 +112,19 @@ export class LlmService {
     this.isReady.set(false);
   }
 
+  setUncensoredMode(enabled: boolean): void {
+    if (this.uncensoredMode() === enabled) return;
+    this.uncensoredMode.set(enabled);
+    try {
+      localStorage.setItem(this.UNCENSORED_STORAGE_KEY, enabled ? '1' : '0');
+    } catch {
+      // ignore persistence errors
+    }
+    this.generator = null;
+    this.loadPromise = null;
+    this.isReady.set(false);
+  }
+
   /**
    * Lazily loads the Gemma generation pipeline with WebGPU → WASM fallback.
    * Safe to call repeatedly; the underlying load happens only once.
@@ -117,7 +143,11 @@ export class LlmService {
 
   private async load(): Promise<any> {
     await this.autoSelectModel();
-    const modelId = this.modelId();
+    const preferredModel = this.selectedModel();
+    const fallbackModel = this.models.find(m => m.id === this.modelId()) ?? GEMMA_MODELS.medium;
+    const candidates = this.uncensoredMode()
+      ? [preferredModel, fallbackModel]
+      : [preferredModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
@@ -134,21 +164,23 @@ export class LlmService {
 
     let lastError: unknown = null;
     try {
-      for (const attempt of attempts) {
-        try {
-          this.loadInfo.set(`loading ${this.selectedModel().name} (${attempt.label})…`);
-          this.generator = await pipeline('text-generation', modelId, {
-            device: attempt.device,
-            dtype: attempt.dtype as any,
-          });
-          this.loadInfo.set(`${this.selectedModel().name} · ${attempt.label}`);
-          this.isReady.set(true);
-          console.info(`[Gemma] Loaded ${modelId} with ${attempt.label}`);
-          return this.generator;
-        } catch (err) {
-          lastError = err;
-          console.warn(`[Gemma] ${attempt.label} failed`, err);
-          this.generator = null;
+      for (const model of candidates) {
+        for (const attempt of attempts) {
+          try {
+            this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
+            this.generator = await pipeline('text-generation', model.id, {
+              device: attempt.device,
+              dtype: attempt.dtype as any,
+            });
+            this.loadInfo.set(`${model.name} · ${attempt.label}`);
+            this.isReady.set(true);
+            console.info(`[Gemma] Loaded ${model.id} with ${attempt.label}`);
+            return this.generator;
+          } catch (err) {
+            lastError = err;
+            console.warn(`[Gemma] ${model.id} ${attempt.label} failed`, err);
+            this.generator = null;
+          }
         }
       }
       this.loadInfo.set('Gemma could not be loaded.');
@@ -206,6 +238,14 @@ export class LlmService {
       // ignore
     }
     return GEMMA_MODELS.medium.id;
+  }
+
+  private loadStoredUncensoredMode(): boolean {
+    try {
+      return localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
   }
 
   private modelExists(id: string): boolean {

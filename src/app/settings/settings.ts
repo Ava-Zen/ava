@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Garden, GardensService } from '../services/gardens';
 import { TtsService, TtsEngine } from '../services/tts';
+import { LlmService } from '../services/llm';
 
 @Component({
   selector: 'app-settings',
@@ -14,6 +15,7 @@ import { TtsService, TtsEngine } from '../services/tts';
 export class Settings {
   private readonly gardensService = inject(GardensService);
   private readonly ttsService = inject(TtsService);
+  private readonly llmService = inject(LlmService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
 
@@ -22,6 +24,8 @@ export class Settings {
   protected readonly selectedVoiceId = this.ttsService.selectedVoiceId;
   protected readonly kokoroVoices = this.ttsService.kokoroVoices;
   protected readonly selectedKokoroVoiceId = this.ttsService.selectedKokoroVoiceId;
+  protected readonly uncensoredModel = this.llmService.uncensoredModel;
+  protected readonly isUncensoredMode = this.llmService.isUncensoredMode;
 
   selectVoice(id: TtsEngine) {
     this.ttsService.setVoice(id);
@@ -30,6 +34,10 @@ export class Settings {
   selectKokoroVoice(id: string) {
     this.ttsService.setKokoroVoice(id);
     this.previewVoice.emit(id);
+  }
+
+  setUncensoredMode(enabled: boolean) {
+    this.llmService.setUncensoredMode(enabled);
   }
 
   @Output() close = new EventEmitter<void>();
