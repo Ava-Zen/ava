@@ -888,7 +888,8 @@
   background: rgba(255, 99, 88, 0.2);
 }
 .add-tool {
-  min-width: 62px;
+  width: 72px;
+  min-width: 72px;
   padding-inline: 0;
   justify-content: center;
 }
@@ -1089,6 +1090,10 @@
     min-width: 148px;
     font-size: 1.08rem;
   }
+  .add-tool {
+    width: 64px;
+    min-width: 64px;
+  }
   .send-tool {
     min-width: 96px;
     padding-inline: 14px;
@@ -1124,6 +1129,10 @@
     font-size: 0.94rem;
   }
   .compact-tool {
+    min-width: 54px;
+  }
+  .add-tool {
+    width: 54px;
     min-width: 54px;
   }
   .manual-input {
