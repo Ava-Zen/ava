@@ -113,7 +113,7 @@ jobs:
           echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
       - name: Configure Android signing
-        if: matrix.platform == 'android' && secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != ''
+        if: matrix.platform == 'android'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -121,6 +121,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "Android signing secrets not fully configured; continuing with unsigned Android artifacts."
+            exit 0
+          fi
           mkdir -p src-tauri/gen/android
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > src-tauri/gen/android/ava-android-upload.jks
           cat > src-tauri/gen/android/keystore.properties <<EOF
