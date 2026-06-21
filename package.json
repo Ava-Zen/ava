@@ -1,6 +1,6 @@
 {
   "name": "ava",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ava — the conscious voice companion (Tauri + Angular)",
   "scripts": {
     "ng": "ng",
