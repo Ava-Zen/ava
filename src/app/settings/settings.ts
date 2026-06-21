@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Garden, GardensService } from '../services/gardens';
 import { TtsService, TtsEngine } from '../services/tts';
 import { LlmService } from '../services/llm';
+import { AgentsService } from '../services/agents';
 
 @Component({
   selector: 'app-settings',
@@ -16,6 +17,7 @@ export class Settings {
   private readonly gardensService = inject(GardensService);
   private readonly ttsService = inject(TtsService);
   private readonly llmService = inject(LlmService);
+  private readonly agentsService = inject(AgentsService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
 
@@ -38,6 +40,7 @@ export class Settings {
 
   setUncensoredMode(enabled: boolean) {
     this.llmService.setUncensoredMode(enabled);
+    this.agentsService.resetLoadedModel();
   }
 
   @Output() close = new EventEmitter<void>();

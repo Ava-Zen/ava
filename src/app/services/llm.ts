@@ -46,10 +46,10 @@ const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
   },
 };
 
-const UNCENSORED_GEMMA_MODEL: LlmModelOption = {
-  id: 'DavidAU/gemma-3-1b-it-heretic-abliterated-uncensored',
-  name: 'Gemma Heretic 1B',
-  size: '~1 GB',
+const UNCENSORED_CHAT_MODEL: LlmModelOption = {
+  id: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
+  name: 'Qwen3 Heretic 0.6B',
+  size: '~0.6 GB',
   tier: 'medium',
 };
 
@@ -77,11 +77,11 @@ export class LlmService {
 
   readonly selectedModel = computed(
     () => this.uncensoredMode()
-      ? UNCENSORED_GEMMA_MODEL
+      ? UNCENSORED_CHAT_MODEL
       : this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
   readonly isUncensoredMode = computed(() => this.uncensoredMode());
-  readonly uncensoredModel = UNCENSORED_GEMMA_MODEL;
+  readonly uncensoredModel = UNCENSORED_CHAT_MODEL;
 
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
@@ -153,14 +153,7 @@ export class LlmService {
     this.isReady.set(false);
 
     const { hasWebGPU } = await detectDeviceCapability();
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
-    if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
-    }
-    attempts.push(
-      { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
-      { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-    );
+    const attempts = this.buildLoadAttempts(hasWebGPU, this.uncensoredMode());
 
     let lastError: unknown = null;
     try {
@@ -188,6 +181,29 @@ export class LlmService {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private buildLoadAttempts(
+    hasWebGPU: boolean,
+    uncensored: boolean
+  ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
+    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
+    if (hasWebGPU) {
+      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
+    }
+
+    if (uncensored) {
+      attempts.push(
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' },
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }
+      );
+    } else {
+      attempts.push(
+        { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
+      );
+    }
+    return attempts;
   }
 
   /**

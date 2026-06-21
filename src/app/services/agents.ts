@@ -1,7 +1,7 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
 import { detectDeviceCapability, DeviceTier } from './device-capability';
-import { ChatTurn, LlmModelOption } from './llm';
+import { ChatTurn, LlmModelOption, LlmService } from './llm';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -45,6 +45,13 @@ const QWEN_MODELS: Record<DeviceTier, LlmModelOption> = {
   },
 };
 
+const UNCENSORED_AGENT_MODEL: LlmModelOption = {
+  id: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
+  name: 'Qwen3 Heretic 0.6B',
+  size: '~0.6 GB',
+  tier: 'medium',
+};
+
 const AGENT_SYSTEM_PROMPT =
   'You are an autonomous background agent working on behalf of Ava, a voice ' +
   'companion. You are given a single task and must complete it carefully and ' +
@@ -54,6 +61,7 @@ const AGENT_SYSTEM_PROMPT =
 @Injectable({ providedIn: 'root' })
 export class AgentsService {
   private readonly STORAGE_KEY = 'ava-agent-model';
+  private readonly llm = inject(LlmService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
@@ -64,7 +72,9 @@ export class AgentsService {
   private readonly modelId = signal<string>(this.loadStoredModel());
 
   readonly selectedModel = computed(
-    () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+    () => this.llm.isUncensoredMode()
+      ? UNCENSORED_AGENT_MODEL
+      : this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
 
   readonly isLoading = signal(false);
@@ -96,6 +106,12 @@ export class AgentsService {
     } catch {
       // ignore
     }
+    this.generator = null;
+    this.loadPromise = null;
+    this.isReady.set(false);
+  }
+
+  resetLoadedModel(): void {
     this.generator = null;
     this.loadPromise = null;
     this.isReady.set(false);
@@ -150,38 +166,38 @@ export class AgentsService {
 
   private async load(): Promise<any> {
     await this.autoSelectModel();
-    const modelId = this.modelId();
+    const preferredModel = this.selectedModel();
+    const fallbackModel = this.models.find(m => m.id === this.modelId()) ?? QWEN_MODELS.medium;
+    const candidates = this.llm.isUncensoredMode()
+      ? [preferredModel, fallbackModel]
+      : [preferredModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
 
+    const uncensored = this.llm.isUncensoredMode();
     const { hasWebGPU } = await detectDeviceCapability();
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
-    if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
-    }
-    attempts.push(
-      { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
-      { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-    );
+    const attempts = this.buildLoadAttempts(hasWebGPU, uncensored);
 
     let lastError: unknown = null;
     try {
-      for (const attempt of attempts) {
-        try {
-          this.loadInfo.set(`loading ${this.selectedModel().name} (${attempt.label})…`);
-          this.generator = await pipeline('text-generation', modelId, {
-            device: attempt.device,
-            dtype: attempt.dtype as any,
-          });
-          this.loadInfo.set(`${this.selectedModel().name} · ${attempt.label}`);
-          this.isReady.set(true);
-          console.info(`[Qwen] Loaded ${modelId} with ${attempt.label}`);
-          return this.generator;
-        } catch (err) {
-          lastError = err;
-          console.warn(`[Qwen] ${attempt.label} failed`, err);
-          this.generator = null;
+      for (const model of candidates) {
+        for (const attempt of attempts) {
+          try {
+            this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
+            this.generator = await pipeline('text-generation', model.id, {
+              device: attempt.device,
+              dtype: attempt.dtype as any,
+            });
+            this.loadInfo.set(`${model.name} · ${attempt.label}`);
+            this.isReady.set(true);
+            console.info(`[Qwen] Loaded ${model.id} with ${attempt.label}`);
+            return this.generator;
+          } catch (err) {
+            lastError = err;
+            console.warn(`[Qwen] ${model.id} ${attempt.label} failed`, err);
+            this.generator = null;
+          }
         }
       }
       this.loadInfo.set('Qwen could not be loaded.');
@@ -189,6 +205,29 @@ export class AgentsService {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private buildLoadAttempts(
+    hasWebGPU: boolean,
+    uncensored: boolean
+  ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
+    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
+    if (hasWebGPU) {
+      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
+    }
+
+    if (uncensored) {
+      attempts.push(
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' },
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }
+      );
+    } else {
+      attempts.push(
+        { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
+      );
+    }
+    return attempts;
   }
 
   /** Runs a single agent generation. Exposed for advanced/manual use. */

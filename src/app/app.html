@@ -87,7 +87,9 @@
               <p class="eyebrow">Conversation</p>
               <h2>{{ messages().length }} moments</h2>
             </div>
-            <span class="privacy-badge">Local first</span>
+            <span class="privacy-badge" [class.busy]="activityBadgeBusy()">
+              {{ activityBadgeLabel() }}
+            </span>
           </div>
 
           <div class="transcript" aria-live="polite" #transcript>

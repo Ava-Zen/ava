@@ -105,6 +105,19 @@ export class App {
   protected readonly canSubmitManualPrompt = computed(() =>
     this.manualPrompt().trim().length > 0 && !this.isThinking()
   );
+  protected readonly activityBadgeLabel = computed(() => {
+    if (this.isModelLoading()) return 'Loading speech';
+    if (this.isKokoroLoading()) return 'Loading voice';
+    if (this.llm.isLoading()) return this.cleanLoadLabel(this.llm.loadInfo()) || 'Loading chat model';
+    if (this.agents.isLoading()) return this.cleanLoadLabel(this.agents.loadInfo()) || 'Loading agent';
+    if (this.isGeneratingAudioFile()) return 'Generating audio';
+    if (this.isThinking()) return 'Thinking';
+    if (this.hasActiveAgents()) return 'Agent working';
+    if (this.status() === 'speaking') return 'Speaking';
+    if (this.status() === 'listening') return 'Listening';
+    return 'Local first';
+  });
+  protected readonly activityBadgeBusy = computed(() => this.activityBadgeLabel() !== 'Local first');
   private activeAudioExportController: AbortController | null = null;
   private audioPreviewPlayer: HTMLAudioElement | null = null;
 
@@ -142,6 +155,13 @@ export class App {
 
   protected openSettings() {
     this.showSettings.set(true);
+  }
+
+  private cleanLoadLabel(label: string): string {
+    return label
+      .replace(/^loading\s+/i, 'Loading ')
+      .replace(/[.…]+$/g, '')
+      .trim();
   }
 
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
