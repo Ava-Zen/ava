@@ -780,7 +780,7 @@
 .ava-footer {
   padding: 4px 0 2px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: end;
   gap: 12px 16px;
   overflow: visible;
@@ -800,6 +800,9 @@
 .footer-side {
   gap: 12px;
   min-width: 0;
+}
+.footer-side-start {
+  justify-self: start;
 }
 .footer-side-end {
   justify-self: end;
