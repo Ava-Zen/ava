@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output, computed, effect, inject, signal } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Output, ViewChild, computed, inject, signal } from '@angular/core';
 import { OnboardingService } from '../services/onboarding';
 
 interface OnboardingOption {
@@ -15,6 +15,7 @@ interface OnboardingOption {
 })
 export class Onboarding {
   private readonly onboarding = inject(OnboardingService);
+  private nameInputElement?: ElementRef<HTMLInputElement>;
 
   @Output() completed = new EventEmitter<void>();
 
@@ -53,12 +54,15 @@ export class Onboarding {
     }
   ];
 
+  @ViewChild('nameInput')
+  protected set nameInput(input: ElementRef<HTMLInputElement> | undefined) {
+    this.nameInputElement = input;
+    this.syncNameInputValue();
+  }
+
   constructor() {
-    effect(() => {
-      const suggested = this.suggestedName();
-      if (!suggested || this.nameEdited() || this.name().trim().length > 0) return;
-      this.name.set(suggested);
-    });
+    this.prefillName(this.suggestedName());
+    void this.onboarding.loadSuggestedName().then(suggested => this.prefillName(suggested));
   }
 
   protected onNameInput(event: Event): void {
@@ -104,5 +108,17 @@ export class Onboarding {
 
   protected back(): void {
     this.step.update(value => Math.max(0, value - 1));
+  }
+
+  private prefillName(suggested: string | null): void {
+    if (!suggested || this.nameEdited() || this.name().trim().length > 0) return;
+    this.name.set(suggested);
+    this.syncNameInputValue();
+  }
+
+  private syncNameInputValue(): void {
+    const input = this.nameInputElement?.nativeElement;
+    if (!input || input.value === this.name()) return;
+    input.value = this.name();
   }
 }

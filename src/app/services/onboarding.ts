@@ -14,6 +14,7 @@ export interface AvaProfile {
 export class OnboardingService {
   private readonly COMPLETE_KEY = 'ava-onboarding-complete';
   private readonly PROFILE_KEY = 'ava-user-profile';
+  private suggestedNameLoad?: Promise<string | null>;
 
   readonly completed = signal(this.loadCompleted());
   readonly profile = signal<AvaProfile | null>(this.loadProfile());
@@ -44,12 +45,20 @@ export class OnboardingService {
     }
   }
 
-  async loadSuggestedName(): Promise<void> {
+  async loadSuggestedName(): Promise<string | null> {
+    this.suggestedNameLoad ??= this.fetchSuggestedName();
+    return this.suggestedNameLoad;
+  }
+
+  private async fetchSuggestedName(): Promise<string | null> {
     try {
       const suggested = await invoke<string | null>('suggested_user_name');
-      this.suggestedName.set(this.cleanOptional(suggested) ?? null);
+      const cleaned = this.cleanOptional(suggested) ?? null;
+      this.suggestedName.set(cleaned);
+      return cleaned;
     } catch {
       this.suggestedName.set(null);
+      return null;
     }
   }
 
