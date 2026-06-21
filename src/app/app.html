@@ -19,6 +19,8 @@
               } @else {
                 Speaking with you.
               }
+            } @else if (userName()) {
+              I am here, {{ userName() }}.
             } @else {
               I am here.
             }
@@ -405,9 +407,14 @@
           (updateGarden)="onUpdateGarden($event)"
           (deleteGarden)="onDeleteGarden($event)"
           (previewVoice)="previewVoice($event)"
+          (resetCache)="onResetCache()"
         ></app-settings>
       </div>
     </div>
+  }
+
+  @if (showOnboarding()) {
+    <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
   }
 
   <router-outlet />

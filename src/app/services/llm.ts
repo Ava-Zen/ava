@@ -20,6 +20,12 @@ export interface LlmModelOption {
   tier: DeviceTier;
 }
 
+interface LoadAttempt {
+  device: 'webgpu' | 'wasm';
+  dtype: string;
+  label: string;
+}
+
 /**
  * Catalogue of Gemma models used for *instant* spoken replies.
  *
@@ -138,18 +144,14 @@ export class LlmService {
   private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
-    const fallbackModel = GEMMA_MODELS.medium;
-    const candidates = this.isUncensoredMode()
-      ? [preferredModel, fallbackModel]
-      : preferredModel.id === fallbackModel.id
-        ? [preferredModel]
-        : [preferredModel, fallbackModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
 
     const { supportsLlmWebGPU } = await detectDeviceCapability();
-    const attempts = this.buildLoadAttempts(supportsLlmWebGPU && !wasmOnly, this.isUncensoredMode());
+    const useWebGPU = supportsLlmWebGPU && !wasmOnly;
+    const candidates = this.buildCandidateModels(preferredModel, useWebGPU);
+    const attempts = this.buildLoadAttempts(useWebGPU);
 
     let lastError: unknown = null;
     try {
@@ -182,27 +184,28 @@ export class LlmService {
     }
   }
 
-  private buildLoadAttempts(
-    hasWebGPU: boolean,
-    uncensored: boolean
-  ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
+  private buildCandidateModels(preferredModel: LlmModelOption, useWebGPU: boolean): LlmModelOption[] {
+    if (!useWebGPU) {
+      return [GEMMA_MODELS.low];
+    }
+
+    const fallbackModel = GEMMA_MODELS.low;
+    return preferredModel.id === fallbackModel.id
+      ? [preferredModel]
+      : [preferredModel, fallbackModel];
+  }
+
+  private buildLoadAttempts(hasWebGPU: boolean): LoadAttempt[] {
+    const attempts: LoadAttempt[] = [];
     if (hasWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
       attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
 
-    if (uncensored) {
-      attempts.push(
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-      );
-    } else {
-      attempts.push(
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-      );
-    }
+    // Current ONNX Runtime Web's WASM backend cannot execute some block-
+    // quantized Gemma graphs, and 1B fp32 can exceed WebView memory. Use fp32
+    // only with the small CPU fallback model.
+    attempts.push({ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' });
     return attempts;
   }
 

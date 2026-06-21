@@ -20,7 +20,9 @@
 .garden-info,
 .garden-actions,
 .edit-buttons,
-.settings-footer {
+.settings-footer,
+.danger-zone,
+.reset-btn {
   display: flex;
   align-items: center;
 }
@@ -222,7 +224,8 @@ input:focus {
 .save-btn,
 .ghost-btn,
 .create-btn,
-.done-btn {
+.done-btn,
+.reset-btn {
   min-height: 52px;
   border-radius: 16px;
   padding: 0 18px;
@@ -469,6 +472,30 @@ input:focus {
   min-width: 132px;
 }
 
+.danger-zone {
+  justify-content: space-between;
+  gap: 18px;
+}
+.danger-zone .hint {
+  margin-bottom: 0;
+}
+.reset-btn {
+  flex: 0 0 auto;
+  gap: 10px;
+  color: #ffd7d2;
+  border-color: rgba(255, 122, 110, 0.38);
+  background: rgba(255, 99, 88, 0.12);
+}
+.reset-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 122, 110, 0.65);
+  background: rgba(255, 99, 88, 0.2);
+}
+.reset-btn svg {
+  width: 21px;
+  height: 21px;
+}
+
 @media (max-width: 760px) {
   .settings-content {
     padding: 20px;
@@ -483,7 +510,13 @@ input:focus {
   .settings-grid {
     grid-template-columns: 1fr;
   }
-  .settings-footer .done-btn {
+  .danger-zone,
+  .settings-footer .done-btn,
+  .reset-btn {
     width: 100%;
+  }
+  .danger-zone {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

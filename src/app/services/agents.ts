@@ -165,17 +165,13 @@ export class AgentsService {
   private async load(): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
-    const fallbackModel = QWEN_MODELS.medium;
-    const uncensored = preferredModel.id === UNCENSORED_AGENT_MODEL.id;
-    const candidates = uncensored
-      ? [preferredModel, fallbackModel]
-      : [preferredModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
 
     const { supportsLlmWebGPU } = await detectDeviceCapability();
-    const attempts = this.buildLoadAttempts(supportsLlmWebGPU, uncensored);
+    const candidates = this.buildCandidateModels(preferredModel, supportsLlmWebGPU);
+    const attempts = this.buildLoadAttempts(supportsLlmWebGPU);
 
     let lastError: unknown = null;
     try {
@@ -205,27 +201,30 @@ export class AgentsService {
     }
   }
 
-  private buildLoadAttempts(
-    hasWebGPU: boolean,
-    uncensored: boolean
-  ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
+  private buildCandidateModels(preferredModel: LlmModelOption, useWebGPU: boolean): LlmModelOption[] {
+    const fallbackModel = QWEN_MODELS.low;
+    if (!useWebGPU) {
+      return preferredModel.id === UNCENSORED_AGENT_MODEL.id
+        ? [preferredModel, fallbackModel]
+        : [fallbackModel];
+    }
+
+    return preferredModel.id === fallbackModel.id
+      ? [preferredModel]
+      : [preferredModel, fallbackModel];
+  }
+
+  private buildLoadAttempts(hasWebGPU: boolean): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
     const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
     if (hasWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
       attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
 
-    if (uncensored) {
-      attempts.push(
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-      );
-    } else {
-      attempts.push(
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-      );
-    }
+    // Current ONNX Runtime Web's WASM backend can miss block-quantized kernels,
+    // and larger fp32 agent models can exceed WebView memory. Use fp32 only
+    // with the small CPU fallback model.
+    attempts.push({ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' });
     return attempts;
   }
 

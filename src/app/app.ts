@@ -1,13 +1,16 @@
 import { Component, signal, computed, effect, ViewChild, ElementRef, inject, HostListener } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { invoke } from '@tauri-apps/api/core';
 import { Settings } from './settings/settings';
+import { Onboarding } from './onboarding/onboarding';
 import { pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn } from './services/llm';
 import { AgentsService } from './services/agents';
+import { OnboardingService } from './services/onboarding';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 
 interface Message {
@@ -41,7 +44,7 @@ interface AudioExportTask {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings],
+  imports: [RouterOutlet, Settings, Onboarding],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -74,6 +77,7 @@ export class App {
   private readonly tts = inject(TtsService);
   private readonly llm = inject(LlmService);
   private readonly agents = inject(AgentsService);
+  private readonly onboarding = inject(OnboardingService);
   private readonly sanitizer = inject(DomSanitizer);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
@@ -85,6 +89,9 @@ export class App {
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected showSettings = signal(false);
+  protected readonly showOnboarding = computed(() => !this.onboarding.completed());
+  protected readonly userName = this.onboarding.userName;
+  private preloadsStarted = false;
 
   /** Reactive: the conversation card is shown while there is content or active voice. */
   protected readonly chatStarted = computed(() =>
@@ -137,10 +144,12 @@ export class App {
 
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
-    this.preloadModel().catch(() => {});
-    this.preloadKokoro().catch(() => {});
-    this.preloadLlm().catch(() => {});
     this.loadMessagesFromStorage();
+
+    effect(() => {
+      if (!this.onboarding.completed() || this.preloadsStarted) return;
+      void this.preloadRequiredModels();
+    });
 
     // Auto-scroll chat when new messages arrive
     effect(() => {
@@ -155,6 +164,7 @@ export class App {
   }
 
   protected openSettings() {
+    if (this.showOnboarding()) return;
     this.showSettings.set(true);
   }
 
@@ -174,7 +184,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings()) return;
+    if (this.showSettings() || this.showOnboarding()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -198,6 +208,37 @@ export class App {
 
   protected closeSettings() {
     this.showSettings.set(false);
+  }
+
+  protected onOnboardingCompleted() {
+    this.showSettings.set(false);
+  }
+
+  protected async onResetCache() {
+    this.closeSettings();
+    this.stopSpeaking();
+    this.stopMoonshineListening();
+    this.stopAudioPreview();
+    this.stopCurrentAudio();
+    this.preloadsStarted = false;
+
+    await this.clearBrowserDatabases();
+    await this.clearBrowserCaches();
+
+    try {
+      await invoke('reset_app_cache');
+    } catch (e) {
+      console.warn('Native cache reset failed', e);
+    }
+
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
+
+    window.location.reload();
   }
 
   protected toggleComposerMenu() {
@@ -537,8 +578,23 @@ export class App {
   }
 
   /**
+   * Warms up the models Ava needs after the user has consented during
+   * onboarding. Loads are intentionally sequential to avoid memory spikes while
+   * large ONNX sessions are being created.
+   */
+  private async preloadRequiredModels() {
+    if (this.preloadsStarted || typeof window === 'undefined') return;
+    this.preloadsStarted = true;
+
+    await this.preloadLlm();
+    await this.preloadModel();
+    await this.preloadKokoro();
+    await this.preloadAgentModel();
+  }
+
+  /**
    * Warms up the Gemma instant-reply model in the background so the first
-   * spoken answer is fast. The Qwen agent model is loaded lazily on demand.
+   * spoken answer is fast.
    */
   private async preloadLlm() {
     if (typeof window === 'undefined') return;
@@ -547,6 +603,17 @@ export class App {
       await this.llm.ensureLoaded();
     } catch (e) {
       console.warn('Gemma preload failed; will retry on first use', e);
+    }
+  }
+
+  /** Warms up the selected Qwen background-agent model after onboarding. */
+  private async preloadAgentModel() {
+    if (typeof window === 'undefined') return;
+    try {
+      await this.agents.autoSelectModel();
+      await this.agents.ensureLoaded();
+    } catch (e) {
+      console.warn('Qwen agent preload failed; will retry on first agent task', e);
     }
   }
 
@@ -1676,6 +1743,49 @@ export class App {
     this.stopAudioPreview();
     if (this.synth) this.synth.cancel();
     this.scrollToBottom();
+  }
+
+  private async clearBrowserDatabases(): Promise<void> {
+    const indexedDb = window.indexedDB;
+    if (!indexedDb) return;
+
+    try {
+      const databases = typeof indexedDb.databases === 'function'
+        ? await indexedDb.databases()
+        : [];
+
+      await Promise.all(
+        databases
+          .map(database => database.name)
+          .filter((name): name is string => !!name)
+          .map(name => this.deleteIndexedDatabase(indexedDb, name))
+      );
+    } catch (e) {
+      console.warn('Failed to enumerate IndexedDB databases', e);
+    }
+  }
+
+  private deleteIndexedDatabase(indexedDb: IDBFactory, name: string): Promise<void> {
+    return new Promise(resolve => {
+      try {
+        const request = indexedDb.deleteDatabase(name);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+        request.onblocked = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  private async clearBrowserCaches(): Promise<void> {
+    try {
+      if (!('caches' in window)) return;
+      const keys = await caches.keys();
+      await Promise.all(keys.map(key => caches.delete(key)));
+    } catch (e) {
+      console.warn('Failed to clear browser caches', e);
+    }
   }
 
   private scrollToBottom() {

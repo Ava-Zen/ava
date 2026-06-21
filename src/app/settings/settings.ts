@@ -54,6 +54,7 @@ export class Settings {
   @Output() updateGarden = new EventEmitter<{id: string; name: string; description?: string}>();
   @Output() deleteGarden = new EventEmitter<string>();
   @Output() previewVoice = new EventEmitter<string>();
+  @Output() resetCache = new EventEmitter<void>();
 
   // Local form state
   newGardenName = '';
@@ -115,6 +116,12 @@ export class Settings {
   remove(id: string) {
     if (confirm('Delete this garden? Its conversation history will be lost.')) {
       this.deleteGarden.emit(id);
+    }
+  }
+
+  resetEverything() {
+    if (confirm('Reset Ava from scratch? This deletes downloaded models, settings, gardens, and local databases.')) {
+      this.resetCache.emit();
     }
   }
 }
