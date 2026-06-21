@@ -19,6 +19,7 @@ interface Message {
   timestamp: Date;
   downloadId?: string;
   exportTaskId?: string;
+  pending?: boolean;
 }
 
 interface QuickPrompt {
@@ -419,6 +420,34 @@ export class App {
     this.saveMessagesToStorage();
   }
 
+  private addUserMessage(gardenId: string, text: string, pending = false): Message {
+    const message: Message = { role: 'user', text, timestamp: new Date(), pending };
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    currentMsgs.push(message);
+    this.setGardenMessages(gardenId, currentMsgs);
+    this.scrollToBottom();
+    return message;
+  }
+
+  private updateMessageText(gardenId: string, target: Message, text: string, pending = false) {
+    const currentMsgs = this.messagesByGarden()[gardenId] || [];
+    const nextMsgs = currentMsgs.map(msg =>
+      msg === target || msg.timestamp === target.timestamp
+        ? { ...msg, text, pending }
+        : msg
+    );
+    this.setGardenMessages(gardenId, nextMsgs);
+    this.scrollToBottom();
+  }
+
+  private removeMessage(gardenId: string, target: Message) {
+    const currentMsgs = this.messagesByGarden()[gardenId] || [];
+    this.setGardenMessages(
+      gardenId,
+      currentMsgs.filter(msg => msg !== target && msg.timestamp !== target.timestamp)
+    );
+  }
+
   private loadMessagesFromStorage() {
     try {
       const saved = localStorage.getItem('ava-messages-by-garden');
@@ -440,7 +469,13 @@ export class App {
 
   private saveMessagesToStorage() {
     try {
-      localStorage.setItem('ava-messages-by-garden', JSON.stringify(this.messagesByGarden()));
+      const persisted = Object.fromEntries(
+        Object.entries(this.messagesByGarden()).map(([gardenId, messages]) => [
+          gardenId,
+          messages.filter(message => !message.pending)
+        ])
+      );
+      localStorage.setItem('ava-messages-by-garden', JSON.stringify(persisted));
     } catch {}
   }
 
@@ -961,25 +996,57 @@ export class App {
       return;
     }
 
+    const gardenId = this.currentGarden()?.id;
+    let pendingUserMessage: Message | undefined;
+
     try {
+      if (live) {
+        this.currentTranscript.set('');
+        this.lastLiveUpdate = 0;
+        this.pauseVoiceCapture();
+        this.handleUserSpeech(live);
+        return;
+      }
+
+      if (gardenId) {
+        pendingUserMessage = this.addUserMessage(gardenId, 'Transcribing...', true);
+      }
+      this.currentTranscript.set('Transcribing...');
+      this.status.set('thinking');
+      this.pauseVoiceCapture();
+
       const result: any = await this.transcribeWithRecovery(bufferToTranscribe);
-      let finalText = (result?.text || live || '').trim();
+      let finalText = (result?.text || '').trim();
 
       if (finalText) {
         this.currentTranscript.set('');
         this.lastLiveUpdate = 0;
-        this.pauseVoiceCapture();
-        this.handleUserSpeech(finalText);
+        this.handleUserSpeech(finalText, pendingUserMessage);
+      } else if (gardenId && pendingUserMessage) {
+        this.removeMessage(gardenId, pendingUserMessage);
+        this.currentTranscript.set('I heard you, but could not make out the words.');
+        setTimeout(() => {
+          if (this.currentTranscript() === 'I heard you, but could not make out the words.') {
+            this.currentTranscript.set('');
+          }
+        }, 1600);
       }
     } catch (e) {
       console.error('Moonshine transcription error on commit', e);
-      if (live) {
-        this.currentTranscript.set('');
-        this.pauseVoiceCapture();
-        this.handleUserSpeech(live);
+      if (gardenId && pendingUserMessage) {
+        this.removeMessage(gardenId, pendingUserMessage);
       }
+      this.currentTranscript.set('I heard you, but could not transcribe that.');
+      setTimeout(() => {
+        if (this.currentTranscript() === 'I heard you, but could not transcribe that.') {
+          this.currentTranscript.set('');
+        }
+      }, 1600);
     } finally {
       this.isCommitInProgress = false;
+      if (!this.isThinking() && this.status() !== 'speaking') {
+        this.resumeVoiceCaptureIfEnabled();
+      }
     }
   }
 
@@ -1044,7 +1111,7 @@ export class App {
     }
   }
 
-  private async handleUserSpeech(text: string) {
+  private async handleUserSpeech(text: string, existingUserMessage?: Message) {
     this.currentTranscript.set('');
 
     if (this.isListeningStopCommand(text)) {
@@ -1066,12 +1133,11 @@ export class App {
     this.status.set('thinking');
     this.isThinking.set(true);
 
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
-
-    // Add user message
-    const userMsg: Message = { role: 'user', text, timestamp: new Date() };
-    currentMsgs.push(userMsg);
-    this.setGardenMessages(gardenId, currentMsgs);
+    if (existingUserMessage) {
+      this.updateMessageText(gardenId, existingUserMessage, text);
+    } else {
+      this.addUserMessage(gardenId, text);
+    }
 
     // 1) Explicit agent / background-task request → hand off to Qwen.
     if (this.detectAgentRequest(text)) {

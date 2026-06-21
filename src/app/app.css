@@ -566,6 +566,12 @@
   border-color: rgba(85, 199, 184, 0.24);
   border-top-right-radius: 8px;
 }
+.message.pending .message-bubble {
+  opacity: 0.76;
+}
+.message.pending .message-text {
+  color: var(--muted);
+}
 .message-meta {
   display: flex;
   align-items: baseline;
