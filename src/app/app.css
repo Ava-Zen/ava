@@ -684,6 +684,86 @@
 .message-text.markdown strong {
   font-weight: 600;
 }
+.audio-download {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(85, 199, 184, 0.34);
+  display: grid;
+  gap: 10px;
+  color: var(--text);
+  background: rgba(85, 199, 184, 0.12);
+}
+.audio-download:hover {
+  border-color: rgba(85, 199, 184, 0.56);
+  background: rgba(85, 199, 184, 0.18);
+}
+.audio-file,
+.audio-controls {
+  display: flex;
+  align-items: center;
+}
+.audio-file {
+  min-width: 0;
+  gap: 9px;
+}
+.audio-controls {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.audio-file svg {
+  flex: 0 0 auto;
+  width: 21px;
+  height: 21px;
+  color: var(--green);
+}
+.audio-file small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.message-action {
+  min-height: 42px;
+  padding: 0 13px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+.message-action:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.1);
+}
+.message-action svg {
+  width: 19px;
+  height: 19px;
+}
+.message-action.danger {
+  color: #ffd7d2;
+  border-color: rgba(255, 122, 110, 0.36);
+  background: rgba(255, 99, 88, 0.12);
+}
+.message-action.danger:hover {
+  border-color: rgba(255, 122, 110, 0.62);
+  background: rgba(255, 99, 88, 0.2);
+}
 .message-time {
   color: var(--soft);
   font-size: 0.82rem;

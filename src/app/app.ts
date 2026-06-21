@@ -14,11 +14,29 @@ interface Message {
   role: 'user' | 'ava';
   text: string;
   timestamp: Date;
+  downloadId?: string;
+  exportTaskId?: string;
 }
 
 interface QuickPrompt {
   label: string;
   text: string;
+}
+
+interface AudioDownload {
+  id: string;
+  filename: string;
+  url: string;
+  blob: Blob;
+  sizeBytes: number;
+}
+
+interface AudioExportTask {
+  id: string;
+  sourceName: string;
+  status: 'running' | 'complete' | 'failed' | 'aborted';
+  current: number;
+  total: number;
 }
 
 @Component({
@@ -80,9 +98,15 @@ export class App {
   protected readonly manualPrompt = signal('');
   protected readonly composerNotice = signal('');
   protected readonly isGeneratingAudioFile = signal(false);
+  protected readonly audioDownloads = signal<Record<string, AudioDownload>>({});
+  protected readonly audioExportTasks = signal<Record<string, AudioExportTask>>({});
+  protected readonly activeAudioPreviewId = signal<string | null>(null);
+  protected readonly audioPreviewPaused = signal(false);
   protected readonly canSubmitManualPrompt = computed(() =>
     this.manualPrompt().trim().length > 0 && !this.isThinking()
   );
+  private activeAudioExportController: AbortController | null = null;
+  private audioPreviewPlayer: HTMLAudioElement | null = null;
 
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
@@ -394,8 +418,10 @@ export class App {
 
   // Kokoro 82M TTS
   private kokoro: any = null;
+  private exportKokoro: any = null;
   private isKokoroLoading = signal(false);
   private kokoroLoadInfo = signal('');
+  private exportKokoroLoadInfo = signal('');
   private readonly CHUNK_SIZE = 4096;
   private readonly SPEECH_THRESHOLD = 0.015; // simple energy VAD
   private readonly MIN_SPEECH_SAMPLES = 16000 * 0.6; // ~0.6s min
@@ -431,17 +457,20 @@ export class App {
     }
   }
 
-  private async preloadKokoro() {
-    if (this.kokoro || typeof window === 'undefined') return;
+  private async preloadKokoro(forceWasm = false) {
+    if ((this.kokoro && !forceWasm) || typeof window === 'undefined') return;
     try {
       this.isKokoroLoading.set(true);
       this.kokoroLoadInfo.set('loading...');
 
       // Use quantized for speed/size, fp32 for quality on WebGPU
-      const hasWebGPU = await this.supportsWebGPU();
+      const hasWebGPU = !forceWasm && await this.supportsWebGPU();
       const dtype = hasWebGPU ? 'fp32' : 'q8';
       const device = hasWebGPU ? 'webgpu' : 'wasm';
 
+      if (forceWasm) {
+        this.kokoro = null;
+      }
       this.kokoro = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-ONNX', {
         dtype,
         device,
@@ -453,6 +482,28 @@ export class App {
       console.warn('Failed to load Kokoro TTS, will fallback to browser speechSynthesis', e);
       this.kokoro = null;
       this.kokoroLoadInfo.set('fallback');
+    } finally {
+      this.isKokoroLoading.set(false);
+    }
+  }
+
+  private async ensureExportKokoro(): Promise<any> {
+    if (this.exportKokoro || typeof window === 'undefined') return this.exportKokoro;
+
+    this.isKokoroLoading.set(true);
+    this.exportKokoroLoadInfo.set('loading wasm/q8');
+    try {
+      this.exportKokoro = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-ONNX', {
+        dtype: 'q8',
+        device: 'wasm',
+      });
+      this.exportKokoroLoadInfo.set('wasm/q8');
+      console.info('[Kokoro export] Loaded wasm/q8');
+      return this.exportKokoro;
+    } catch (e) {
+      this.exportKokoro = null;
+      this.exportKokoroLoadInfo.set('failed');
+      throw e;
     } finally {
       this.isKokoroLoading.set(false);
     }
@@ -966,42 +1017,137 @@ export class App {
   private async generateDownloadableAudio(text: string, sourceName: string) {
     if (this.isGeneratingAudioFile()) return;
 
+    const taskId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const controller = new AbortController();
+    this.activeAudioExportController = controller;
     this.isGeneratingAudioFile.set(true);
-    this.composerNotice.set('Preparing Ava voice export...');
+    this.composerNotice.set('');
+    this.audioExportTasks.update(tasks => ({
+      ...tasks,
+      [taskId]: { id: taskId, sourceName, status: 'running', current: 0, total: 0 }
+    }));
+    this.addAvaExportMessage(`Making audio from ${sourceName}...`, taskId);
 
     try {
+      this.updateAvaExportMessage(taskId, `Preparing ${sourceName} for audio export...`);
+
       if (!this.kokoro) {
         await this.preloadKokoro().catch(() => {});
       }
       if (!this.kokoro) {
-        this.composerNotice.set('Audio export needs the Kokoro voice to finish loading.');
+        this.markAudioExportTask(taskId, 'failed');
+        this.updateAvaExportMessage(taskId, `I could not load Ava's voice model for ${sourceName}.`);
         return;
       }
+      this.throwIfAudioExportAborted(controller.signal);
 
       const spoken = markdownToPlainText(text);
       const chunks = splitIntoSpeechChunks(spoken);
       if (chunks.length === 0) {
-        this.composerNotice.set(`${sourceName} did not contain speakable text.`);
+        this.markAudioExportTask(taskId, 'failed');
+        this.updateAvaExportMessage(taskId, `${sourceName} did not contain speakable text.`);
         return;
       }
+
+      this.audioExportTasks.update(tasks => ({
+        ...tasks,
+        [taskId]: { ...tasks[taskId], total: chunks.length }
+      }));
 
       const voice = this.tts.selectedKokoroVoiceId();
       const audioChunks: Float32Array[] = [];
       let sampleRate = 24000;
 
       for (let i = 0; i < chunks.length; i++) {
-        this.composerNotice.set(`Generating audio ${i + 1} of ${chunks.length}...`);
-        const audio = await this.kokoro.generate(chunks[i], { voice, speed: 0.98 });
-        audioChunks.push(audio.data);
-        sampleRate = audio.sampling_rate ?? sampleRate;
+        this.throwIfAudioExportAborted(controller.signal);
+        this.audioExportTasks.update(tasks => ({
+          ...tasks,
+          [taskId]: { ...tasks[taskId], current: i + 1 }
+        }));
+        this.updateAvaExportMessage(
+          taskId,
+          `Generating audio from ${sourceName} (${i + 1}/${chunks.length})...`
+        );
+
+        const audio = await this.generateKokoroAudioChunk(chunks[i], voice, this.kokoro, taskId);
+        this.throwIfAudioExportAborted(controller.signal);
+        audioChunks.push(this.extractKokoroSamples(audio));
+        sampleRate = audio.sampling_rate ?? audio.sample_rate ?? sampleRate;
       }
 
+      const filename = `${this.stripFileExtension(sourceName)}-ava.wav`;
       const wav = this.createWavBlob(this.concatAudioChunks(audioChunks), sampleRate);
-      this.downloadBlob(wav, `${this.stripFileExtension(sourceName)}-ava.wav`);
-      this.composerNotice.set(`Generated ${sourceName} as downloadable Ava audio.`);
+      const download = this.createAudioDownload(wav, filename);
+
+      this.markAudioExportTask(taskId, 'complete');
+      this.updateAvaExportMessage(
+        taskId,
+        `I transcribed ${sourceName} into Ava audio. Use the button below to download ${filename}.`,
+        download.id
+      );
+    } catch (e) {
+      if (this.isAbortError(e)) {
+        this.markAudioExportTask(taskId, 'aborted');
+        this.updateAvaExportMessage(taskId, `Stopped audio export for ${sourceName}.`);
+      } else {
+        console.error('Audio file generation failed', e);
+        this.markAudioExportTask(taskId, 'failed');
+        this.updateAvaExportMessage(taskId, `I could not finish the audio export for ${sourceName}.`);
+      }
     } finally {
+      if (this.activeAudioExportController === controller) {
+        this.activeAudioExportController = null;
+      }
       this.isGeneratingAudioFile.set(false);
     }
+  }
+
+  private async generateKokoroAudioChunk(
+    text: string,
+    voice: string,
+    engine = this.kokoro,
+    taskId?: string
+  ): Promise<any> {
+    try {
+      return await engine.generate(text, { voice, speed: 0.98 });
+    } catch (e) {
+      if (engine !== this.kokoro || !this.isRecoverableGpuError(e) || !this.kokoroLoadInfo().startsWith('webgpu')) {
+        throw e;
+      }
+
+      console.warn('Kokoro WebGPU synthesis failed; retrying audio export on WASM', e);
+      if (taskId) {
+        this.updateAvaExportMessage(taskId, 'GPU voice synthesis stumbled. Retrying safely...');
+      }
+      const exporter = await this.ensureExportKokoro();
+      if (!exporter) throw e;
+      return await exporter.generate(text, { voice, speed: 0.98 });
+    }
+  }
+
+  protected stopAudioExport(taskId: string) {
+    const task = this.audioExportTasks()[taskId];
+    if (!task || task.status !== 'running') return;
+
+    this.markAudioExportTask(taskId, 'aborted');
+    this.updateAvaExportMessage(taskId, `Stopping audio export for ${task.sourceName}...`);
+    this.activeAudioExportController?.abort();
+  }
+
+  private throwIfAudioExportAborted(signal: AbortSignal) {
+    if (!signal.aborted) return;
+    const error = new Error('Audio export stopped.');
+    error.name = 'AbortError';
+    throw error;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return (error as any)?.name === 'AbortError';
+  }
+
+  private isRecoverableGpuError(error: unknown): boolean {
+    const message = String((error as any)?.message ?? error);
+    return /GPUBuffer|mapAsync|external Instance|device lost|AbortError/i.test(message);
   }
 
   private concatAudioChunks(chunks: Float32Array[]): Float32Array {
@@ -1013,6 +1159,13 @@ export class App {
       offset += chunk.length;
     }
     return combined;
+  }
+
+  private extractKokoroSamples(audio: any): Float32Array {
+    const samples = audio?.data ?? audio?.audio;
+    if (samples instanceof Float32Array) return samples;
+    if (Array.isArray(samples)) return this.concatAudioChunks(samples);
+    throw new Error('Kokoro returned audio without PCM samples.');
   }
 
   private createWavBlob(samples: Float32Array, sampleRate: number): Blob {
@@ -1051,16 +1204,128 @@ export class App {
     }
   }
 
-  private downloadBlob(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
+  protected audioDownloadFor(message: Message): AudioDownload | null {
+    return message.downloadId ? this.audioDownloads()[message.downloadId] ?? null : null;
+  }
+
+  protected audioExportTaskFor(message: Message): AudioExportTask | null {
+    return message.exportTaskId ? this.audioExportTasks()[message.exportTaskId] ?? null : null;
+  }
+
+  protected isAudioPreviewActive(downloadId: string): boolean {
+    return this.activeAudioPreviewId() === downloadId && !this.audioPreviewPaused();
+  }
+
+  protected async toggleAudioPreview(download: AudioDownload) {
+    if (this.activeAudioPreviewId() === download.id && this.audioPreviewPlayer) {
+      if (this.audioPreviewPaused()) {
+        await this.audioPreviewPlayer.play().catch(() => {});
+        this.audioPreviewPaused.set(false);
+      } else {
+        this.audioPreviewPlayer.pause();
+        this.audioPreviewPaused.set(true);
+      }
+      return;
+    }
+
+    this.stopAudioPreview();
+    const player = new Audio(download.url);
+    this.audioPreviewPlayer = player;
+    this.activeAudioPreviewId.set(download.id);
+    this.audioPreviewPaused.set(false);
+
+    const settle = () => {
+      if (this.audioPreviewPlayer === player) {
+        this.audioPreviewPlayer = null;
+        this.activeAudioPreviewId.set(null);
+        this.audioPreviewPaused.set(false);
+      }
+    };
+    player.onended = settle;
+    player.onerror = settle;
+    await player.play().catch(settle);
+  }
+
+  protected async saveAudioDownload(download: AudioDownload) {
+    const savePicker = (window as any).showSaveFilePicker;
+    if (typeof savePicker === 'function') {
+      try {
+        const handle = await savePicker({
+          suggestedName: download.filename,
+          types: [
+            {
+              description: 'WAV audio',
+              accept: { 'audio/wav': ['.wav'] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(download.blob);
+        await writable.close();
+        return;
+      } catch (e) {
+        if ((e as any)?.name === 'AbortError') return;
+        console.warn('Save picker failed; falling back to browser download', e);
+      }
+    }
+
     const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
+    link.href = download.url;
+    link.download = download.filename;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  private createAudioDownload(blob: Blob, filename: string): AudioDownload {
+    const url = URL.createObjectURL(blob);
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const download = { id, filename, url, blob, sizeBytes: blob.size };
+    this.audioDownloads.update(downloads => ({ ...downloads, [id]: download }));
+    return download;
+  }
+
+  private addAvaExportMessage(text: string, exportTaskId: string) {
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    currentMsgs.push({ role: 'ava', text, timestamp: new Date(), exportTaskId });
+    this.setGardenMessages(gardenId, currentMsgs);
+    this.scrollToBottom();
+  }
+
+  private updateAvaExportMessage(exportTaskId: string, text: string, downloadId?: string) {
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    const currentMsgs = this.messagesByGarden()[gardenId] || [];
+    const nextMsgs = currentMsgs.map(msg =>
+      msg.exportTaskId === exportTaskId
+        ? { ...msg, text, downloadId: downloadId ?? msg.downloadId }
+        : msg
+    );
+    this.setGardenMessages(gardenId, nextMsgs);
+    this.scrollToBottom();
+  }
+
+  private markAudioExportTask(taskId: string, status: AudioExportTask['status']) {
+    this.audioExportTasks.update(tasks => {
+      const task = tasks[taskId];
+      if (!task) return tasks;
+      return { ...tasks, [taskId]: { ...task, status } };
+    });
+  }
+
+  private addAvaMessage(text: string) {
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    currentMsgs.push({ role: 'ava', text, timestamp: new Date() });
+    this.setGardenMessages(gardenId, currentMsgs);
+    this.scrollToBottom();
   }
 
   private speakWithSystem(text: string, id: number): Promise<void> {
@@ -1232,6 +1497,19 @@ export class App {
     }
   }
 
+  private stopAudioPreview() {
+    if (this.audioPreviewPlayer) {
+      try {
+        this.audioPreviewPlayer.pause();
+      } catch {
+        // ignore
+      }
+      this.audioPreviewPlayer = null;
+    }
+    this.activeAudioPreviewId.set(null);
+    this.audioPreviewPaused.set(false);
+  }
+
   private generateAvaResponse(input: string): string | null {
     const lower = input.toLowerCase().trim();
 
@@ -1297,6 +1575,7 @@ export class App {
     this.speechGen++;
     this.isPaused.set(false);
     this.stopCurrentAudio();
+    this.stopAudioPreview();
     if (this.synth) this.synth.cancel();
     this.scrollToBottom();
   }

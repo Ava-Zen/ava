@@ -104,6 +104,63 @@
                   </div>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                    @if (audioDownloadFor(msg); as download) {
+                      <div class="audio-download">
+                        <div class="audio-file">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M9 18V5l12-2v13"></path>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <circle cx="18" cy="16" r="3"></circle>
+                          </svg>
+                          <small>{{ download.filename }}</small>
+                        </div>
+                        <div class="audio-controls">
+                          <button
+                            class="message-action"
+                            type="button"
+                            (click)="toggleAudioPreview(download)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              @if (isAudioPreviewActive(download.id)) {
+                                <rect x="7" y="5" width="4" height="14" rx="1"></rect>
+                                <rect x="13" y="5" width="4" height="14" rx="1"></rect>
+                              } @else {
+                                <path d="M8 5v14l11-7z"></path>
+                              }
+                            </svg>
+                            <span>{{ isAudioPreviewActive(download.id) ? 'Pause' : 'Play' }}</span>
+                          </button>
+                          <button
+                            class="message-action"
+                            type="button"
+                            (click)="saveAudioDownload(download)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M12 3v12"></path>
+                              <path d="M7 10l5 5 5-5"></path>
+                              <path d="M5 21h14"></path>
+                            </svg>
+                            <span>Save</span>
+                          </button>
+                        </div>
+                      </div>
+                    }
+                    @if (audioExportTaskFor(msg); as task) {
+                      @if (task.status === 'running') {
+                        <div class="message-actions">
+                          <button
+                            class="message-action danger"
+                            type="button"
+                            (click)="stopAudioExport(task.id)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                            </svg>
+                            <span>Stop</span>
+                          </button>
+                        </div>
+                      }
+                    }
                   } @else {
                     <div class="message-text">{{ msg.text }}</div>
                   }
@@ -131,7 +188,6 @@
               <path d="M12 5v14"></path>
               <path d="M5 12h14"></path>
             </svg>
-            <span>Add</span>
           </button>
 
           @if (composerMenuOpen()) {
