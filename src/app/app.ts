@@ -831,6 +831,12 @@ export class App {
 
   private async handleUserSpeech(text: string) {
     this.currentTranscript.set('');
+
+    if (this.isListeningStopCommand(text)) {
+      this.stopMoonshineListening();
+      return;
+    }
+
     this.status.set('thinking');
     this.isThinking.set(true);
 
@@ -868,6 +874,20 @@ export class App {
     return /\b(agent|background task|in the background|run a task|keep working on|work on (this|that|it)|go (and )?(research|find|look into|investigate)|research .+ for me|monitor|keep an eye on|while i('m| am)? (away|gone|busy))\b/.test(
       lower
     );
+  }
+
+  private isListeningStopCommand(text: string): boolean {
+    if (!this.isListening()) return false;
+
+    const normalized = text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return /\b(stop|end|turn off|shut off|disable|mute)\b(?:\s+(the|my|your))?\s+(listening|mic|microphone|voice|recording|voice channel)\b/.test(normalized)
+      || /\b(stop|end)\s+(listening|recording)\b/.test(normalized)
+      || /\b(mic|microphone)\s+(off|stop)\b/.test(normalized);
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */

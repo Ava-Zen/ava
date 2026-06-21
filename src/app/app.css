@@ -780,7 +780,7 @@
 .ava-footer {
   padding: 4px 0 2px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 720px) minmax(0, 1fr);
   align-items: end;
   gap: 12px 16px;
   overflow: visible;
@@ -808,11 +808,12 @@
   justify-self: end;
 }
 .footer-center {
+  width: 100%;
   min-width: 0;
   justify-content: center;
 }
 .composer-stack {
-  width: min(100%, 720px);
+  width: 100%;
   display: grid;
   gap: 8px;
 }
