@@ -13,17 +13,44 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            platform: linux
+            platform: linux-x64
             tauri-target: x86_64-unknown-linux-gnu
             rust-targets: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            platform: windows
+            build-command: npm run tauri:build -- --target x86_64-unknown-linux-gnu
+            release-globs: |
+              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+          - os: windows-2022
+            platform: windows-x64
             tauri-target: x86_64-pc-windows-msvc
             rust-targets: x86_64-pc-windows-msvc
+            build-command: npm run tauri:build -- --target x86_64-pc-windows-msvc
+            release-globs: |
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+              src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          - os: windows-2022
+            platform: windows-arm64
+            tauri-target: aarch64-pc-windows-msvc
+            rust-targets: aarch64-pc-windows-msvc
+            build-command: npm run tauri:build -- --target aarch64-pc-windows-msvc
+            release-globs: |
+              src-tauri/target/aarch64-pc-windows-msvc/release/bundle/msi/*.msi
+              src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
           - os: macos-latest
-            platform: macos
+            platform: macos-universal
             tauri-target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-command: npm run tauri:build -- --target universal-apple-darwin
+            release-globs: |
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - os: ubuntu-latest
+            platform: android
+            rust-targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+            build-command: npm run tauri:android:build -- --apk --aab
+            release-globs: |
+              src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+              src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab
 
     runs-on: ${{ matrix.os }}
     env:
@@ -48,7 +75,7 @@ jobs:
           targets: ${{ matrix.rust-targets }}
 
       - name: Install dependencies (Linux)
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -56,6 +83,25 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf
+
+      - name: Setup Java (Android)
+        if: matrix.platform == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Configure Android environment
+        if: matrix.platform == 'android'
+        shell: bash
+        run: |
+          SDK_PATH="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          NDK_PATH="${ANDROID_NDK_HOME:-${ANDROID_NDK:-$ANDROID_NDK_LATEST_HOME}}"
+          echo "ANDROID_HOME=$SDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm install
@@ -70,25 +116,25 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version from package.json: $VERSION"
 
-      - name: Build Tauri app
-        run: npm run tauri:build -- --target ${{ matrix.tauri-target }}
+      - name: Build release artifacts
+        run: ${{ matrix.build-command }}
 
       - name: Stage only final release artifacts
         shell: bash
         run: |
           mkdir -p release-artifacts
-          # Copy ONLY the final distributable installers. Never the raw .app bundles or build cache.
-          find src-tauri/target -type f \( \
-            -name "*.msi" -o \
-            -name "*.msi.zip" -o \
-            -name "*.exe" -o \
-            -name "*.dmg" -o \
-            -name "*.AppImage" -o \
-            -name "*.deb" -o \
-            -name "*.rpm" \
-          \) -exec cp {} release-artifacts/ \; || true
+          shopt -s nullglob
+          while IFS= read -r pattern; do
+            [ -z "$pattern" ] && continue
+            for file in $pattern; do
+              cp "$file" release-artifacts/
+            done
+          done <<'EOF'
+          ${{ matrix.release-globs }}
+          EOF
           echo "Staged files:"
-          ls -lh release-artifacts/ || echo "(none)"
+          find release-artifacts -maxdepth 1 -type f | sort || echo "(none)"
+          find release-artifacts -maxdepth 1 -type f | grep -q .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -137,11 +183,12 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/*.msi
-            artifacts/*.msi.zip
-            artifacts/*.exe
+            artifacts/*-setup.exe
             artifacts/*.dmg
             artifacts/*.AppImage
             artifacts/*.deb
             artifacts/*.rpm
+            artifacts/*.apk
+            artifacts/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
