@@ -24,8 +24,14 @@ export interface DeviceCapability {
 
 let cached: DeviceCapability | null = null;
 
+export function isAndroidWebView(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android/i.test(navigator.userAgent);
+}
+
 export async function getWebGPUAdapter(): Promise<any | null> {
   try {
+    if (isAndroidWebView()) return null;
     // @ts-ignore — navigator.gpu is not in all lib targets yet
     return navigator.gpu ? await navigator.gpu.requestAdapter() : null;
   } catch {
@@ -44,6 +50,21 @@ export async function supportsWebGPU(): Promise<boolean> {
  */
 export async function detectDeviceCapability(force = false): Promise<DeviceCapability> {
   if (cached && !force) return cached;
+
+  if (isAndroidWebView()) {
+    cached = {
+      tier: 'low',
+      hasWebGPU: false,
+      supportsLlmWebGPU: false,
+      memoryGb: typeof navigator !== 'undefined'
+        ? (navigator as any).deviceMemory as number | undefined
+        : undefined,
+      cores: typeof navigator !== 'undefined'
+        ? navigator.hardwareConcurrency || 4
+        : 4,
+    };
+    return cached;
+  }
 
   const adapter = await getWebGPUAdapter();
   const hasWebGPU = !!adapter;

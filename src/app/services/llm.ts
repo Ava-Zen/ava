@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
-import { detectDeviceCapability, DeviceTier } from './device-capability';
+import { detectDeviceCapability, DeviceTier, isAndroidWebView } from './device-capability';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -74,6 +74,7 @@ const SYSTEM_PROMPT =
 export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
   private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
+  private readonly ANDROID_LOAD_TIMEOUT_MS = 180000;
 
   /** All available Gemma options, one recommended per device tier. */
   readonly models: LlmModelOption[] = [
@@ -149,7 +150,7 @@ export class LlmService {
     this.isReady.set(false);
 
     const { supportsLlmWebGPU } = await detectDeviceCapability();
-    const useWebGPU = supportsLlmWebGPU && !wasmOnly;
+    const useWebGPU = supportsLlmWebGPU && !wasmOnly && !isAndroidWebView();
     const candidates = this.buildCandidateModels(preferredModel, useWebGPU);
     const attempts = this.buildLoadAttempts(useWebGPU);
 
@@ -160,10 +161,7 @@ export class LlmService {
           try {
             this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
             const repoId = model.repoId ?? model.id;
-            this.generator = await pipeline('text-generation', repoId, {
-              device: attempt.device,
-              dtype: attempt.dtype as any,
-            });
+            this.generator = await this.loadPipeline(repoId, attempt);
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
             this.loadedDevice = attempt.device;
@@ -207,6 +205,25 @@ export class LlmService {
     // only with the small CPU fallback model.
     attempts.push({ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' });
     return attempts;
+  }
+
+  private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
+    const load = pipeline('text-generation', repoId, {
+      device: attempt.device,
+      dtype: attempt.dtype as any,
+    });
+
+    if (!isAndroidWebView()) return await load;
+
+    return await Promise.race([
+      load,
+      new Promise((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error(`Timed out loading ${repoId} (${attempt.label}) on Android WebView`)),
+          this.ANDROID_LOAD_TIMEOUT_MS
+        );
+      }),
+    ]);
   }
 
   /**

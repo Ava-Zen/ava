@@ -98,7 +98,7 @@ export class App {
 
   /** Reactive: the conversation card is shown while there is content or active voice. */
   protected readonly chatStarted = computed(() =>
-    this.messages().length > 0 || this.isListening() || this.isModelLoading()
+    this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading()
   );
 
   /** Name of the currently selected text-to-speech voice. */
@@ -621,6 +621,8 @@ export class App {
     if (this.preloadsStarted || typeof window === 'undefined') return;
     this.preloadsStarted = true;
 
+    if (this.isAndroidWebView()) return;
+
     await this.preloadLlm();
     await this.preloadModel();
     await this.preloadKokoro();
@@ -677,6 +679,7 @@ export class App {
 
   private async supportsWebGPU(): Promise<boolean> {
     try {
+      if (this.isAndroidWebView()) return false;
       // @ts-ignore
       return !!(navigator.gpu && (await navigator.gpu.requestAdapter()));
     } catch {
