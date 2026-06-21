@@ -2,9 +2,6 @@ name: Build and Draft Release
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 jobs:
   build:
