@@ -106,23 +106,50 @@
     <div class="section-heading">
       <div>
         <p class="overline">Conversation</p>
-        <h3>Response model</h3>
+        <h3>Models</h3>
       </div>
     </div>
-    <p class="hint">Use an experimental Heretic Qwen model for less-filtered local replies and background agent tasks. If it cannot load, Ava falls back to the normal local model.</p>
+    <p class="hint">Pick separate local models for quick conversation replies and background agent tasks. Experimental Heretic models are less-filtered and may be less stable.</p>
 
-    <label class="toggle-row">
-      <span>
-        <strong>Uncensored mode</strong>
-        <small>{{ uncensoredModel.name }} · {{ uncensoredModel.size }}</small>
-      </span>
-      <input
-        type="checkbox"
-        [ngModel]="isUncensoredMode()"
-        (ngModelChange)="setUncensoredMode($event)"
-      />
-      <span class="toggle-switch" aria-hidden="true"></span>
-    </label>
+    <div class="model-groups">
+      <div>
+        <p class="speaker-label">Conversation</p>
+        <div class="model-list">
+          @for (model of conversationModels; track model.id) {
+            <button
+              class="model-item"
+              [class.active]="model.id === selectedConversationModel().id"
+              (click)="selectConversationModel(model.id)"
+            >
+              <span class="voice-radio" aria-hidden="true"></span>
+              <span>
+                <strong>{{ model.name }}</strong>
+                <small>{{ model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : 'Stable' }}</small>
+              </span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div>
+        <p class="speaker-label">Background Agent</p>
+        <div class="model-list">
+          @for (model of agentModels; track model.id) {
+            <button
+              class="model-item"
+              [class.active]="model.id === selectedAgentModel().id"
+              (click)="selectAgentModel(model.id)"
+            >
+              <span class="voice-radio" aria-hidden="true"></span>
+              <span>
+                <strong>{{ model.name }}</strong>
+                <small>{{ model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : 'Stable' }}</small>
+              </span>
+            </button>
+          }
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="section">

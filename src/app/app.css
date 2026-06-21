@@ -483,6 +483,24 @@
   border-color: rgba(85, 199, 184, 0.42);
   background: rgba(85, 199, 184, 0.14);
 }
+.thinking-trace {
+  margin: -6px 4px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.thinking-trace span {
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(85, 199, 184, 0.26);
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  background: rgba(85, 199, 184, 0.08);
+  font-size: 0.86rem;
+  font-weight: 750;
+}
 .transcript {
   min-height: 0;
   overflow-y: scroll;
@@ -1138,7 +1156,8 @@
 .settings-modal {
   width: min(760px, 100%);
   max-height: min(860px, 92dvh);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-radius: 34px;
   background:
     linear-gradient(150deg, rgba(245, 252, 239, 0.15), rgba(255, 255, 255, 0.04)),

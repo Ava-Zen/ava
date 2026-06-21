@@ -8,8 +8,10 @@ export interface ChatTurn {
 }
 
 export interface LlmModelOption {
-  /** Hugging Face ONNX repo id (transformers.js compatible). */
+  /** Stable UI/config id. */
   id: string;
+  /** Hugging Face ONNX repo id (transformers.js compatible). */
+  repoId?: string;
   /** Friendly label shown in the UI. */
   name: string;
   /** Rough on-disk / VRAM footprint, for user guidance. */
@@ -33,13 +35,15 @@ const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
     tier: 'low',
   },
   medium: {
-    id: 'onnx-community/gemma-3-1b-it-ONNX',
+    id: 'gemma-3-1b',
+    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
     name: 'Gemma 1B',
     size: '~1 GB',
     tier: 'medium',
   },
   high: {
-    id: 'onnx-community/gemma-3-1b-it-ONNX',
+    id: 'gemma-3-1b-hq',
+    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
     name: 'Gemma 1B (HQ)',
     size: '~1.5 GB',
     tier: 'high',
@@ -47,7 +51,8 @@ const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
 };
 
 const UNCENSORED_CHAT_MODEL: LlmModelOption = {
-  id: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
+  id: 'qwen3-heretic-0.6b',
+  repoId: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
   name: 'Qwen3 Heretic 0.6B',
   size: '~0.6 GB',
   tier: 'medium',
@@ -69,23 +74,22 @@ export class LlmService {
     GEMMA_MODELS.low,
     GEMMA_MODELS.medium,
     GEMMA_MODELS.high,
+    UNCENSORED_CHAT_MODEL,
   ];
 
   /** The chosen model id (auto-selected by hardware, user-overridable). */
   private readonly modelId = signal<string>(this.loadStoredModel());
-  private readonly uncensoredMode = signal<boolean>(this.loadStoredUncensoredMode());
 
   readonly selectedModel = computed(
-    () => this.uncensoredMode()
-      ? UNCENSORED_CHAT_MODEL
-      : this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+    () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
-  readonly isUncensoredMode = computed(() => this.uncensoredMode());
+  readonly isUncensoredMode = computed(() => this.selectedModel().id === UNCENSORED_CHAT_MODEL.id);
   readonly uncensoredModel = UNCENSORED_CHAT_MODEL;
 
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly thinkingTrace = signal<string[]>([]);
 
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
@@ -103,23 +107,11 @@ export class LlmService {
     this.modelId.set(id);
     try {
       localStorage.setItem(this.STORAGE_KEY, id);
+      localStorage.removeItem(this.UNCENSORED_STORAGE_KEY);
     } catch {
       // ignore persistence errors
     }
     // Force a reload on next generate.
-    this.generator = null;
-    this.loadPromise = null;
-    this.isReady.set(false);
-  }
-
-  setUncensoredMode(enabled: boolean): void {
-    if (this.uncensoredMode() === enabled) return;
-    this.uncensoredMode.set(enabled);
-    try {
-      localStorage.setItem(this.UNCENSORED_STORAGE_KEY, enabled ? '1' : '0');
-    } catch {
-      // ignore persistence errors
-    }
     this.generator = null;
     this.loadPromise = null;
     this.isReady.set(false);
@@ -144,8 +136,8 @@ export class LlmService {
   private async load(): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
-    const fallbackModel = this.models.find(m => m.id === this.modelId()) ?? GEMMA_MODELS.medium;
-    const candidates = this.uncensoredMode()
+    const fallbackModel = GEMMA_MODELS.medium;
+    const candidates = this.isUncensoredMode()
       ? [preferredModel, fallbackModel]
       : [preferredModel];
 
@@ -153,7 +145,7 @@ export class LlmService {
     this.isReady.set(false);
 
     const { hasWebGPU } = await detectDeviceCapability();
-    const attempts = this.buildLoadAttempts(hasWebGPU, this.uncensoredMode());
+    const attempts = this.buildLoadAttempts(hasWebGPU, this.isUncensoredMode());
 
     let lastError: unknown = null;
     try {
@@ -161,17 +153,18 @@ export class LlmService {
         for (const attempt of attempts) {
           try {
             this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
-            this.generator = await pipeline('text-generation', model.id, {
+            const repoId = model.repoId ?? model.id;
+            this.generator = await pipeline('text-generation', repoId, {
               device: attempt.device,
               dtype: attempt.dtype as any,
             });
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
-            console.info(`[Gemma] Loaded ${model.id} with ${attempt.label}`);
+            console.info(`[Gemma] Loaded ${repoId} with ${attempt.label}`);
             return this.generator;
           } catch (err) {
             lastError = err;
-            console.warn(`[Gemma] ${model.id} ${attempt.label} failed`, err);
+            console.warn(`[Gemma] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
             this.generator = null;
           }
         }
@@ -189,7 +182,8 @@ export class LlmService {
   ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
     const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
     if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
+      attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
+      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
 
     if (uncensored) {
@@ -212,6 +206,7 @@ export class LlmService {
    */
   async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
     const generator = await this.ensureLoaded();
+    this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
 
     const messages: ChatTurn[] = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -219,26 +214,61 @@ export class LlmService {
       { role: 'user', content: userText },
     ];
 
-    const output: any = await generator(messages, {
+    const options = {
       max_new_tokens: 192,
       do_sample: true,
       temperature: 0.7,
       top_p: 0.9,
-    });
+    };
 
-    return this.extractText(output);
+    let output: any;
+    let promptPrefix = '';
+    try {
+      this.thinkingTrace.set(['Preparing context', 'Generating reply']);
+      output = await generator(messages, options);
+    } catch (e) {
+      if (!this.isMissingChatTemplateError(e)) throw e;
+      this.thinkingTrace.set(['Preparing context', 'Using plain prompt fallback', 'Generating reply']);
+      promptPrefix = this.buildPlainPrompt(userText, history);
+      output = await generator(promptPrefix, options);
+    }
+
+    this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
+    const reply = this.extractText(output, promptPrefix);
+    this.thinkingTrace.set([]);
+    return reply;
   }
 
-  private extractText(output: any): string {
+  private buildPlainPrompt(userText: string, history: ChatTurn[]): string {
+    const turns = history
+      .filter(turn => turn.role !== 'system')
+      .map(turn =>
+        `<|im_start|>${turn.role === 'assistant' ? 'assistant' : 'user'}\n${turn.content}<|im_end|>`
+      )
+      .join('\n');
+
+    return [
+      `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>`,
+      turns,
+      `<|im_start|>user\n${userText}<|im_end|>`,
+      '<|im_start|>assistant\n',
+    ].filter(Boolean).join('\n');
+  }
+
+  private isMissingChatTemplateError(error: unknown): boolean {
+    return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
+  }
+
+  private extractText(output: any, promptPrefix = ''): string {
     try {
       const generated = output?.[0]?.generated_text;
       if (Array.isArray(generated)) {
         // Chat-format output: take the final assistant turn.
         const last = generated.at(-1);
-        return (last?.content ?? '').toString().trim();
+        return this.cleanGeneratedText((last?.content ?? '').toString(), promptPrefix);
       }
       if (typeof generated === 'string') {
-        return generated.trim();
+        return this.cleanGeneratedText(generated, promptPrefix);
       }
     } catch {
       // fall through
@@ -246,9 +276,25 @@ export class LlmService {
     return '';
   }
 
+  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+    let cleaned = text;
+    if (promptPrefix && cleaned.startsWith(promptPrefix)) {
+      cleaned = cleaned.slice(promptPrefix.length);
+    }
+    cleaned = cleaned
+      .replace(/<\|im_start\|>\s*assistant\s*/gi, '')
+      .replace(/<\|im_end\|>/gi, '')
+      .replace(/^(System|User|Ava|Assistant):[\s\S]*?\bAva:\s*/i, '')
+      .trim();
+    return cleaned;
+  }
+
   private loadStoredModel(): string {
     try {
+      if (localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1') return UNCENSORED_CHAT_MODEL.id;
       const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (stored === 'onnx-community/gemma-3-1b-it-ONNX') return GEMMA_MODELS.medium.id;
+      if (stored === UNCENSORED_CHAT_MODEL.repoId) return UNCENSORED_CHAT_MODEL.id;
       if (stored && this.modelExists(stored)) return stored;
     } catch {
       // ignore
@@ -256,16 +302,8 @@ export class LlmService {
     return GEMMA_MODELS.medium.id;
   }
 
-  private loadStoredUncensoredMode(): boolean {
-    try {
-      return localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1';
-    } catch {
-      return false;
-    }
-  }
-
   private modelExists(id: string): boolean {
-    return [GEMMA_MODELS.low.id, GEMMA_MODELS.medium.id, GEMMA_MODELS.high.id].includes(id);
+    return this.models.some(model => model.id === id);
   }
 
   private hasUserOverride(): boolean {

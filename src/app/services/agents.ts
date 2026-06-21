@@ -1,7 +1,7 @@
-import { Injectable, signal, computed, inject } from '@angular/core';
+import { Injectable, signal, computed } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
 import { detectDeviceCapability, DeviceTier } from './device-capability';
-import { ChatTurn, LlmModelOption, LlmService } from './llm';
+import { ChatTurn, LlmModelOption } from './llm';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -61,20 +61,18 @@ const AGENT_SYSTEM_PROMPT =
 @Injectable({ providedIn: 'root' })
 export class AgentsService {
   private readonly STORAGE_KEY = 'ava-agent-model';
-  private readonly llm = inject(LlmService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
     QWEN_MODELS.medium,
     QWEN_MODELS.high,
+    UNCENSORED_AGENT_MODEL,
   ];
 
   private readonly modelId = signal<string>(this.loadStoredModel());
 
   readonly selectedModel = computed(
-    () => this.llm.isUncensoredMode()
-      ? UNCENSORED_AGENT_MODEL
-      : this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+    () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
 
   readonly isLoading = signal(false);
@@ -167,15 +165,15 @@ export class AgentsService {
   private async load(): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
-    const fallbackModel = this.models.find(m => m.id === this.modelId()) ?? QWEN_MODELS.medium;
-    const candidates = this.llm.isUncensoredMode()
+    const fallbackModel = QWEN_MODELS.medium;
+    const uncensored = preferredModel.id === UNCENSORED_AGENT_MODEL.id;
+    const candidates = uncensored
       ? [preferredModel, fallbackModel]
       : [preferredModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
 
-    const uncensored = this.llm.isUncensoredMode();
     const { hasWebGPU } = await detectDeviceCapability();
     const attempts = this.buildLoadAttempts(hasWebGPU, uncensored);
 
@@ -213,7 +211,8 @@ export class AgentsService {
   ): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
     const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
     if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
+      attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
+      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
 
     if (uncensored) {
@@ -240,14 +239,44 @@ export class AgentsService {
       { role: 'user', content: prompt },
     ];
 
-    const output: any = await generator(messages, {
+    const options = {
       max_new_tokens: 1024,
       do_sample: true,
       temperature: 0.6,
       top_p: 0.95,
-    });
+    };
 
-    return this.extractText(output);
+    let output: any;
+    let promptPrefix = '';
+    try {
+      output = await generator(messages, options);
+    } catch (e) {
+      if (!this.isMissingChatTemplateError(e)) throw e;
+      promptPrefix = this.buildPlainPrompt(prompt, history);
+      output = await generator(promptPrefix, options);
+    }
+
+    return this.extractText(output, promptPrefix);
+  }
+
+  private buildPlainPrompt(prompt: string, history: ChatTurn[]): string {
+    const turns = history
+      .filter(turn => turn.role !== 'system')
+      .map(turn =>
+        `<|im_start|>${turn.role === 'assistant' ? 'assistant' : 'user'}\n${turn.content}<|im_end|>`
+      )
+      .join('\n');
+
+    return [
+      `<|im_start|>system\n${AGENT_SYSTEM_PROMPT}<|im_end|>`,
+      turns,
+      `<|im_start|>user\n${prompt}<|im_end|>`,
+      '<|im_start|>assistant\n',
+    ].filter(Boolean).join('\n');
+  }
+
+  private isMissingChatTemplateError(error: unknown): boolean {
+    return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
   }
 
   clearCompleted(): void {
@@ -262,20 +291,31 @@ export class AgentsService {
     );
   }
 
-  private extractText(output: any): string {
+  private extractText(output: any, promptPrefix = ''): string {
     try {
       const generated = output?.[0]?.generated_text;
       if (Array.isArray(generated)) {
         const last = generated.at(-1);
-        return this.stripThinking((last?.content ?? '').toString()).trim();
+        return this.cleanGeneratedText((last?.content ?? '').toString(), promptPrefix);
       }
       if (typeof generated === 'string') {
-        return this.stripThinking(generated).trim();
+        return this.cleanGeneratedText(generated, promptPrefix);
       }
     } catch {
       // fall through
     }
     return '';
+  }
+
+  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+    let cleaned = text;
+    if (promptPrefix && cleaned.startsWith(promptPrefix)) {
+      cleaned = cleaned.slice(promptPrefix.length);
+    }
+    cleaned = cleaned
+      .replace(/<\|im_start\|>\s*assistant\s*/gi, '')
+      .replace(/<\|im_end\|>/gi, '');
+    return this.stripThinking(cleaned).trim();
   }
 
   /** Qwen3 can emit <think>…</think> reasoning blocks; remove them from results. */
@@ -294,7 +334,7 @@ export class AgentsService {
   }
 
   private modelExists(id: string): boolean {
-    return [QWEN_MODELS.low.id, QWEN_MODELS.medium.id, QWEN_MODELS.high.id].includes(id);
+    return this.models.some(model => model.id === id);
   }
 
   private hasUserOverride(): boolean {

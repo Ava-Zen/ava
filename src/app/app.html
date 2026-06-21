@@ -92,6 +92,14 @@
             </span>
           </div>
 
+          @if (isThinking() && llmThinkingTrace().length) {
+            <div class="thinking-trace" aria-label="Ava thinking status">
+              @for (step of llmThinkingTrace(); track step) {
+                <span>{{ step }}</span>
+              }
+            </div>
+          }
+
           <div class="transcript" aria-live="polite" #transcript>
             @for (msg of messages(); track msg.timestamp) {
               <article

@@ -133,6 +133,7 @@ export class App {
   // Background agent tasks (Qwen) surfaced for the UI.
   protected readonly agentTasks = this.agents.tasks;
   protected readonly hasActiveAgents = this.agents.hasActiveTasks;
+  protected readonly llmThinkingTrace = this.llm.thinkingTrace;
 
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
@@ -620,6 +621,61 @@ export class App {
     }
   }
 
+  private async reloadTranscriberOnWasm(): Promise<any> {
+    this.transcriber = null;
+    this.isModelLoading.set(true);
+    this.modelLoadInfo.set('wasm/q8');
+    this.currentTranscript.set('Reloading Moonshine on CPU...');
+
+    const attempts: Array<{ dtype: any; label: string }> = [
+      { dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, label: 'wasm/q8' },
+      { dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'wasm/fp32' },
+    ];
+
+    let lastError: unknown = null;
+    try {
+      for (const attempt of attempts) {
+        try {
+          this.modelLoadInfo.set(attempt.label);
+          this.transcriber = await pipeline(
+            'automatic-speech-recognition',
+            'onnx-community/moonshine-base-ONNX',
+            { device: 'wasm', dtype: attempt.dtype }
+          );
+          await this.transcriber(new Float32Array(this.SAMPLE_RATE * 0.25));
+          this.currentTranscript.set('');
+          console.info(`[Moonshine] Recovered with ${attempt.label}`);
+          return this.transcriber;
+        } catch (e) {
+          lastError = e;
+          this.transcriber = null;
+        }
+      }
+      throw lastError ?? new Error('Moonshine WASM reload failed');
+    } finally {
+      this.isModelLoading.set(false);
+    }
+  }
+
+  private async transcribeWithRecovery(audio: Float32Array, transcriber = this.transcriber): Promise<any> {
+    try {
+      return await transcriber(audio);
+    } catch (e) {
+      if (!this.isRecoverableMoonshineGpuError(e) || !this.modelLoadInfo().startsWith('webgpu')) {
+        throw e;
+      }
+
+      console.warn('Moonshine WebGPU failed during transcription; retrying on WASM', e);
+      const wasmTranscriber = await this.reloadTranscriberOnWasm();
+      return await wasmTranscriber(audio);
+    }
+  }
+
+  private isRecoverableMoonshineGpuError(error: unknown): boolean {
+    const message = String((error as any)?.message ?? error);
+    return /WebGPU|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU/i.test(message);
+  }
+
   private async startMoonshineListening() {
     try {
       this.currentTranscript.set('');
@@ -760,7 +816,7 @@ export class App {
     try {
       if (this.moonshineBuffer.length < this.MIN_SPEECH_SAMPLES) return;
 
-      const result: any = await transcriber(this.moonshineBuffer);
+      const result: any = await this.transcribeWithRecovery(this.moonshineBuffer, transcriber);
       const text = (result?.text || '').trim();
       if (text) {
         this.currentTranscript.set(text);
@@ -782,7 +838,7 @@ export class App {
     }
 
     try {
-      const result: any = await transcriber(bufferToTranscribe);
+      const result: any = await this.transcribeWithRecovery(bufferToTranscribe, transcriber);
       let finalText = (result?.text || live || '').trim();
 
       if (finalText) {

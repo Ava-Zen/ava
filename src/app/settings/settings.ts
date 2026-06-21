@@ -26,8 +26,10 @@ export class Settings {
   protected readonly selectedVoiceId = this.ttsService.selectedVoiceId;
   protected readonly kokoroVoices = this.ttsService.kokoroVoices;
   protected readonly selectedKokoroVoiceId = this.ttsService.selectedKokoroVoiceId;
-  protected readonly uncensoredModel = this.llmService.uncensoredModel;
-  protected readonly isUncensoredMode = this.llmService.isUncensoredMode;
+  protected readonly conversationModels = this.llmService.models;
+  protected readonly selectedConversationModel = this.llmService.selectedModel;
+  protected readonly agentModels = this.agentsService.models;
+  protected readonly selectedAgentModel = this.agentsService.selectedModel;
 
   selectVoice(id: TtsEngine) {
     this.ttsService.setVoice(id);
@@ -38,9 +40,12 @@ export class Settings {
     this.previewVoice.emit(id);
   }
 
-  setUncensoredMode(enabled: boolean) {
-    this.llmService.setUncensoredMode(enabled);
-    this.agentsService.resetLoadedModel();
+  selectConversationModel(id: string) {
+    this.llmService.setModel(id);
+  }
+
+  selectAgentModel(id: string) {
+    this.agentsService.setModel(id);
   }
 
   @Output() close = new EventEmitter<void>();
