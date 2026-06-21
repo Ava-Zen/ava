@@ -57,6 +57,9 @@ jobs:
       # upload-artifact@v4 still uses Node 20 internally on GitHub runners.
       # This env var suppresses the deprecation warning.
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      CARGO_NET_RETRY: 10
+      CARGO_HTTP_TIMEOUT: 120
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
     steps:
       - name: Checkout
@@ -73,6 +76,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
 
       - name: Install dependencies (Linux)
         if: startsWith(matrix.platform, 'linux')
@@ -106,6 +115,21 @@ jobs:
       - name: Install dependencies
         run: npm install
         # TODO: Change to 'npm ci' and re-enable cache above once package-lock.json is committed
+
+      - name: Prefetch Rust crates with retries
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if cargo fetch --locked --manifest-path src-tauri/Cargo.toml; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "cargo fetch failed after $attempt attempts"
+              exit 1
+            fi
+            echo "cargo fetch failed on attempt $attempt, retrying in 15s..."
+            sleep 15
+          done
 
 
       - name: Get version from package.json
