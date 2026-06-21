@@ -56,11 +56,11 @@
 
         <div class="voice-status">
           @if (isLoadingModel()) {
-            <span>Loading Moonshine Base</span>
+            <span>Loading {{ speechModelName() }}</span>
             <small>{{ modelLoadInfo() || 'preparing local model' }}</small>
           } @else if (isListening()) {
             <span>Voice channel open</span>
-            <small>Moonshine Base ({{ modelLoadInfo() || 'auto' }})</small>
+            <small>{{ speechModelName() }} ({{ modelLoadInfo() || 'auto' }})</small>
           } @else if (isThinking()) {
             <span>Ava is reflecting</span>
             <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Working inside ' + (currentGarden()?.name || 'this garden') }}</small>

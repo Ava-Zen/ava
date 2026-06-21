@@ -4,7 +4,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings } from './settings/settings';
 import { Onboarding } from './onboarding/onboarding';
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
@@ -93,6 +93,8 @@ export class App {
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
   protected readonly userName = this.onboarding.userName;
   private preloadsStarted = false;
+  private readonly MOONSHINE_BASE_MODEL = 'onnx-community/moonshine-base-ONNX';
+  private readonly MOONSHINE_TINY_MODEL = 'onnx-community/moonshine-tiny-ONNX';
 
   /** Reactive: the conversation card is shown while there is content or active voice. */
   protected readonly chatStarted = computed(() =>
@@ -145,6 +147,7 @@ export class App {
 
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    this.configureTransformersRuntime();
     this.loadMessagesFromStorage();
 
     effect(() => {
@@ -537,28 +540,14 @@ export class App {
   private async preloadModel() {
     if (this.transcriber || typeof window === 'undefined') return;
     try {
-      const hasWebGPU = await this.supportsWebGPU();
-      const attempts: any[] = hasWebGPU
-        ? [
-            {
-              device: 'webgpu',
-              dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
-              label: 'webgpu/fp32',
-            },
-          ]
-        : [];
-      attempts.push(
-        {
-          device: 'wasm',
-          dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
-          label: 'wasm/fp32',
-        }
-      );
-
-      for (const a of attempts) {
+      for (const a of await this.moonshineLoadAttempts()) {
         try {
-          this.transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/moonshine-base-ONNX', a);
+          this.transcriber = await pipeline('automatic-speech-recognition', a.modelId, {
+            device: a.device,
+            dtype: a.dtype,
+          });
           await this.transcriber(new Float32Array(4000));
+          this.speechModelName.set(a.modelName);
           this.modelLoadInfo.set(a.label);
           return;
         } catch {
@@ -652,6 +641,7 @@ export class App {
   }
 
   protected readonly isLoadingModel = computed(() => this.isModelLoading());
+  protected readonly speechModelName = signal<string>('Moonshine Base');
   protected modelLoadInfo = signal<string>('');  // e.g. "webgpu/q4" or "wasm/q8"
 
   protected async toggleVoice() {
@@ -694,10 +684,76 @@ export class App {
     }
   }
 
+  private configureTransformersRuntime() {
+    if (typeof window === 'undefined') return;
+
+    const onnx = env.backends.onnx as any;
+    onnx.wasm ??= {};
+
+    if (this.isAndroidWebView()) {
+      onnx.wasm.numThreads = 1;
+      onnx.wasm.proxy = false;
+      env.useWasmCache = false;
+    }
+  }
+
+  private isAndroidWebView(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    return /Android/i.test(navigator.userAgent);
+  }
+
+  private async moonshineLoadAttempts(): Promise<Array<{
+    modelId: string;
+    modelName: string;
+    device: 'webgpu' | 'wasm';
+    dtype: any;
+    label: string;
+  }>> {
+    const hasWebGPU = await this.supportsWebGPU();
+    const models = this.isAndroidWebView()
+      ? [
+          { modelId: this.MOONSHINE_TINY_MODEL, modelName: 'Moonshine Tiny' },
+          { modelId: this.MOONSHINE_BASE_MODEL, modelName: 'Moonshine Base' },
+        ]
+      : [
+          { modelId: this.MOONSHINE_BASE_MODEL, modelName: 'Moonshine Base' },
+          { modelId: this.MOONSHINE_TINY_MODEL, modelName: 'Moonshine Tiny' },
+        ];
+
+    return models.flatMap(model => {
+      const shortName = model.modelName.replace('Moonshine ', '').toLowerCase();
+      const attempts: Array<{
+        modelId: string;
+        modelName: string;
+        device: 'webgpu' | 'wasm';
+        dtype: any;
+        label: string;
+      }> = [];
+
+      if (hasWebGPU && !this.isAndroidWebView()) {
+        attempts.push({
+          ...model,
+          device: 'webgpu',
+          dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+          label: `${shortName} webgpu/fp32`,
+        });
+      }
+
+      attempts.push({
+        ...model,
+        device: 'wasm',
+        dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+        label: `${shortName} wasm/fp32`,
+      });
+
+      return attempts;
+    });
+  }
+
   /**
-   * Loads Moonshine Base with device/dtype fallbacks.
-   * The quantized merged decoder variants can fail in ORT Web with missing DQ
-   * scale metadata, so speech recognition uses fp32 and only changes backend.
+   * Loads Moonshine with device/dtype fallbacks. The quantized merged decoder
+   * variants can fail in ORT Web with missing DQ scale metadata, so speech
+   * recognition uses fp32 and only changes backend/model size.
    */
   private async ensureTranscriberLoaded(): Promise<any> {
     if (this.transcriber) return this.transcriber;
@@ -706,15 +762,7 @@ export class App {
     this.status.set('listening');
     this.currentTranscript.set('');
 
-    const hasWebGPU = await this.supportsWebGPU();
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: any; label: string }> = [];
-
-    if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'webgpu/fp32' });
-    }
-    attempts.push(
-      { device: 'wasm', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'wasm/fp32' }
-    );
+    const attempts = await this.moonshineLoadAttempts();
 
     let lastError: any = null;
 
@@ -722,10 +770,11 @@ export class App {
       for (const attempt of attempts) {
         try {
           this.modelLoadInfo.set(attempt.label);
+          this.speechModelName.set(attempt.modelName);
 
           this.transcriber = await pipeline(
             'automatic-speech-recognition',
-            'onnx-community/moonshine-base-ONNX',
+            attempt.modelId,
             { device: attempt.device, dtype: attempt.dtype }
           );
 
@@ -739,7 +788,7 @@ export class App {
           this.transcriber = null;
         }
       }
-      console.error('Moonshine Base failed to load on all backends', lastError);
+      console.error('Moonshine failed to load on all backends', lastError);
       this.currentTranscript.set('');
       throw lastError ?? new Error('Moonshine load failed');
     } finally {
@@ -750,11 +799,17 @@ export class App {
   private async reloadTranscriberOnWasm(): Promise<any> {
     this.transcriber = null;
     this.isModelLoading.set(true);
-    this.modelLoadInfo.set('wasm/fp32');
+    this.modelLoadInfo.set(`${this.speechModelName().replace('Moonshine ', '').toLowerCase()} wasm/fp32`);
     this.currentTranscript.set('');
 
+    const modelId = this.speechModelName() === 'Moonshine Tiny'
+      ? this.MOONSHINE_TINY_MODEL
+      : this.MOONSHINE_BASE_MODEL;
     const attempts: Array<{ dtype: any; label: string }> = [
-      { dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'wasm/fp32' },
+      {
+        dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+        label: `${this.speechModelName().replace('Moonshine ', '').toLowerCase()} wasm/fp32`,
+      },
     ];
 
     let lastError: unknown = null;
@@ -764,7 +819,7 @@ export class App {
           this.modelLoadInfo.set(attempt.label);
           this.transcriber = await pipeline(
             'automatic-speech-recognition',
-            'onnx-community/moonshine-base-ONNX',
+            modelId,
             { device: 'wasm', dtype: attempt.dtype }
           );
           await this.transcriber(new Float32Array(this.SAMPLE_RATE * 0.25));
@@ -814,15 +869,7 @@ export class App {
       this.isLiveTranscriptInProgress = false;
       this.noiseFloor = 0.003;
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: this.SAMPLE_RATE,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const stream = await this.requestMicrophoneStream();
 
       this.mediaStream = stream;
 
@@ -909,11 +956,44 @@ export class App {
       this.voiceEnabled.set(false);
       this.stopMoonshineListening({ commitPending: false, submitPartial: false });
 
-      if (!this.transcriber) {
-        this.currentTranscript.set('Moonshine unavailable');
-        setTimeout(() => this.currentTranscript.set(''), 1200);
-      }
+      this.currentTranscript.set(this.voiceStartFailureMessage(err));
+      setTimeout(() => this.currentTranscript.set(''), 2400);
     }
+  }
+
+  private async requestMicrophoneStream(): Promise<MediaStream> {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Microphone capture is unavailable in this WebView');
+    }
+
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: this.SAMPLE_RATE,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  }
+
+  private voiceStartFailureMessage(error: unknown): string {
+    const name = String((error as any)?.name ?? '');
+    const message = String((error as any)?.message ?? error);
+
+    if (/NotAllowedError|PermissionDeniedError|SecurityError/i.test(name) || /permission|denied/i.test(message)) {
+      return 'Microphone permission needed';
+    }
+
+    if (/NotFoundError|DevicesNotFoundError/i.test(name) || /no.*microphone|requested device not found/i.test(message)) {
+      return 'No microphone found';
+    }
+
+    if (!this.transcriber) {
+      return 'Speech model unavailable';
+    }
+
+    return 'Voice unavailable';
   }
 
   private calculateEnergy(buffer: Float32Array): number {
