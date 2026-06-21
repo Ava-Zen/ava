@@ -694,10 +694,6 @@
   color: var(--text);
   background: rgba(85, 199, 184, 0.12);
 }
-.audio-download:hover {
-  border-color: rgba(85, 199, 184, 0.56);
-  background: rgba(85, 199, 184, 0.18);
-}
 .audio-file,
 .audio-controls {
   display: flex;
@@ -780,7 +776,7 @@
 .ava-footer {
   padding: 4px 0 2px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 720px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 720px) minmax(180px, 1fr);
   align-items: end;
   gap: 12px 16px;
   overflow: visible;
@@ -799,6 +795,7 @@
 }
 .footer-side {
   gap: 12px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 .footer-side-start {
@@ -894,11 +891,6 @@
 .add-tool {
   width: 72px;
   min-width: 72px;
-  padding-inline: 0;
-  justify-content: center;
-}
-.compact-tool {
-  min-width: 62px;
   padding-inline: 0;
   justify-content: center;
 }
@@ -1075,6 +1067,7 @@
 /* ---------- Footer: compact controls on small screens ---------- */
 @media (max-width: 980px) {
   .ava-footer {
+    grid-template-columns: minmax(128px, 1fr) minmax(0, 620px) minmax(90px, 1fr);
     gap: 10px 12px;
   }
   .footer-side {
@@ -1111,6 +1104,7 @@
 
 @media (max-width: 720px) {
   .ava-footer {
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px 10px;
   }
   .composer-row {
@@ -1131,9 +1125,6 @@
     min-width: 88px;
     padding-inline: 12px;
     font-size: 0.94rem;
-  }
-  .compact-tool {
-    min-width: 54px;
   }
   .add-tool {
     width: 54px;
