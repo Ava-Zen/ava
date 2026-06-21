@@ -151,7 +151,21 @@ jobs:
           while IFS= read -r pattern; do
             [ -z "$pattern" ] && continue
             for file in $pattern; do
-              cp "$file" release-artifacts/
+              dest_name="$(basename "$file")"
+              if [ "${{ matrix.platform }}" = "android" ]; then
+                case "$dest_name" in
+                  app-universal-release.aab)
+                    dest_name="Ava_${{ steps.get_version.outputs.version }}.aab"
+                    ;;
+                  app-universal-release.apk)
+                    dest_name="Ava_${{ steps.get_version.outputs.version }}.apk"
+                    ;;
+                  app-universal-release-unsigned.apk)
+                    dest_name="Ava_${{ steps.get_version.outputs.version }}-unsigned.apk"
+                    ;;
+                esac
+              fi
+              cp "$file" "release-artifacts/$dest_name"
             done
           done <<'EOF'
           ${{ matrix.release-globs }}
