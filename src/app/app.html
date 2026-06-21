@@ -3,10 +3,7 @@
     <section class="companion-grid" [class.chat-active]="chatStarted()">
       <section class="voice-console" [class.mini]="chatStarted()" aria-labelledby="voice-title">
         <button type="button" class="garden-eyebrow" (click)="openSettings()" title="Switch garden">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 21c4-4 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 7 7 11Z"></path>
-            <path d="M12 12.2A2.2 2.2 0 1 0 12 7.8a2.2 2.2 0 0 0 0 4.4Z"></path>
-          </svg>
+          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
           <span>{{ currentGarden()?.name || 'Personal Garden' }}</span>
         </button>
 
@@ -36,14 +33,16 @@
           (click)="toggleVoice()"
           (keydown.enter)="toggleVoice()"
           title="Toggle listening (Space)"
-          [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
+          [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'"
+        >
           <span class="orb-ring"></span>
           <span
             class="orb"
             [class.listening]="isListening() || isLoadingModel()"
             [class.thinking]="isThinking()"
             [class.speaking]="status() === 'speaking'"
-            [class.loading]="isLoadingModel()">
+            [class.loading]="isLoadingModel()"
+          >
             <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
               <rect x="9" y="2" width="6" height="12" rx="3"></rect>
               <path d="M5 11a7 7 0 0 0 14 0"></path>
@@ -78,39 +77,52 @@
       </section>
 
       @if (chatStarted()) {
-      <section class="history-panel" aria-label="Conversation history" animate.leave="panel-leave">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Conversation</p>
-            <h2>{{ messages().length }} moments</h2>
+        <section
+          class="history-panel"
+          aria-label="Conversation history"
+          animate.leave="panel-leave"
+        >
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>{{ messages().length }} moments</h2>
+            </div>
+            <span class="privacy-badge">Local first</span>
           </div>
-          <span class="privacy-badge">Local first</span>
-        </div>
 
-        <div class="transcript" aria-live="polite" #transcript>
-          @for (msg of messages(); track msg.timestamp) {
-            <article class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
-              <div class="message-bubble">
-                <div class="message-meta">
-                  <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
-                  <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
+          <div class="transcript" aria-live="polite" #transcript>
+            @for (msg of messages(); track msg.timestamp) {
+              <article
+                class="message"
+                [class.user]="msg.role === 'user'"
+                [class.ava]="msg.role === 'ava'"
+              >
+                <div class="message-bubble">
+                  <div class="message-meta">
+                    <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
+                    <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
+                  </div>
+                  @if (msg.role === 'ava') {
+                    <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                  } @else {
+                    <div class="message-text">{{ msg.text }}</div>
+                  }
                 </div>
-                @if (msg.role === 'ava') {
-                  <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
-                } @else {
-                  <div class="message-text">{{ msg.text }}</div>
-                }
-              </div>
-            </article>
-          }
-        </div>
-      </section>
+              </article>
+            }
+          </div>
+        </section>
       }
     </section>
 
     <footer class="ava-footer" aria-label="Conversation actions">
       <div class="footer-side footer-side-start">
-        <button class="tool-btn" [class.compact-tool]="manualInputEnabled()" (click)="clearConversation()" aria-label="Clear conversation">
+        <button
+          class="tool-btn"
+          [class.compact-tool]="manualInputEnabled()"
+          (click)="clearConversation()"
+          aria-label="Clear conversation"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M3 6h18"></path>
             <path d="M8 6V4h8v2"></path>
@@ -123,7 +135,11 @@
           }
         </button>
         @if (status() === 'speaking') {
-          <button class="tool-btn" (click)="togglePause()" [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'">
+          <button
+            class="tool-btn"
+            (click)="togglePause()"
+            [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'"
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               @if (isPaused()) {
                 <path d="M8 5v14l11-7z"></path>
@@ -155,9 +171,9 @@
                   [value]="manualPrompt()"
                   (input)="onManualPromptInput($event)"
                   (keydown)="onManualPromptKeydown($event)"
-                  placeholder="Type a prompt, add a file, or insert a built-in message"></textarea>
+                  placeholder="Type a prompt, add a file, or insert a built-in message"
+                ></textarea>
               </label>
-
             }
 
             <div class="action-menu-shell" #primaryActionShell>
@@ -177,7 +193,8 @@
                   (touchstart)="onPrimaryActionTouchStart($event)"
                   (touchmove)="onPrimaryActionTouchMove()"
                   (touchend)="onPrimaryActionPressEnd()"
-                  (touchcancel)="onPrimaryActionPressEnd()">
+                  (touchcancel)="onPrimaryActionPressEnd()"
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M4 12 20 4 15 20 11 13 4 12Z"></path>
                   </svg>
@@ -198,7 +215,8 @@
                   (touchstart)="onPrimaryActionTouchStart($event)"
                   (touchmove)="onPrimaryActionTouchMove()"
                   (touchend)="onPrimaryActionPressEnd()"
-                  (touchcancel)="onPrimaryActionPressEnd()">
+                  (touchcancel)="onPrimaryActionPressEnd()"
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     @if (isListening()) {
                       <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
@@ -215,13 +233,29 @@
 
               @if (composerMenuOpen()) {
                 <div class="action-menu" role="menu" aria-label="Prompt options">
-                  <button class="menu-action" type="button" role="menuitem" (click)="openFilePicker()">
+                  <button
+                    class="menu-action"
+                    type="button"
+                    role="menuitem"
+                    (click)="openFilePicker()"
+                  >
                     <strong>Add files</strong>
                     <span>Attach local text files into the manual prompt</span>
                   </button>
-                  <button class="menu-action" type="button" role="menuitem" (click)="setManualInputMode(!manualInputEnabled())">
-                    <strong>{{ manualInputEnabled() ? 'Use voice button' : 'Use text input' }}</strong>
-                    <span>{{ manualInputEnabled() ? 'Swap the composer back to Speak' : 'Replace Speak with a manual prompt field' }}</span>
+                  <button
+                    class="menu-action"
+                    type="button"
+                    role="menuitem"
+                    (click)="setManualInputMode(!manualInputEnabled())"
+                  >
+                    <strong>{{
+                      manualInputEnabled() ? 'Use voice button' : 'Use text input'
+                    }}</strong>
+                    <span>{{
+                      manualInputEnabled()
+                        ? 'Swap the composer back to Speak'
+                        : 'Replace Speak with a manual prompt field'
+                    }}</span>
                   </button>
 
                   <div class="menu-divider"></div>
@@ -229,7 +263,12 @@
                   <p class="menu-label">Built-in prompts</p>
                   <div class="quick-prompt-list">
                     @for (prompt of quickPrompts; track prompt.label) {
-                      <button class="quick-prompt" type="button" role="menuitem" (click)="queueQuickPrompt(prompt.text)">
+                      <button
+                        class="quick-prompt"
+                        type="button"
+                        role="menuitem"
+                        (click)="queueQuickPrompt(prompt.text)"
+                      >
                         {{ prompt.label }}
                       </button>
                     }
@@ -247,10 +286,7 @@
 
       <div class="footer-side footer-side-end">
         <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
-            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .1l-.3.2a1.7 1.7 0 0 0-.9 1.6v.3H10v-.3a1.7 1.7 0 0 0-.9-1.6l-.3-.2a1.7 1.7 0 0 0-2-.1l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 5 15l-.1-.4a1.7 1.7 0 0 0-1.4-1.1H3v-4h.5a1.7 1.7 0 0 0 1.4-1.1L5 8a1.7 1.7 0 0 0-.3-1.9L4.6 6l2-3.4.2.1a1.7 1.7 0 0 0 2-.1l.3-.2A1.7 1.7 0 0 0 10 1h4a1.7 1.7 0 0 0 .9 1.4l.3.2a1.7 1.7 0 0 0 2 .1l.2-.1 2 3.4-.1.1A1.7 1.7 0 0 0 19 8l.1.4a1.7 1.7 0 0 0 1.4 1.1h.5v4h-.5a1.7 1.7 0 0 0-1.4 1.1l-.1.4Z"></path>
-          </svg>
+          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
           <span>Settings</span>
         </button>
       </div>
@@ -263,7 +299,8 @@
         aria-label="Choose files to add to the manual prompt"
         title="Choose files to add to the manual prompt"
         accept=".txt,.md,.markdown,.json,.csv,.ts,.tsx,.js,.jsx,.html,.css,.scss,.xml,.yml,.yaml,.log,text/*"
-        (change)="onFilesSelected($event)" />
+        (change)="onFilesSelected($event)"
+      />
     </footer>
   </div>
 
