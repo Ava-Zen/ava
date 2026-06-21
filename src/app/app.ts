@@ -60,6 +60,7 @@ export class App {
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
+  @ViewChild('audioFilePicker') private audioFilePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
 
   // Gardens
@@ -78,12 +79,10 @@ export class App {
   protected readonly composerMenuOpen = signal(false);
   protected readonly manualPrompt = signal('');
   protected readonly composerNotice = signal('');
+  protected readonly isGeneratingAudioFile = signal(false);
   protected readonly canSubmitManualPrompt = computed(() =>
     this.manualPrompt().trim().length > 0 && !this.isThinking()
   );
-  private primaryMenuPressTimer: ReturnType<typeof setTimeout> | null = null;
-  private suppressPrimaryActionClick = false;
-  private readonly PRIMARY_MENU_PRESS_MS = 460;
 
   // Per-garden message storage (keyed by garden id)
   private messagesByGarden = signal<Record<string, Message[]>>({});
@@ -163,40 +162,10 @@ export class App {
   protected openComposerMenu(event?: Event) {
     event?.preventDefault();
     event?.stopPropagation();
-    this.clearPrimaryActionPress();
-    this.suppressPrimaryActionClick = true;
     this.composerMenuOpen.set(true);
   }
 
-  protected onPrimaryActionMouseDown(event: MouseEvent) {
-    if (event.button === 2) {
-      this.openComposerMenu(event);
-      return;
-    }
-
-    if (event.button !== 0) return;
-    this.startPrimaryActionPressTimer();
-  }
-
-  protected onPrimaryActionTouchStart(event: TouchEvent) {
-    event.stopPropagation();
-    this.startPrimaryActionPressTimer();
-  }
-
-  protected onPrimaryActionTouchMove() {
-    this.clearPrimaryActionPress();
-  }
-
-  protected onPrimaryActionPressEnd() {
-    this.clearPrimaryActionPress();
-  }
-
   protected onPrimaryActionClick() {
-    if (this.suppressPrimaryActionClick) {
-      this.suppressPrimaryActionClick = false;
-      return;
-    }
-
     this.composerMenuOpen.set(false);
 
     if (this.manualInputEnabled()) {
@@ -217,6 +186,11 @@ export class App {
     if (!enabled) {
       this.composerNotice.set('');
     }
+  }
+
+  protected onAddButtonClick(event: Event) {
+    event.stopPropagation();
+    this.toggleComposerMenu();
   }
 
   protected onManualPromptInput(event: Event) {
@@ -249,6 +223,11 @@ export class App {
   protected openFilePicker() {
     this.setManualInputMode(true);
     this.filePickerEl?.nativeElement.click();
+  }
+
+  protected openAudioFilePicker() {
+    this.composerMenuOpen.set(false);
+    this.audioFilePickerEl?.nativeElement.click();
   }
 
   protected async onFilesSelected(event: Event) {
@@ -294,6 +273,33 @@ export class App {
 
     if (input) {
       input.value = '';
+    }
+  }
+
+  protected async onAudioFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!file) return;
+
+    if (!this.isTextFile(file)) {
+      this.composerNotice.set(`${file.name} does not look like a text file.`);
+      if (input) input.value = '';
+      return;
+    }
+
+    try {
+      const text = (await file.text()).trim();
+      if (!text) {
+        this.composerNotice.set(`${file.name} is empty.`);
+        return;
+      }
+
+      await this.generateDownloadableAudio(text, file.name);
+    } catch (e) {
+      console.error('Audio file generation failed', e);
+      this.composerNotice.set('Could not generate that audio file.');
+    } finally {
+      if (input) input.value = '';
     }
   }
 
@@ -957,6 +963,106 @@ export class App {
     }
   }
 
+  private async generateDownloadableAudio(text: string, sourceName: string) {
+    if (this.isGeneratingAudioFile()) return;
+
+    this.isGeneratingAudioFile.set(true);
+    this.composerNotice.set('Preparing Ava voice export...');
+
+    try {
+      if (!this.kokoro) {
+        await this.preloadKokoro().catch(() => {});
+      }
+      if (!this.kokoro) {
+        this.composerNotice.set('Audio export needs the Kokoro voice to finish loading.');
+        return;
+      }
+
+      const spoken = markdownToPlainText(text);
+      const chunks = splitIntoSpeechChunks(spoken);
+      if (chunks.length === 0) {
+        this.composerNotice.set(`${sourceName} did not contain speakable text.`);
+        return;
+      }
+
+      const voice = this.tts.selectedKokoroVoiceId();
+      const audioChunks: Float32Array[] = [];
+      let sampleRate = 24000;
+
+      for (let i = 0; i < chunks.length; i++) {
+        this.composerNotice.set(`Generating audio ${i + 1} of ${chunks.length}...`);
+        const audio = await this.kokoro.generate(chunks[i], { voice, speed: 0.98 });
+        audioChunks.push(audio.data);
+        sampleRate = audio.sampling_rate ?? sampleRate;
+      }
+
+      const wav = this.createWavBlob(this.concatAudioChunks(audioChunks), sampleRate);
+      this.downloadBlob(wav, `${this.stripFileExtension(sourceName)}-ava.wav`);
+      this.composerNotice.set(`Generated ${sourceName} as downloadable Ava audio.`);
+    } finally {
+      this.isGeneratingAudioFile.set(false);
+    }
+  }
+
+  private concatAudioChunks(chunks: Float32Array[]): Float32Array {
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const combined = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return combined;
+  }
+
+  private createWavBlob(samples: Float32Array, sampleRate: number): Blob {
+    const bytesPerSample = 2;
+    const dataSize = samples.length * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    this.writeAscii(view, 0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    this.writeAscii(view, 8, 'WAVE');
+    this.writeAscii(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * bytesPerSample, true);
+    view.setUint16(32, bytesPerSample, true);
+    view.setUint16(34, 16, true);
+    this.writeAscii(view, 36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (const sample of samples) {
+      const clamped = Math.max(-1, Math.min(1, sample));
+      view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  private writeAscii(view: DataView, offset: number, text: string) {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  }
+
+  private downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   private speakWithSystem(text: string, id: number): Promise<void> {
     return new Promise<void>(resolve => {
       if (!this.synth) {
@@ -1179,6 +1285,7 @@ export class App {
   }
 
   protected clearConversation() {
+    this.composerMenuOpen.set(false);
     const gardenId = this.currentGarden()?.id;
     if (gardenId) {
       this.setGardenMessages(gardenId, []);
@@ -1233,21 +1340,6 @@ export class App {
     }
   }
 
-  private startPrimaryActionPressTimer() {
-    this.clearPrimaryActionPress();
-    this.primaryMenuPressTimer = setTimeout(() => {
-      this.suppressPrimaryActionClick = true;
-      this.composerMenuOpen.set(true);
-    }, this.PRIMARY_MENU_PRESS_MS);
-  }
-
-  private clearPrimaryActionPress() {
-    if (this.primaryMenuPressTimer !== null) {
-      clearTimeout(this.primaryMenuPressTimer);
-      this.primaryMenuPressTimer = null;
-    }
-  }
-
   private isTextFile(file: File): boolean {
     const type = file.type.toLowerCase();
     if (type.startsWith('text/')) return true;
@@ -1255,5 +1347,10 @@ export class App {
 
     const extension = file.name.split('.').pop()?.toLowerCase();
     return extension ? this.TEXT_FILE_EXTENSIONS.has(extension) : false;
+  }
+
+  private stripFileExtension(filename: string): string {
+    const withoutExtension = filename.replace(/\.[^/.]+$/, '');
+    return withoutExtension.replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'ava-audio';
   }
 }

@@ -117,23 +117,104 @@
 
     <footer class="ava-footer" aria-label="Conversation actions">
       <div class="footer-side footer-side-start">
-        <button
-          class="tool-btn"
-          [class.compact-tool]="manualInputEnabled()"
-          (click)="clearConversation()"
-          aria-label="Clear conversation"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 6h18"></path>
-            <path d="M8 6V4h8v2"></path>
-            <path d="M19 6l-1 14H6L5 6"></path>
-            <path d="M10 11v5"></path>
-            <path d="M14 11v5"></path>
-          </svg>
-          @if (!manualInputEnabled()) {
-            <span>Clear</span>
+        <div class="action-menu-shell" #primaryActionShell>
+          <button
+            class="tool-btn add-tool"
+            type="button"
+            [attr.aria-expanded]="composerMenuOpen()"
+            aria-haspopup="menu"
+            aria-label="Open add menu"
+            title="Add"
+            (click)="onAddButtonClick($event)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14"></path>
+              <path d="M5 12h14"></path>
+            </svg>
+            <span>Add</span>
+          </button>
+
+          @if (composerMenuOpen()) {
+            <div class="action-menu" role="menu" aria-label="Add options">
+              <div class="menu-header">
+                <span>Actions</span>
+                <button
+                  class="menu-close"
+                  type="button"
+                  aria-label="Close add menu"
+                  (click)="composerMenuOpen.set(false)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 6l12 12"></path>
+                    <path d="M18 6L6 18"></path>
+                  </svg>
+                </button>
+              </div>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="openFilePicker()"
+              >
+                <strong>Add files</strong>
+                <span>Attach local text files into the manual prompt</span>
+              </button>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="openAudioFilePicker()"
+                [disabled]="isGeneratingAudioFile()"
+              >
+                <strong>Generate audio file</strong>
+                <span>Upload text and download Ava speaking it as WAV</span>
+              </button>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="setManualInputMode(!manualInputEnabled())"
+              >
+                <strong>{{
+                  manualInputEnabled() ? 'Use voice button' : 'Use text input'
+                }}</strong>
+                <span>{{
+                  manualInputEnabled()
+                    ? 'Swap the composer back to Speak'
+                    : 'Replace Speak with a manual prompt field'
+                }}</span>
+              </button>
+
+              <div class="menu-divider"></div>
+
+              <p class="menu-label">Built-in prompts</p>
+              <div class="quick-prompt-list">
+                @for (prompt of quickPrompts; track prompt.label) {
+                  <button
+                    class="quick-prompt"
+                    type="button"
+                    role="menuitem"
+                    (click)="queueQuickPrompt(prompt.text)"
+                  >
+                    {{ prompt.label }}
+                  </button>
+                }
+              </div>
+
+              <div class="menu-divider"></div>
+
+              <button
+                class="menu-action danger"
+                type="button"
+                role="menuitem"
+                (click)="clearConversation()"
+              >
+                <strong>Clear conversation</strong>
+                <span>Reset the current garden's visible chat</span>
+              </button>
+            </div>
           }
-        </button>
+        </div>
         @if (status() === 'speaking') {
           <button
             class="tool-btn"
@@ -176,24 +257,14 @@
               </label>
             }
 
-            <div class="action-menu-shell" #primaryActionShell>
+            <div class="action-menu-shell">
               @if (manualInputEnabled()) {
                 <button
                   class="primary-tool send-tool"
                   type="button"
                   [disabled]="!canSubmitManualPrompt()"
-                  [attr.aria-expanded]="composerMenuOpen()"
-                  aria-haspopup="menu"
                   aria-label="Send manual prompt"
                   (click)="onPrimaryActionClick()"
-                  (contextmenu)="$event.preventDefault()"
-                  (mousedown)="onPrimaryActionMouseDown($event)"
-                  (mouseup)="onPrimaryActionPressEnd()"
-                  (mouseleave)="onPrimaryActionPressEnd()"
-                  (touchstart)="onPrimaryActionTouchStart($event)"
-                  (touchmove)="onPrimaryActionTouchMove()"
-                  (touchend)="onPrimaryActionPressEnd()"
-                  (touchcancel)="onPrimaryActionPressEnd()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M4 12 20 4 15 20 11 13 4 12Z"></path>
@@ -204,18 +275,8 @@
                 <button
                   class="primary-tool"
                   type="button"
-                  [attr.aria-expanded]="composerMenuOpen()"
-                  aria-haspopup="menu"
                   aria-label="Toggle voice"
                   (click)="onPrimaryActionClick()"
-                  (contextmenu)="$event.preventDefault()"
-                  (mousedown)="onPrimaryActionMouseDown($event)"
-                  (mouseup)="onPrimaryActionPressEnd()"
-                  (mouseleave)="onPrimaryActionPressEnd()"
-                  (touchstart)="onPrimaryActionTouchStart($event)"
-                  (touchmove)="onPrimaryActionTouchMove()"
-                  (touchend)="onPrimaryActionPressEnd()"
-                  (touchcancel)="onPrimaryActionPressEnd()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     @if (isListening()) {
@@ -229,51 +290,6 @@
                   </svg>
                   <span>{{ isListening() ? 'Stop mic' : 'Speak' }}</span>
                 </button>
-              }
-
-              @if (composerMenuOpen()) {
-                <div class="action-menu" role="menu" aria-label="Prompt options">
-                  <button
-                    class="menu-action"
-                    type="button"
-                    role="menuitem"
-                    (click)="openFilePicker()"
-                  >
-                    <strong>Add files</strong>
-                    <span>Attach local text files into the manual prompt</span>
-                  </button>
-                  <button
-                    class="menu-action"
-                    type="button"
-                    role="menuitem"
-                    (click)="setManualInputMode(!manualInputEnabled())"
-                  >
-                    <strong>{{
-                      manualInputEnabled() ? 'Use voice button' : 'Use text input'
-                    }}</strong>
-                    <span>{{
-                      manualInputEnabled()
-                        ? 'Swap the composer back to Speak'
-                        : 'Replace Speak with a manual prompt field'
-                    }}</span>
-                  </button>
-
-                  <div class="menu-divider"></div>
-
-                  <p class="menu-label">Built-in prompts</p>
-                  <div class="quick-prompt-list">
-                    @for (prompt of quickPrompts; track prompt.label) {
-                      <button
-                        class="quick-prompt"
-                        type="button"
-                        role="menuitem"
-                        (click)="queueQuickPrompt(prompt.text)"
-                      >
-                        {{ prompt.label }}
-                      </button>
-                    }
-                  </div>
-                </div>
               }
             </div>
           </div>
@@ -300,6 +316,15 @@
         title="Choose files to add to the manual prompt"
         accept=".txt,.md,.markdown,.json,.csv,.ts,.tsx,.js,.jsx,.html,.css,.scss,.xml,.yml,.yaml,.log,text/*"
         (change)="onFilesSelected($event)"
+      />
+      <input
+        #audioFilePicker
+        class="sr-only"
+        type="file"
+        aria-label="Choose a text file to turn into Ava audio"
+        title="Choose a text file to turn into Ava audio"
+        accept=".txt,.md,.markdown,.json,.csv,.log,text/*"
+        (change)="onAudioFileSelected($event)"
       />
     </footer>
   </div>
