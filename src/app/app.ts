@@ -491,9 +491,13 @@ export class App {
   private kokoroLoadInfo = signal('');
   private exportKokoroLoadInfo = signal('');
   private readonly CHUNK_SIZE = 4096;
-  private readonly SPEECH_THRESHOLD = 0.015; // simple energy VAD
-  private readonly MIN_SPEECH_SAMPLES = 16000 * 0.6; // ~0.6s min
+  private readonly SPEECH_THRESHOLD = 0.007; // adaptive energy VAD floor
+  private readonly MIN_SPEECH_SAMPLES = 16000 * 0.35; // ~0.35s min
   private readonly SILENCE_FOR_COMMIT = 16000 * 0.7; // ~0.7s silence to commit
+  private noiseFloor = 0.003;
+  private speechSamples = 0;
+  private isCommitInProgress = false;
+  private isLiveTranscriptInProgress = false;
 
   private async preloadModel() {
     if (this.transcriber || typeof window === 'undefined') return;
@@ -770,6 +774,10 @@ export class App {
       this.moonshineBuffer = new Float32Array(0);
       this.isSpeechActive = false;
       this.silenceSamples = 0;
+      this.speechSamples = 0;
+      this.isCommitInProgress = false;
+      this.isLiveTranscriptInProgress = false;
+      this.noiseFloor = 0.003;
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -787,6 +795,9 @@ export class App {
         sampleRate: this.SAMPLE_RATE,
         latencyHint: 'interactive',
       });
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume().catch(() => {});
+      }
 
       // Some browsers ignore sampleRate in getUserMedia; we resample in processor if needed.
       this.sourceNode = this.audioContext.createMediaStreamSource(stream);
@@ -808,6 +819,8 @@ export class App {
       this.status.set('listening');
 
       this.processor.onaudioprocess = (event) => {
+        if (this.isCommitInProgress) return;
+
         const inputBuffer = event.inputBuffer.getChannelData(0);
 
         // Convert to mono float32 (already should be)
@@ -815,16 +828,20 @@ export class App {
 
         // Simple energy-based VAD
         const energy = this.calculateEnergy(samples);
-
-        const isSpeech = energy > this.SPEECH_THRESHOLD;
+        const speechThreshold = this.currentSpeechThreshold();
+        const isSpeech = this.isSpeechActive
+          ? energy > speechThreshold * 0.62
+          : energy > speechThreshold;
 
         if (isSpeech) {
           if (!this.isSpeechActive) {
             this.isSpeechActive = true;
             this.silenceSamples = 0;
+            this.speechSamples = 0;
           }
           // Append to current utterance buffer
           this.appendToBuffer(samples);
+          this.speechSamples += samples.length;
           this.silenceSamples = 0;
         } else if (this.isSpeechActive) {
           this.silenceSamples += samples.length;
@@ -832,10 +849,11 @@ export class App {
           this.appendToBuffer(samples);
 
           // If enough silence after speech, commit current utterance
-          if (this.silenceSamples >= this.SILENCE_FOR_COMMIT && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES) {
+          if (this.silenceSamples >= this.SILENCE_FOR_COMMIT && this.speechSamples >= this.MIN_SPEECH_SAMPLES) {
             this.commitCurrentUtterance();
           }
         } else {
+          this.updateNoiseFloor(energy);
           // Not in speech, keep small rolling context (last 1s) for better start of next utterance
           this.appendToRollingContext(samples);
         }
@@ -844,8 +862,8 @@ export class App {
         const now = Date.now();
         if (this.isSpeechActive &&
             this.moonshineBuffer.length > 0 &&
-            (now - this.lastLiveUpdate > 900) && // update ~every 900ms for smooth live text
-            this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES) {
+            (now - this.lastLiveUpdate > 1800) && // occasional live text, final transcription has priority
+            this.speechSamples >= this.MIN_SPEECH_SAMPLES) {
           this.lastLiveUpdate = now;
           this.updateLiveTranscript();
         }
@@ -869,6 +887,16 @@ export class App {
       sum += buffer[i] * buffer[i];
     }
     return Math.sqrt(sum / buffer.length);
+  }
+
+  private currentSpeechThreshold(): number {
+    return Math.max(this.SPEECH_THRESHOLD, this.noiseFloor * 3.2);
+  }
+
+  private updateNoiseFloor(energy: number) {
+    // Slow EMA so air-conditioning/keyboard noise is learned, but speech does
+    // not immediately raise the threshold and make Ava deaf mid-sentence.
+    this.noiseFloor = this.noiseFloor * 0.96 + Math.min(energy, 0.03) * 0.04;
   }
 
   private appendToBuffer(newSamples: Float32Array) {
@@ -898,26 +926,38 @@ export class App {
 
   private async updateLiveTranscript() {
     try {
+      if (this.isLiveTranscriptInProgress || this.isCommitInProgress) return;
       if (this.moonshineBuffer.length < this.MIN_SPEECH_SAMPLES) return;
 
-      const result: any = await this.transcribeWithRecovery(this.moonshineBuffer);
+      this.isLiveTranscriptInProgress = true;
+      const buffer = this.moonshineBuffer.slice();
+      const result: any = await this.transcribeWithRecovery(buffer);
       const text = (result?.text || '').trim();
       if (text) {
         this.currentTranscript.set(text);
       }
     } catch (e) {
       // non-fatal for live updates
+    } finally {
+      this.isLiveTranscriptInProgress = false;
     }
   }
 
   private async commitCurrentUtterance() {
+    if (this.isCommitInProgress) return;
+    this.isCommitInProgress = true;
+    await this.waitForLiveTranscriptToSettle();
+
     const bufferToTranscribe = this.moonshineBuffer;
     this.moonshineBuffer = new Float32Array(0);
     this.isSpeechActive = false;
     this.silenceSamples = 0;
+    const spokenSamples = this.speechSamples;
+    this.speechSamples = 0;
 
     const live = this.currentTranscript();
-    if (!live && bufferToTranscribe.length < this.MIN_SPEECH_SAMPLES) {
+    if (!live && spokenSamples < this.MIN_SPEECH_SAMPLES) {
+      this.isCommitInProgress = false;
       return;
     }
 
@@ -938,6 +978,14 @@ export class App {
         this.pauseVoiceCapture();
         this.handleUserSpeech(live);
       }
+    } finally {
+      this.isCommitInProgress = false;
+    }
+  }
+
+  private async waitForLiveTranscriptToSettle() {
+    for (let i = 0; i < 12 && this.isLiveTranscriptInProgress; i++) {
+      await this.delay(25);
     }
   }
 
@@ -950,7 +998,7 @@ export class App {
     this.isListening.set(false);
 
     // Attempt to commit any remaining speech
-    const willCommit = commitPending && wasListening && !!this.transcriber && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES;
+    const willCommit = commitPending && wasListening && !!this.transcriber && this.speechSamples >= this.MIN_SPEECH_SAMPLES;
     if (willCommit) {
       // fire and forget
       this.commitCurrentUtterance().catch(() => {});
@@ -980,6 +1028,8 @@ export class App {
     this.moonshineBuffer = new Float32Array(0);
     this.isSpeechActive = false;
     this.silenceSamples = 0;
+    this.speechSamples = 0;
+    this.isLiveTranscriptInProgress = false;
 
     if (this.status() === 'listening') {
       this.status.set('idle');
