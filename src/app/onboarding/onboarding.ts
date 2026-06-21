@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output, computed, effect, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Output, computed, inject, signal } from '@angular/core';
 import { OnboardingService } from '../services/onboarding';
 
 interface OnboardingOption {
@@ -21,6 +21,11 @@ export class Onboarding {
   protected readonly step = signal(0);
   protected readonly suggestedName = this.onboarding.suggestedName;
   protected readonly name = signal('');
+  protected readonly nameEdited = signal(false);
+  protected readonly displayName = computed(() => {
+    if (this.nameEdited()) return this.name();
+    return this.name() || this.suggestedName() || '';
+  });
   protected readonly pronunciation = signal('');
   protected readonly primaryUse = signal('Everyday companion');
   protected readonly preferredInput = signal<'voice' | 'text' | 'both'>('both');
@@ -29,7 +34,7 @@ export class Onboarding {
   protected readonly totalSteps = 4;
   protected readonly progress = computed(() => `${((this.step() + 1) / this.totalSteps) * 100}%`);
   protected readonly canContinue = computed(() => {
-    if (this.step() === 1) return this.name().trim().length > 0;
+    if (this.step() === 1) return this.displayName().trim().length > 0;
     if (this.step() === 2) return this.downloadConsent();
     return true;
   });
@@ -52,17 +57,9 @@ export class Onboarding {
     }
   ];
 
-  constructor() {
-    effect(() => {
-      const suggested = this.suggestedName();
-      const currentName = this.name();
-      if (!suggested || currentName.trim().length > 0) return;
-      this.name.set(suggested);
-    });
-  }
-
   protected onNameInput(event: Event): void {
     const input = event.target as HTMLInputElement | null;
+    this.nameEdited.set(true);
     this.name.set(input?.value ?? '');
   }
 
@@ -92,7 +89,7 @@ export class Onboarding {
     }
 
     this.onboarding.complete({
-      name: this.name(),
+      name: this.displayName(),
       pronunciation: this.pronunciation(),
       primaryUse: this.primaryUse(),
       preferredInput: this.preferredInput(),
