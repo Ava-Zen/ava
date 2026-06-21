@@ -217,7 +217,7 @@ export class App {
   protected async onResetCache() {
     this.closeSettings();
     this.stopSpeaking();
-    this.stopMoonshineListening();
+    this.disableVoiceChannel();
     this.stopAudioPreview();
     this.stopCurrentAudio();
     this.preloadsStarted = false;
@@ -263,8 +263,8 @@ export class App {
   }
 
   protected setManualInputMode(enabled: boolean) {
-    if (enabled && this.isListening()) {
-      this.stopMoonshineListening();
+    if (enabled && this.voiceEnabled()) {
+      this.disableVoiceChannel();
     }
 
     this.manualInputEnabled.set(enabled);
@@ -446,10 +446,16 @@ export class App {
 
   // Voice / conversation state
   protected readonly isListening = signal(false);
+  protected readonly voiceEnabled = signal(false);
   protected readonly isThinking = signal(false);
   protected readonly isPaused = signal(false);
   protected readonly status = signal<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   protected readonly currentTranscript = signal('');
+  protected readonly voiceButtonLabel = computed(() => {
+    if (!this.voiceEnabled()) return 'Speak';
+    if (this.isListening()) return 'Listening';
+    return 'Voice on';
+  });
 
   protected readonly statusLabel = computed(() => {
     if (this.isLoadingModel()) return 'Loading Moonshine…';
@@ -610,12 +616,34 @@ export class App {
   protected modelLoadInfo = signal<string>('');  // e.g. "webgpu/q4" or "wasm/q8"
 
   protected async toggleVoice() {
-    if (this.isListening()) {
-      this.stopMoonshineListening();
+    if (this.voiceEnabled()) {
+      this.disableVoiceChannel();
       return;
     }
 
-    await this.startMoonshineListening();
+    await this.enableVoiceChannel();
+  }
+
+  private async enableVoiceChannel() {
+    this.voiceEnabled.set(true);
+    if (!this.isListening() && !this.isThinking() && this.status() !== 'speaking') {
+      await this.startMoonshineListening();
+    }
+  }
+
+  private disableVoiceChannel() {
+    this.voiceEnabled.set(false);
+    this.stopMoonshineListening();
+  }
+
+  private pauseVoiceCapture() {
+    this.stopMoonshineListening({ commitPending: false, submitPartial: false });
+  }
+
+  private resumeVoiceCaptureIfEnabled() {
+    if (!this.voiceEnabled() || this.manualInputEnabled() || this.showOnboarding() || this.showSettings()) return;
+    if (this.isListening() || this.isThinking() || this.status() === 'speaking') return;
+    this.startMoonshineListening().catch(() => {});
   }
 
   private async supportsWebGPU(): Promise<boolean> {
@@ -735,6 +763,8 @@ export class App {
   }
 
   private async startMoonshineListening() {
+    if (this.isListening() || this.manualInputEnabled()) return;
+
     try {
       this.currentTranscript.set('');
       this.moonshineBuffer = new Float32Array(0);
@@ -823,6 +853,7 @@ export class App {
 
     } catch (err: any) {
       console.error('Moonshine STT start error', err);
+      this.voiceEnabled.set(false);
       this.stopMoonshineListening({ commitPending: false, submitPartial: false });
 
       if (!this.transcriber) {
@@ -897,14 +928,14 @@ export class App {
       if (finalText) {
         this.currentTranscript.set('');
         this.lastLiveUpdate = 0;
-        this.stopMoonshineListening({ commitPending: false, submitPartial: false });
+        this.pauseVoiceCapture();
         this.handleUserSpeech(finalText);
       }
     } catch (e) {
       console.error('Moonshine transcription error on commit', e);
       if (live) {
         this.currentTranscript.set('');
-        this.stopMoonshineListening({ commitPending: false, submitPartial: false });
+        this.pauseVoiceCapture();
         this.handleUserSpeech(live);
       }
     }
@@ -967,7 +998,7 @@ export class App {
     this.currentTranscript.set('');
 
     if (this.isListeningStopCommand(text)) {
-      this.stopMoonshineListening({ commitPending: false, submitPartial: false });
+      this.disableVoiceChannel();
       return;
     }
 
@@ -1060,6 +1091,7 @@ export class App {
     await this.speak(response);
 
     if (this.status() === 'speaking') this.status.set('idle');
+    this.resumeVoiceCaptureIfEnabled();
   }
 
   /** Routes an open-ended question to Gemma, speaking a filler line first. */
@@ -1650,6 +1682,7 @@ export class App {
     this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
     if (this.status() === 'speaking') this.status.set('idle');
+    this.resumeVoiceCaptureIfEnabled();
   }
 
   private async playAudioBlob(blob: Blob): Promise<boolean> {

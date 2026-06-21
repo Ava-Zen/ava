@@ -35,7 +35,7 @@
           (click)="toggleVoice()"
           (keydown.enter)="toggleVoice()"
           title="Toggle listening (Space)"
-          [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'"
+          [attr.aria-label]="voiceEnabled() ? 'Turn off Ava voice channel' : 'Start speaking with Ava'"
         >
           <span class="orb-ring"></span>
           <span
@@ -63,10 +63,13 @@
             <small>Moonshine Base ({{ modelLoadInfo() || 'auto' }})</small>
           } @else if (isThinking()) {
             <span>Ava is reflecting</span>
-            <small>Working inside {{ currentGarden()?.name || 'this garden' }}</small>
+            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Working inside ' + (currentGarden()?.name || 'this garden') }}</small>
           } @else if (status() === 'speaking') {
             <span>{{ voiceName() }} speaking</span>
-            <small>Ava voice active</small>
+            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
+          } @else if (voiceEnabled()) {
+            <span>Voice channel on</span>
+            <small>Ready to listen</small>
           } @else {
             <span>Ready when you are</span>
             <small>Local speech and voice</small>
@@ -347,7 +350,7 @@
                   (click)="onPrimaryActionClick()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    @if (isListening()) {
+                    @if (voiceEnabled()) {
                       <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
                     } @else {
                       <rect x="9" y="2" width="6" height="12" rx="3"></rect>
@@ -356,7 +359,7 @@
                       <path d="M8 22h8"></path>
                     }
                   </svg>
-                  <span>{{ isListening() ? 'Stop mic' : 'Speak' }}</span>
+                  <span>{{ voiceButtonLabel() }}</span>
                 </button>
               }
             </div>
