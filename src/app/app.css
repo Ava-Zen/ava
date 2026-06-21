@@ -320,6 +320,7 @@
   width: min(460px, 100%);
   justify-content: space-between;
   gap: 18px;
+  min-width: 0;
   padding: clamp(12px, 2vmin, 18px) clamp(14px, 2.4vmin, 22px);
   border-radius: 22px;
   background: rgba(4, 8, 13, 0.5);
@@ -327,13 +328,21 @@
   text-align: left;
 }
 .voice-status span {
+  min-width: 0;
   font-size: clamp(1rem, 2.4vmin, 1.28rem);
   font-weight: 780;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .voice-status small {
+  min-width: 0;
   color: var(--muted);
   font-size: clamp(0.82rem, 1.8vmin, 1rem);
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .live-transcript {
   width: min(520px, 100%);
@@ -471,6 +480,10 @@
   justify-content: space-between;
   gap: 16px;
   padding: 4px 4px 16px;
+  min-width: 0;
+}
+.panel-header > div {
+  min-width: 0;
 }
 .panel-header h2 {
   margin: 6px 0 0;
@@ -480,7 +493,8 @@
   letter-spacing: -0.01em;
 }
 .privacy-badge {
-  max-width: 260px;
+  min-width: 0;
+  max-width: min(260px, 42%);
   padding: 10px 15px;
   color: var(--green);
   font-weight: 750;
@@ -707,9 +721,10 @@
 .ava-footer {
   padding: 4px 0 2px;
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(0, 720px) minmax(180px, 1fr);
+  grid-template-columns: auto minmax(0, 720px) auto;
   align-items: center;
-  gap: 12px 16px;
+  justify-content: space-between;
+  gap: 12px clamp(8px, 1.4vw, 16px);
   overflow: visible;
   background: transparent;
   border: 0;
@@ -739,6 +754,7 @@
   width: 100%;
   min-width: 0;
   justify-content: center;
+  justify-self: center;
 }
 .composer-stack {
   width: 100%;
@@ -769,6 +785,7 @@
   background: rgba(255, 255, 255, 0.06);
   font-weight: 780;
   font-size: 1.08rem;
+  white-space: nowrap;
   transition:
     transform 0.2s ease,
     border-color 0.2s ease,
@@ -776,6 +793,7 @@
 }
 .tool-btn svg,
 .primary-tool svg {
+  flex: 0 0 auto;
   width: 23px;
   height: 23px;
 }
@@ -1000,7 +1018,6 @@
 /* ---------- Footer: compact controls on small screens ---------- */
 @media (max-width: 980px) {
   .ava-footer {
-    grid-template-columns: minmax(128px, 1fr) minmax(0, 620px) minmax(90px, 1fr);
     gap: 10px 12px;
   }
   .footer-side {
@@ -1045,9 +1062,31 @@
   }
 }
 
+@media (max-width: 860px) {
+  .panel-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+  }
+  .privacy-badge {
+    width: 100%;
+    max-width: 100%;
+    justify-self: start;
+  }
+  .footer-side-end .tool-btn {
+    width: 58px;
+    min-width: 58px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  .footer-side-end .tool-btn span {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   .ava-footer {
-    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px 10px;
   }
   .composer-row {
@@ -1124,6 +1163,24 @@
     min-height: 38px;
     padding: 0 12px;
     font-size: 0.92rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .composer-row:has(.manual-composer) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .manual-composer {
+    min-width: 0;
+  }
+  .send-tool {
+    width: 54px;
+    min-width: 54px;
+    padding-inline: 0;
+  }
+  .send-tool span {
+    display: none;
   }
 }
 

@@ -115,8 +115,8 @@ export class App {
   protected readonly activityBadgeLabel = computed(() => {
     if (this.isModelLoading()) return 'Loading speech';
     if (this.isKokoroLoading()) return 'Loading voice';
-    if (this.llm.isLoading()) return this.cleanLoadLabel(this.llm.loadInfo()) || 'Loading chat model';
-    if (this.agents.isLoading()) return this.cleanLoadLabel(this.agents.loadInfo()) || 'Loading agent';
+    if (this.llm.isLoading()) return 'Loading chat';
+    if (this.agents.isLoading()) return 'Loading agent';
     if (this.isGeneratingAudioFile()) return 'Generating audio';
     if (this.isThinking()) return 'Thinking';
     if (this.hasActiveAgents()) return 'Agent working';
@@ -580,7 +580,8 @@ export class App {
   /**
    * Warms up the models Ava needs after the user has consented during
    * onboarding. Loads are intentionally sequential to avoid memory spikes while
-   * large ONNX sessions are being created.
+   * large ONNX sessions are being created. Background agent models stay lazy
+   * because they are only needed for explicit agent tasks.
    */
   private async preloadRequiredModels() {
     if (this.preloadsStarted || typeof window === 'undefined') return;
@@ -589,7 +590,6 @@ export class App {
     await this.preloadLlm();
     await this.preloadModel();
     await this.preloadKokoro();
-    await this.preloadAgentModel();
   }
 
   /**
@@ -603,17 +603,6 @@ export class App {
       await this.llm.ensureLoaded();
     } catch (e) {
       console.warn('Gemma preload failed; will retry on first use', e);
-    }
-  }
-
-  /** Warms up the selected Qwen background-agent model after onboarding. */
-  private async preloadAgentModel() {
-    if (typeof window === 'undefined') return;
-    try {
-      await this.agents.autoSelectModel();
-      await this.agents.ensureLoaded();
-    } catch (e) {
-      console.warn('Qwen agent preload failed; will retry on first agent task', e);
     }
   }
 
@@ -982,11 +971,19 @@ export class App {
       return;
     }
 
-    this.status.set('thinking');
-    this.isThinking.set(true);
-
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
+
+    if (this.isNewConversationCommand(text)) {
+      this.resetCurrentConversation(gardenId);
+      this.status.set('thinking');
+      this.isThinking.set(true);
+      await this.respond(gardenId, 'Okay, starting a fresh conversation.');
+      return;
+    }
+
+    this.status.set('thinking');
+    this.isThinking.set(true);
 
     const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
 
@@ -1033,6 +1030,20 @@ export class App {
     return /\b(stop|end|turn off|shut off|disable|mute)\b(?:\s+(the|my|your))?\s+(listening|mic|microphone|voice|recording|voice channel)\b/.test(normalized)
       || /\b(stop|end)\s+(listening|recording)\b/.test(normalized)
       || /\b(mic|microphone)\s+(off|stop)\b/.test(normalized);
+  }
+
+  private isNewConversationCommand(text: string): boolean {
+    const normalized = text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^(?:(?:hey\s+)?ava\s+|please\s+|can you\s+|could you\s+|would you\s+|can we\s+|could we\s+)+/, '')
+      .replace(/\s+(please|for me)$/g, '');
+
+    return /^(new|start a new|begin a new|fresh|reset|clear|wipe|erase)\s+(the\s+|my\s+|current\s+)?(conversation|chat|thread)$/.test(normalized)
+      || /^(new conversation|new chat|fresh conversation|fresh chat|start fresh|start over|start from scratch|begin again)$/.test(normalized)
+      || /^(let'?s|lets|let us)\s+(start over|start fresh|start a new conversation|begin again)$/.test(normalized);
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */
@@ -1730,9 +1741,11 @@ export class App {
   protected clearConversation() {
     this.composerMenuOpen.set(false);
     const gardenId = this.currentGarden()?.id;
-    if (gardenId) {
-      this.setGardenMessages(gardenId, []);
-    }
+    if (gardenId) this.resetCurrentConversation(gardenId);
+  }
+
+  private resetCurrentConversation(gardenId: string) {
+    this.setGardenMessages(gardenId, []);
     this.currentTranscript.set('');
     this.manualPrompt.set('');
     this.composerNotice.set('');
