@@ -40,27 +40,16 @@
         <section class="onboarding-step">
           <p class="overline">Name</p>
           <h1 id="onboarding-title">What should Ava call you?</h1>
-          @if (suggestedName() && !nameAnswered()) {
-            <div class="name-guess">
-              <span>Is your name</span>
-              <strong>{{ suggestedName() }}?</strong>
-              <div>
-                <button type="button" class="choice-btn primary" (click)="acceptSuggestedName()">Yes</button>
-                <button type="button" class="choice-btn" (click)="editSuggestedName()">Edit</button>
-              </div>
-            </div>
-          } @else {
-            <label class="field">
-              <span>Your name</span>
-              <input
-                type="text"
-                autocomplete="name"
-                [value]="name()"
-                (input)="onNameInput($event)"
-                placeholder="Sondre"
-              />
-            </label>
-          }
+          <label class="field">
+            <span>Your name</span>
+            <input
+              type="text"
+              autocomplete="name"
+              [value]="name()"
+              (input)="onNameInput($event)"
+              placeholder="Sondre"
+            />
+          </label>
 
           <label class="field">
             <span>Pronunciation or nickname</span>
@@ -73,8 +62,8 @@
           </label>
 
           <p class="fine-print">
-            Device account names are only a best guess. If Ava guessed poorly, type the name
-            or pronunciation you want saved locally.
+            Device account names are only a best guess. If Ava filled this incorrectly, just type
+            the name or pronunciation you want saved locally.
           </p>
         </section>
       }

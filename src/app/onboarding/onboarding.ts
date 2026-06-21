@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output, computed, inject, signal } from '@angular/core';
+import { Component, EventEmitter, Output, computed, effect, inject, signal } from '@angular/core';
 import { OnboardingService } from '../services/onboarding';
 
 interface OnboardingOption {
@@ -25,7 +25,6 @@ export class Onboarding {
   protected readonly primaryUse = signal('Everyday companion');
   protected readonly preferredInput = signal<'voice' | 'text' | 'both'>('both');
   protected readonly downloadConsent = signal(false);
-  protected readonly nameAnswered = signal(false);
 
   protected readonly totalSteps = 4;
   protected readonly progress = computed(() => `${((this.step() + 1) / this.totalSteps) * 100}%`);
@@ -53,16 +52,13 @@ export class Onboarding {
     }
   ];
 
-  protected acceptSuggestedName(): void {
-    const suggested = this.suggestedName();
-    if (!suggested) return;
-    this.name.set(suggested);
-    this.nameAnswered.set(true);
-  }
-
-  protected editSuggestedName(): void {
-    this.name.set(this.suggestedName() ?? '');
-    this.nameAnswered.set(true);
+  constructor() {
+    effect(() => {
+      const suggested = this.suggestedName();
+      const currentName = this.name();
+      if (!suggested || currentName.trim().length > 0) return;
+      this.name.set(suggested);
+    });
   }
 
   protected onNameInput(event: Event): void {

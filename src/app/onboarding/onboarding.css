@@ -128,7 +128,6 @@ h1 {
 
 .capability-grid div,
 .download-panel,
-.name-guess,
 .option-item {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 18px;
@@ -151,24 +150,6 @@ span,
 .fine-print {
   color: #b7c8c0;
   line-height: 1.45;
-}
-
-.name-guess {
-  padding: clamp(18px, 3vw, 26px);
-  display: grid;
-  gap: 14px;
-}
-
-.name-guess strong {
-  color: #ffffff;
-  font-size: clamp(2rem, 5vw, 3.6rem);
-  line-height: 1;
-}
-
-.name-guess div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
 }
 
 .field {
@@ -255,7 +236,6 @@ span,
 }
 
 .segmented button,
-.choice-btn,
 .continue-btn,
 .secondary-btn {
   min-height: 46px;
@@ -270,7 +250,6 @@ span,
 }
 
 .segmented button.active,
-.choice-btn.primary,
 .continue-btn {
   color: #06110f;
   border-color: transparent;
