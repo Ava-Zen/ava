@@ -224,7 +224,7 @@
   );
   filter: blur(12px);
   opacity: 0.6;
-  animation: spin 9s linear infinite;
+  animation: colorPulse 3.2s ease-in-out infinite;
   transition:
     opacity 0.35s ease,
     filter 0.35s ease;
@@ -249,13 +249,15 @@
     0 0 0 16px rgba(85, 199, 184, 0.13),
     0 0 80px rgba(85, 199, 184, 0.4),
     inset 0 2px rgba(255, 255, 255, 0.22);
-  animation: pulse 1.45s ease-in-out infinite;
 }
 .orb.thinking {
   animation: breathe 1.9s ease-in-out infinite;
 }
 .orb.loading {
-  animation: spin 2.1s linear infinite;
+  box-shadow:
+    0 0 0 16px rgba(85, 199, 184, 0.12),
+    0 0 74px rgba(216, 194, 135, 0.28),
+    inset 0 2px rgba(255, 255, 255, 0.22);
 }
 .orb.speaking {
   box-shadow:
@@ -280,23 +282,32 @@
   opacity: 0.92;
   filter: blur(17px);
 }
+.orb-container:has(.orb.listening) .orb-ring,
+.orb-container:has(.orb.loading) .orb-ring {
+  opacity: 0.94;
+  filter: blur(18px) saturate(1.25);
+  animation: colorPulse 1.35s ease-in-out infinite;
+}
 .orb-container:hover .mic-icon {
   transform: scale(1.08);
   color: #ffffff;
-}
-@keyframes pulse {
-  50% {
-    transform: scale(1.05);
-  }
 }
 @keyframes breathe {
   50% {
     transform: scale(1.06);
   }
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+@keyframes colorPulse {
+  0%,
+  100% {
+    opacity: 0.54;
+    filter: blur(11px) saturate(1);
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 0.96;
+    filter: blur(19px) saturate(1.35);
+    transform: scale(1.045);
   }
 }
 @keyframes pulseDot {
