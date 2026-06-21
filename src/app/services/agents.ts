@@ -174,8 +174,8 @@ export class AgentsService {
     this.isLoading.set(true);
     this.isReady.set(false);
 
-    const { hasWebGPU } = await detectDeviceCapability();
-    const attempts = this.buildLoadAttempts(hasWebGPU, uncensored);
+    const { supportsLlmWebGPU } = await detectDeviceCapability();
+    const attempts = this.buildLoadAttempts(supportsLlmWebGPU, uncensored);
 
     let lastError: unknown = null;
     try {
@@ -217,12 +217,12 @@ export class AgentsService {
 
     if (uncensored) {
       attempts.push(
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' },
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
       );
     } else {
       attempts.push(
-        { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
         { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
       );
     }

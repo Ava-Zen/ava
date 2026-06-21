@@ -93,6 +93,7 @@ export class LlmService {
 
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
+  private loadedDevice: 'webgpu' | 'wasm' | null = null;
 
   /** Picks the best default model for this device unless the user has overridden it. */
   async autoSelectModel(): Promise<void> {
@@ -114,6 +115,7 @@ export class LlmService {
     // Force a reload on next generate.
     this.generator = null;
     this.loadPromise = null;
+    this.loadedDevice = null;
     this.isReady.set(false);
   }
 
@@ -133,19 +135,21 @@ export class LlmService {
     }
   }
 
-  private async load(): Promise<any> {
+  private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
     const fallbackModel = GEMMA_MODELS.medium;
     const candidates = this.isUncensoredMode()
       ? [preferredModel, fallbackModel]
-      : [preferredModel];
+      : preferredModel.id === fallbackModel.id
+        ? [preferredModel]
+        : [preferredModel, fallbackModel];
 
     this.isLoading.set(true);
     this.isReady.set(false);
 
-    const { hasWebGPU } = await detectDeviceCapability();
-    const attempts = this.buildLoadAttempts(hasWebGPU, this.isUncensoredMode());
+    const { supportsLlmWebGPU } = await detectDeviceCapability();
+    const attempts = this.buildLoadAttempts(supportsLlmWebGPU && !wasmOnly, this.isUncensoredMode());
 
     let lastError: unknown = null;
     try {
@@ -160,12 +164,14 @@ export class LlmService {
             });
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
+            this.loadedDevice = attempt.device;
             console.info(`[Gemma] Loaded ${repoId} with ${attempt.label}`);
             return this.generator;
           } catch (err) {
             lastError = err;
             console.warn(`[Gemma] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
             this.generator = null;
+            this.loadedDevice = null;
           }
         }
       }
@@ -188,12 +194,12 @@ export class LlmService {
 
     if (uncensored) {
       attempts.push(
-        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' },
-        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
+        { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
       );
     } else {
       attempts.push(
-        { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
+        { device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' },
         { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
       );
     }
@@ -205,7 +211,6 @@ export class LlmService {
    * History should be the recent conversation turns (excluding the system prompt).
    */
   async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
-    const generator = await this.ensureLoaded();
     this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
 
     const messages: ChatTurn[] = [
@@ -221,6 +226,34 @@ export class LlmService {
       top_p: 0.9,
     };
 
+    try {
+      const generator = await this.ensureLoaded();
+      return await this.runGeneration(generator, messages, userText, history, options);
+    } catch (e) {
+      if (!this.isRecoverableWebGpuRuntimeError(e) || this.loadedDevice !== 'webgpu') {
+        this.thinkingTrace.set([]);
+        throw e;
+      }
+
+      console.warn('[Gemma] WebGPU generation failed; retrying on WASM', e);
+      this.thinkingTrace.set(['Preparing context', 'Switching chat model to CPU', 'Generating reply']);
+      const generator = await this.reloadOnWasm();
+      try {
+        return await this.runGeneration(generator, messages, userText, history, options);
+      } catch (retryError) {
+        this.thinkingTrace.set([]);
+        throw retryError;
+      }
+    }
+  }
+
+  private async runGeneration(
+    generator: any,
+    messages: ChatTurn[],
+    userText: string,
+    history: ChatTurn[],
+    options: Record<string, unknown>
+  ): Promise<string> {
     let output: any;
     let promptPrefix = '';
     try {
@@ -237,6 +270,14 @@ export class LlmService {
     const reply = this.extractText(output, promptPrefix);
     this.thinkingTrace.set([]);
     return reply;
+  }
+
+  private async reloadOnWasm(): Promise<any> {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    return await this.load(true);
   }
 
   private buildPlainPrompt(userText: string, history: ChatTurn[]): string {
@@ -257,6 +298,11 @@ export class LlmService {
 
   private isMissingChatTemplateError(error: unknown): boolean {
     return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
+  }
+
+  private isRecoverableWebGpuRuntimeError(error: unknown): boolean {
+    const message = String((error as any)?.message ?? error);
+    return /WebGPU|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU/i.test(message);
   }
 
   private extractText(output: any, promptPrefix = ''): string {

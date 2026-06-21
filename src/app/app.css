@@ -453,7 +453,7 @@
 /* ---------- History panel ---------- */
 .history-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   padding: clamp(18px, 2vw, 24px);
 }
 .panel-header {
@@ -487,6 +487,7 @@
   margin: -6px 4px 12px;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 .thinking-trace span {
@@ -695,7 +696,7 @@
 .ava-footer {
   padding: 4px 0 2px;
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(0, 720px) minmax(180px, 1fr);
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 720px) minmax(180px, 1fr);
   align-items: center;
   gap: 12px 16px;
   overflow: visible;
@@ -714,7 +715,7 @@
 }
 .footer-side {
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
 .footer-side-start {
@@ -737,6 +738,7 @@
   min-width: 0;
   gap: 12px;
   flex-wrap: nowrap;
+  justify-content: center;
 }
 .action-menu-shell {
   position: relative;

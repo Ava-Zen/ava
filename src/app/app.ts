@@ -454,20 +454,26 @@ export class App {
       const hasWebGPU = await this.supportsWebGPU();
       const attempts: any[] = hasWebGPU
         ? [
-            { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
-            { device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' } },
+            {
+              device: 'webgpu',
+              dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+              label: 'webgpu/fp32',
+            },
           ]
         : [];
       attempts.push(
-        { device: 'wasm', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' } },
-        { device: 'wasm', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' } }
+        {
+          device: 'wasm',
+          dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+          label: 'wasm/fp32',
+        }
       );
 
       for (const a of attempts) {
         try {
           this.transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/moonshine-base-ONNX', a);
           await this.transcriber(new Float32Array(4000));
-          this.modelLoadInfo.set(hasWebGPU ? 'webgpu' : 'wasm');
+          this.modelLoadInfo.set(a.label);
           return;
         } catch {
           this.transcriber = null;
@@ -567,25 +573,23 @@ export class App {
 
   /**
    * Loads Moonshine Base with device/dtype fallbacks.
-   * WebGPU + q4 on the base merged decoder can fail with "Missing required scale".
-   * We try the recommended config first, then fall back to safer options.
+   * The quantized merged decoder variants can fail in ORT Web with missing DQ
+   * scale metadata, so speech recognition uses fp32 and only changes backend.
    */
   private async ensureTranscriberLoaded(): Promise<any> {
     if (this.transcriber) return this.transcriber;
 
     this.isModelLoading.set(true);
     this.status.set('listening');
-    this.currentTranscript.set('Loading Moonshine Base…');
+    this.currentTranscript.set('');
 
     const hasWebGPU = await this.supportsWebGPU();
     const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: any; label: string }> = [];
 
     if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, label: 'webgpu/q4' });
       attempts.push({ device: 'webgpu', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'webgpu/fp32' });
     }
     attempts.push(
-      { device: 'wasm', dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, label: 'wasm/q8' },
       { device: 'wasm', dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'wasm/fp32' }
     );
 
@@ -595,7 +599,6 @@ export class App {
       for (const attempt of attempts) {
         try {
           this.modelLoadInfo.set(attempt.label);
-          this.currentTranscript.set(`Loading Moonshine Base (${attempt.label})…`);
 
           this.transcriber = await pipeline(
             'automatic-speech-recognition',
@@ -614,7 +617,7 @@ export class App {
         }
       }
       console.error('Moonshine Base failed to load on all backends', lastError);
-      this.currentTranscript.set('Moonshine Base could not be loaded.');
+      this.currentTranscript.set('');
       throw lastError ?? new Error('Moonshine load failed');
     } finally {
       this.isModelLoading.set(false);
@@ -624,11 +627,10 @@ export class App {
   private async reloadTranscriberOnWasm(): Promise<any> {
     this.transcriber = null;
     this.isModelLoading.set(true);
-    this.modelLoadInfo.set('wasm/q8');
-    this.currentTranscript.set('Reloading Moonshine on CPU...');
+    this.modelLoadInfo.set('wasm/fp32');
+    this.currentTranscript.set('');
 
     const attempts: Array<{ dtype: any; label: string }> = [
-      { dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, label: 'wasm/q8' },
       { dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' }, label: 'wasm/fp32' },
     ];
 
@@ -714,7 +716,7 @@ export class App {
       this.processor.connect(gain);
       gain.connect(this.audioContext.destination);
 
-      const transcriber = await this.ensureTranscriberLoaded();
+      await this.ensureTranscriberLoaded();
 
       this.isListening.set(true);
       this.status.set('listening');
@@ -745,7 +747,7 @@ export class App {
 
           // If enough silence after speech, commit current utterance
           if (this.silenceSamples >= this.SILENCE_FOR_COMMIT && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES) {
-            this.commitCurrentUtterance(transcriber);
+            this.commitCurrentUtterance();
           }
         } else {
           // Not in speech, keep small rolling context (last 1s) for better start of next utterance
@@ -759,22 +761,17 @@ export class App {
             (now - this.lastLiveUpdate > 900) && // update ~every 900ms for smooth live text
             this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES) {
           this.lastLiveUpdate = now;
-          this.updateLiveTranscript(transcriber);
+          this.updateLiveTranscript();
         }
       };
 
     } catch (err: any) {
       console.error('Moonshine STT start error', err);
-      this.stopMoonshineListening();
+      this.stopMoonshineListening({ commitPending: false, submitPartial: false });
 
-      // Only use simulation if we have no working transcriber at all
       if (!this.transcriber) {
-        this.currentTranscript.set('Moonshine unavailable – using demo mode');
+        this.currentTranscript.set('Moonshine unavailable');
         setTimeout(() => this.currentTranscript.set(''), 1200);
-      }
-      // Still allow the orb tap to feel responsive (demo only if completely broken)
-      if (!this.transcriber) {
-        this.simulateVoiceInput();
       }
     }
   }
@@ -812,11 +809,11 @@ export class App {
     this.moonshineBuffer = combined;
   }
 
-  private async updateLiveTranscript(transcriber: any) {
+  private async updateLiveTranscript() {
     try {
       if (this.moonshineBuffer.length < this.MIN_SPEECH_SAMPLES) return;
 
-      const result: any = await this.transcribeWithRecovery(this.moonshineBuffer, transcriber);
+      const result: any = await this.transcribeWithRecovery(this.moonshineBuffer);
       const text = (result?.text || '').trim();
       if (text) {
         this.currentTranscript.set(text);
@@ -826,7 +823,7 @@ export class App {
     }
   }
 
-  private async commitCurrentUtterance(transcriber: any) {
+  private async commitCurrentUtterance() {
     const bufferToTranscribe = this.moonshineBuffer;
     this.moonshineBuffer = new Float32Array(0);
     this.isSpeechActive = false;
@@ -838,33 +835,38 @@ export class App {
     }
 
     try {
-      const result: any = await this.transcribeWithRecovery(bufferToTranscribe, transcriber);
+      const result: any = await this.transcribeWithRecovery(bufferToTranscribe);
       let finalText = (result?.text || live || '').trim();
 
       if (finalText) {
         this.currentTranscript.set('');
         this.lastLiveUpdate = 0;
+        this.stopMoonshineListening({ commitPending: false, submitPartial: false });
         this.handleUserSpeech(finalText);
       }
     } catch (e) {
       console.error('Moonshine transcription error on commit', e);
       if (live) {
         this.currentTranscript.set('');
+        this.stopMoonshineListening({ commitPending: false, submitPartial: false });
         this.handleUserSpeech(live);
       }
     }
   }
 
-  private stopMoonshineListening() {
+  private stopMoonshineListening(
+    options: { commitPending?: boolean; submitPartial?: boolean } = {}
+  ) {
+    const commitPending = options.commitPending ?? true;
+    const submitPartial = options.submitPartial ?? true;
     const wasListening = this.isListening();
     this.isListening.set(false);
 
     // Attempt to commit any remaining speech
-    const willCommit = wasListening && !!this.transcriber && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES;
+    const willCommit = commitPending && wasListening && !!this.transcriber && this.moonshineBuffer.length >= this.MIN_SPEECH_SAMPLES;
     if (willCommit) {
-      const trans = this.transcriber;
       // fire and forget
-      this.commitCurrentUtterance(trans).catch(() => {});
+      this.commitCurrentUtterance().catch(() => {});
     }
 
     // Cleanup audio graph
@@ -898,7 +900,7 @@ export class App {
 
     // If there is a live partial when stopping, commit it
     const partial = this.currentTranscript();
-    if (partial) {
+    if (submitPartial && partial) {
       const text = partial;
       this.currentTranscript.set('');
       this.handleUserSpeech(text);
@@ -909,7 +911,7 @@ export class App {
     this.currentTranscript.set('');
 
     if (this.isListeningStopCommand(text)) {
-      this.stopMoonshineListening();
+      this.stopMoonshineListening({ commitPending: false, submitPartial: false });
       return;
     }
 

@@ -12,6 +12,10 @@ export type DeviceTier = 'low' | 'medium' | 'high';
 export interface DeviceCapability {
   tier: DeviceTier;
   hasWebGPU: boolean;
+  /** WebGPU adapter workgroup storage limit in bytes, when available. */
+  maxComputeWorkgroupStorageSize?: number;
+  /** Whether local text generation should use WebGPU for current ONNX kernels. */
+  supportsLlmWebGPU: boolean;
   /** Approximate device memory in GB (Chrome-only; undefined elsewhere). */
   memoryGb?: number;
   /** Number of logical CPU cores. */
@@ -20,13 +24,17 @@ export interface DeviceCapability {
 
 let cached: DeviceCapability | null = null;
 
-export async function supportsWebGPU(): Promise<boolean> {
+export async function getWebGPUAdapter(): Promise<any | null> {
   try {
     // @ts-ignore — navigator.gpu is not in all lib targets yet
-    return !!(navigator.gpu && (await navigator.gpu.requestAdapter()));
+    return navigator.gpu ? await navigator.gpu.requestAdapter() : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function supportsWebGPU(): Promise<boolean> {
+  return !!(await getWebGPUAdapter());
 }
 
 /**
@@ -37,7 +45,12 @@ export async function supportsWebGPU(): Promise<boolean> {
 export async function detectDeviceCapability(force = false): Promise<DeviceCapability> {
   if (cached && !force) return cached;
 
-  const hasWebGPU = await supportsWebGPU();
+  const adapter = await getWebGPUAdapter();
+  const hasWebGPU = !!adapter;
+  const maxComputeWorkgroupStorageSize =
+    adapter?.limits?.maxComputeWorkgroupStorageSize as number | undefined;
+  const supportsLlmWebGPU =
+    hasWebGPU && (maxComputeWorkgroupStorageSize ?? 0) >= 65536;
   const memoryGb = typeof navigator !== 'undefined'
     ? (navigator as any).deviceMemory as number | undefined
     : undefined;
@@ -54,6 +67,13 @@ export async function detectDeviceCapability(force = false): Promise<DeviceCapab
     tier = 'low';
   }
 
-  cached = { tier, hasWebGPU, memoryGb, cores };
+  cached = {
+    tier,
+    hasWebGPU,
+    maxComputeWorkgroupStorageSize,
+    supportsLlmWebGPU,
+    memoryGb,
+    cores,
+  };
   return cached;
 }
