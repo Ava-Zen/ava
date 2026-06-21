@@ -689,6 +689,10 @@ export class App {
 
     const onnx = env.backends.onnx as any;
     onnx.wasm ??= {};
+    onnx.wasm.wasmPaths = {
+      mjs: new URL('onnxruntime/ort-wasm-simd-threaded.asyncify.mjs', window.location.href).href,
+      wasm: new URL('onnxruntime/ort-wasm-simd-threaded.asyncify.wasm', window.location.href).href,
+    };
 
     if (this.isAndroidWebView()) {
       onnx.wasm.numThreads = 1;
@@ -713,7 +717,6 @@ export class App {
     const models = this.isAndroidWebView()
       ? [
           { modelId: this.MOONSHINE_TINY_MODEL, modelName: 'Moonshine Tiny' },
-          { modelId: this.MOONSHINE_BASE_MODEL, modelName: 'Moonshine Base' },
         ]
       : [
           { modelId: this.MOONSHINE_BASE_MODEL, modelName: 'Moonshine Base' },

@@ -48,6 +48,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "ort-wasm-simd-threaded.asyncify.*",
+                "input": "node_modules/onnxruntime-web/dist",
+                "output": "onnxruntime"
               }
             ],
             "styles": [
