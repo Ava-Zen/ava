@@ -87,6 +87,18 @@ export class Settings {
     this.agentsService.setModel(id);
   }
 
+  fallbackConversationToCpu() {
+    void this.llmService.reloadOnCpu().catch(error => {
+      console.error('Conversation CPU fallback failed', error);
+    });
+  }
+
+  fallbackAgentToCpu() {
+    void this.agentsService.reloadOnCpu().catch(error => {
+      console.error('Agent CPU fallback failed', error);
+    });
+  }
+
   @Output() close = new EventEmitter<void>();
   @Output() selectGarden = new EventEmitter<string>();
   @Output() createGarden = new EventEmitter<{name: string; description?: string}>();

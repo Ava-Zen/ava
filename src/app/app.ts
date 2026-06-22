@@ -625,8 +625,6 @@ export class App {
     if (this.preloadsStarted || typeof window === 'undefined') return;
     this.preloadsStarted = true;
 
-    if (this.isAndroidWebView()) return;
-
     await this.preloadLlm();
     await this.preloadModel();
     await this.preloadKokoro();
@@ -683,7 +681,6 @@ export class App {
 
   private async supportsWebGPU(): Promise<boolean> {
     try {
-      if (this.isAndroidWebView()) return false;
       // @ts-ignore
       return !!(navigator.gpu && (await navigator.gpu.requestAdapter()));
     } catch {
@@ -740,7 +737,7 @@ export class App {
         label: string;
       }> = [];
 
-      if (hasWebGPU && !this.isAndroidWebView()) {
+      if (hasWebGPU) {
         attempts.push({
           ...model,
           device: 'webgpu',
@@ -749,12 +746,14 @@ export class App {
         });
       }
 
-      attempts.push({
-        ...model,
-        device: 'wasm',
-        dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
-        label: `${shortName} wasm/fp32`,
-      });
+      if (!hasWebGPU) {
+        attempts.push({
+          ...model,
+          device: 'wasm',
+          dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' },
+          label: `${shortName} wasm/fp32`,
+        });
+      }
 
       return attempts;
     });
@@ -851,13 +850,10 @@ export class App {
     try {
       return await transcriber(audio);
     } catch (e) {
-      if (!this.isRecoverableMoonshineGpuError(e) || !this.modelLoadInfo().startsWith('webgpu')) {
-        throw e;
+      if (this.isRecoverableMoonshineGpuError(e) && this.modelLoadInfo().startsWith('webgpu')) {
+        this.modelLoadInfo.set('speech webgpu failed');
       }
-
-      console.warn('Moonshine WebGPU failed during transcription; retrying on WASM', e);
-      const wasmTranscriber = await this.reloadTranscriberOnWasm();
-      return await wasmTranscriber(audio);
+      throw e;
     }
   }
 

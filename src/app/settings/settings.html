@@ -230,7 +230,7 @@
       </div>
       <div>
         <span>Runtime path</span>
-        <strong>{{ hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+        <strong>{{ hardware()?.hasWebNN ? 'WebNN NPU/GPU available' : hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
       </div>
     </div>
 
@@ -246,19 +246,35 @@
         <small>{{ formatMemory(hardware()?.memoryGb) }}</small>
       </div>
       <div class="diagnostic-item">
-        <span>WebGPU</span>
-        <strong>{{ hardware()?.hasWebGPU ? 'Detected' : 'Not used' }}</strong>
-        <small>{{ hardware()?.maxComputeWorkgroupStorageSize ? 'Workgroup storage ' + hardware()?.maxComputeWorkgroupStorageSize + ' bytes' : 'No compatible adapter for Ava' }}</small>
+        <span>Accelerators</span>
+        <strong>{{ hardware()?.hasWebNN ? 'WebNN detected' : hardware()?.hasWebGPU ? 'WebGPU detected' : 'Not available' }}</strong>
+        <small>{{ hardware()?.maxComputeWorkgroupStorageSize ? 'WebGPU workgroup storage ' + hardware()?.maxComputeWorkgroupStorageSize + ' bytes' : 'Ava tries NPU/GPU before CPU when exposed' }}</small>
       </div>
       <div class="diagnostic-item">
         <span>Conversation model</span>
         <strong>{{ conversationRuntimeLabel() }}</strong>
         <small>Configured: {{ selectedConversationModel().name }}</small>
+        <button
+          class="fallback-btn"
+          type="button"
+          (click)="fallbackConversationToCpu()"
+          [disabled]="conversationLoading()"
+        >
+          Use CPU fallback
+        </button>
       </div>
       <div class="diagnostic-item">
         <span>Agent model</span>
         <strong>{{ agentRuntimeLabel() }}</strong>
         <small>Configured: {{ selectedAgentModel().name }}</small>
+        <button
+          class="fallback-btn"
+          type="button"
+          (click)="fallbackAgentToCpu()"
+          [disabled]="agentLoading()"
+        >
+          Use CPU fallback
+        </button>
       </div>
       <div class="diagnostic-item">
         <span>Speech model</span>

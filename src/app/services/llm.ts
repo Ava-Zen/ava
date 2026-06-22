@@ -20,8 +20,10 @@ export interface LlmModelOption {
   tier: DeviceTier;
 }
 
+type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
+
 interface LoadAttempt {
-  device: 'webgpu' | 'wasm';
+  device: InferenceDevice;
   dtype: string;
   label: string;
 }
@@ -101,7 +103,7 @@ export class LlmService {
 
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
-  private loadedDevice: 'webgpu' | 'wasm' | null = null;
+  private loadedDevice: InferenceDevice | null = null;
 
   /** Picks the best default model for this device unless the user has overridden it. */
   async autoSelectModel(): Promise<void> {
@@ -144,6 +146,15 @@ export class LlmService {
     }
   }
 
+  async reloadOnCpu(): Promise<any> {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    this.activeModel.set(null);
+    return await this.load(true);
+  }
+
   private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
@@ -152,10 +163,11 @@ export class LlmService {
     this.isReady.set(false);
     this.activeModel.set(null);
 
-    const { supportsLlmWebGPU } = await detectDeviceCapability();
-    const useWebGPU = supportsLlmWebGPU && !wasmOnly && !isAndroidWebView();
-    const candidates = this.buildCandidateModels(preferredModel, useWebGPU);
-    const attempts = this.buildLoadAttempts(useWebGPU);
+    const capability = await detectDeviceCapability();
+    const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
+    const hasAccelerator = acceleratorAttempts.length > 0;
+    const candidates = this.buildCandidateModels(preferredModel, hasAccelerator);
+    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
 
     let lastError: unknown = null;
     try {
@@ -179,15 +191,17 @@ export class LlmService {
           }
         }
       }
-      this.loadInfo.set('Gemma could not be loaded.');
+      this.loadInfo.set(hasAccelerator
+        ? 'GPU/NPU chat failed. CPU fallback is available in Settings.'
+        : 'Gemma could not be loaded.');
       throw lastError ?? new Error('Gemma load failed');
     } finally {
       this.isLoading.set(false);
     }
   }
 
-  private buildCandidateModels(preferredModel: LlmModelOption, useWebGPU: boolean): LlmModelOption[] {
-    if (!useWebGPU) {
+  private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
+    if (!useAccelerator) {
       return [GEMMA_MODELS.low];
     }
 
@@ -197,18 +211,21 @@ export class LlmService {
       : [preferredModel, fallbackModel];
   }
 
-  private buildLoadAttempts(hasWebGPU: boolean): LoadAttempt[] {
+  private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
     const attempts: LoadAttempt[] = [];
-    if (hasWebGPU) {
+    if (capability.hasWebNN) {
+      attempts.push({ device: 'webnn-npu', dtype: 'q4', label: 'webnn-npu/q4' });
+      attempts.push({ device: 'webnn-gpu', dtype: 'q4', label: 'webnn-gpu/q4' });
+    }
+    if (capability.supportsLlmWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
       attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
-
-    // Current ONNX Runtime Web's WASM backend cannot execute some block-
-    // quantized Gemma graphs, and 1B fp32 can exceed WebView memory. Use fp32
-    // only with the small CPU fallback model.
-    attempts.push({ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' });
     return attempts;
+  }
+
+  private buildCpuLoadAttempts(): LoadAttempt[] {
+    return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
   }
 
   private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
@@ -254,20 +271,12 @@ export class LlmService {
       const generator = await this.ensureLoaded();
       return await this.runGeneration(generator, messages, userText, history, options);
     } catch (e) {
-      if (!this.isRecoverableWebGpuRuntimeError(e) || this.loadedDevice !== 'webgpu') {
-        this.thinkingTrace.set([]);
-        throw e;
+      if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
+        console.warn('[Gemma] Accelerator generation failed; CPU fallback is available in Settings', e);
+        this.loadInfo.set('GPU/NPU chat failed during generation. CPU fallback is available in Settings.');
       }
-
-      console.warn('[Gemma] WebGPU generation failed; retrying on WASM', e);
-      this.thinkingTrace.set(['Preparing context', 'Switching chat model to CPU', 'Generating reply']);
-      const generator = await this.reloadOnWasm();
-      try {
-        return await this.runGeneration(generator, messages, userText, history, options);
-      } catch (retryError) {
-        this.thinkingTrace.set([]);
-        throw retryError;
-      }
+      this.thinkingTrace.set([]);
+      throw e;
     }
   }
 
@@ -296,14 +305,6 @@ export class LlmService {
     return reply;
   }
 
-  private async reloadOnWasm(): Promise<any> {
-    this.generator = null;
-    this.loadPromise = null;
-    this.loadedDevice = null;
-    this.isReady.set(false);
-    return await this.load(true);
-  }
-
   private buildPlainPrompt(userText: string, history: ChatTurn[]): string {
     const turns = history
       .filter(turn => turn.role !== 'system')
@@ -324,9 +325,9 @@ export class LlmService {
     return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
   }
 
-  private isRecoverableWebGpuRuntimeError(error: unknown): boolean {
+  private isRecoverableAcceleratorRuntimeError(error: unknown): boolean {
     const message = String((error as any)?.message ?? error);
-    return /WebGPU|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU/i.test(message);
+    return /WebGPU|WebNN|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU|NPU/i.test(message);
   }
 
   private extractText(output: any, promptPrefix = ''): string {

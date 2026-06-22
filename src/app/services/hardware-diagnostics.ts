@@ -9,6 +9,7 @@ export interface HardwareDiagnostics {
   cores: number;
   memoryGb?: number;
   hasWebGPU: boolean;
+  hasWebNN: boolean;
   supportsLlmWebGPU: boolean;
   maxComputeWorkgroupStorageSize?: number;
   tier: DeviceCapability['tier'];
@@ -22,20 +23,19 @@ export class HardwareDiagnosticsService {
   readonly readinessLabel = computed(() => {
     const info = this.diagnostics();
     if (!info) return 'Checking device';
-    if (info.androidWebView) return 'Usable, but CPU-only today';
-    if (info.supportsLlmWebGPU && info.tier === 'high') return 'Strong local AI device';
-    if (info.supportsLlmWebGPU || info.tier === 'medium') return 'Good for local AI';
+    if ((info.hasWebNN || info.supportsLlmWebGPU) && info.tier === 'high') return 'Strong local AI device';
+    if (info.hasWebNN || info.supportsLlmWebGPU || info.tier === 'medium') return 'Good for local AI';
     return 'Limited local AI performance';
   });
 
   readonly readinessDetails = computed(() => {
     const info = this.diagnostics();
     if (!info) return 'Ava is checking browser and hardware capabilities.';
-    if (info.androidWebView) {
-      return 'Ava currently avoids WebGPU in Android WebView, so local chat runs through WASM on CPU. Voice can work, but open-ended replies may feel slow until cloud AI or a faster Android GPU path is available.';
+    if (info.hasWebNN) {
+      return 'This device exposes WebNN, so Ava will try NPU/GPU acceleration before any CPU fallback.';
     }
     if (info.supportsLlmWebGPU) {
-      return 'This browser exposes enough WebGPU for Ava to try GPU-backed local chat models.';
+      return 'This browser exposes WebGPU, so Ava will try GPU-backed local chat models before any CPU fallback.';
     }
     return 'Ava will use WASM on CPU for local models. Smaller models are recommended on this device.';
   });
@@ -57,6 +57,7 @@ export class HardwareDiagnosticsService {
       cores: capability.cores,
       memoryGb: capability.memoryGb,
       hasWebGPU: capability.hasWebGPU,
+      hasWebNN: capability.hasWebNN,
       supportsLlmWebGPU: capability.supportsLlmWebGPU,
       maxComputeWorkgroupStorageSize: capability.maxComputeWorkgroupStorageSize,
       tier: capability.tier,

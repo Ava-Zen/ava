@@ -82,7 +82,7 @@
             </div>
             <div class="readiness-card">
               <span>Runtime path</span>
-              <strong>{{ hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+              <strong>{{ hardware()?.hasWebNN ? 'WebNN NPU/GPU available' : hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
             </div>
           </div>
 
@@ -96,8 +96,8 @@
               <span>{{ formatMemory(hardware()?.memoryGb) }}</span>
             </div>
             <div>
-              <strong>{{ hardware()?.hasWebGPU ? 'WebGPU detected' : 'WebGPU not used' }}</strong>
-              <span>{{ hardware()?.supportsLlmWebGPU ? 'Ava can try GPU-backed chat' : 'Ava will use smaller CPU-backed models' }}</span>
+              <strong>{{ hardware()?.hasWebNN ? 'WebNN detected' : hardware()?.hasWebGPU ? 'WebGPU detected' : 'No accelerator exposed' }}</strong>
+              <span>{{ hardware()?.hasWebNN ? 'Ava can try NPU/GPU-backed chat' : hardware()?.supportsLlmWebGPU ? 'Ava can try GPU-backed chat' : 'Ava will use smaller CPU-backed models' }}</span>
             </div>
           </div>
 

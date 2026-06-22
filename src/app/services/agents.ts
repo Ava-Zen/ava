@@ -52,6 +52,14 @@ const UNCENSORED_AGENT_MODEL: LlmModelOption = {
   tier: 'medium',
 };
 
+type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
+
+interface LoadAttempt {
+  device: InferenceDevice;
+  dtype: string;
+  label: string;
+}
+
 const AGENT_SYSTEM_PROMPT =
   'You are an autonomous background agent working on behalf of Ava, a voice ' +
   'companion. You are given a single task and must complete it carefully and ' +
@@ -90,6 +98,7 @@ export class AgentsService {
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
   private queue: Promise<void> = Promise.resolve();
+  private loadedDevice: InferenceDevice | null = null;
 
   async autoSelectModel(): Promise<void> {
     if (this.hasUserOverride()) return;
@@ -107,6 +116,7 @@ export class AgentsService {
     }
     this.generator = null;
     this.loadPromise = null;
+    this.loadedDevice = null;
     this.isReady.set(false);
     this.activeModel.set(null);
   }
@@ -114,8 +124,18 @@ export class AgentsService {
   resetLoadedModel(): void {
     this.generator = null;
     this.loadPromise = null;
+    this.loadedDevice = null;
     this.isReady.set(false);
     this.activeModel.set(null);
+  }
+
+  async reloadOnCpu(): Promise<any> {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    this.activeModel.set(null);
+    return await this.load(true);
   }
 
   /**
@@ -165,7 +185,7 @@ export class AgentsService {
     }
   }
 
-  private async load(): Promise<any> {
+  private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
     const preferredModel = this.selectedModel();
 
@@ -173,9 +193,11 @@ export class AgentsService {
     this.isReady.set(false);
     this.activeModel.set(null);
 
-    const { supportsLlmWebGPU } = await detectDeviceCapability();
-    const candidates = this.buildCandidateModels(preferredModel, supportsLlmWebGPU);
-    const attempts = this.buildLoadAttempts(supportsLlmWebGPU);
+    const capability = await detectDeviceCapability();
+    const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
+    const hasAccelerator = acceleratorAttempts.length > 0;
+    const candidates = this.buildCandidateModels(preferredModel, hasAccelerator);
+    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
 
     let lastError: unknown = null;
     try {
@@ -190,25 +212,29 @@ export class AgentsService {
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
             this.activeModel.set(model);
+            this.loadedDevice = attempt.device;
             console.info(`[Qwen] Loaded ${model.id} with ${attempt.label}`);
             return this.generator;
           } catch (err) {
             lastError = err;
             console.warn(`[Qwen] ${model.id} ${attempt.label} failed`, err);
             this.generator = null;
+            this.loadedDevice = null;
           }
         }
       }
-      this.loadInfo.set('Qwen could not be loaded.');
+      this.loadInfo.set(hasAccelerator
+        ? 'GPU/NPU agent failed. CPU fallback is available in Settings.'
+        : 'Qwen could not be loaded.');
       throw lastError ?? new Error('Qwen load failed');
     } finally {
       this.isLoading.set(false);
     }
   }
 
-  private buildCandidateModels(preferredModel: LlmModelOption, useWebGPU: boolean): LlmModelOption[] {
+  private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
     const fallbackModel = QWEN_MODELS.low;
-    if (!useWebGPU) {
+    if (!useAccelerator) {
       return preferredModel.id === UNCENSORED_AGENT_MODEL.id
         ? [preferredModel, fallbackModel]
         : [fallbackModel];
@@ -219,18 +245,21 @@ export class AgentsService {
       : [preferredModel, fallbackModel];
   }
 
-  private buildLoadAttempts(hasWebGPU: boolean): Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> {
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
-    if (hasWebGPU) {
+  private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
+    const attempts: LoadAttempt[] = [];
+    if (capability.hasWebNN) {
+      attempts.push({ device: 'webnn-npu', dtype: 'q4', label: 'webnn-npu/q4' });
+      attempts.push({ device: 'webnn-gpu', dtype: 'q4', label: 'webnn-gpu/q4' });
+    }
+    if (capability.supportsLlmWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
       attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
     }
-
-    // Current ONNX Runtime Web's WASM backend can miss block-quantized kernels,
-    // and larger fp32 agent models can exceed WebView memory. Use fp32 only
-    // with the small CPU fallback model.
-    attempts.push({ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' });
     return attempts;
+  }
+
+  private buildCpuLoadAttempts(): LoadAttempt[] {
+    return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
   }
 
   /** Runs a single agent generation. Exposed for advanced/manual use. */

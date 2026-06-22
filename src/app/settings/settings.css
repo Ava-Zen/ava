@@ -338,6 +338,28 @@ input:focus {
   margin-top: 6px;
   font-size: 1.22rem;
 }
+.fallback-btn {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(216, 194, 135, 0.34);
+  background: rgba(216, 194, 135, 0.1);
+  color: #f7e9bf;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.fallback-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(216, 194, 135, 0.16);
+}
+.fallback-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 
 /* Voice / TTS picker */
 .voice-list {
