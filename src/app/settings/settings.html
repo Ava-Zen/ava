@@ -199,13 +199,72 @@
   <section class="section settings-grid">
     <div class="setting-item">
       <span>Speech recognition</span>
-      <strong>Moonshine Base</strong>
-      <small>Local STT</small>
+      <strong>{{ speechModelName }}</strong>
+      <small>{{ speechLoadInfo || 'Loads on first voice use' }}</small>
     </div>
     <div class="setting-item">
       <span>Storage</span>
       <strong>Local first</strong>
       <small>Gardens in this device</small>
+    </div>
+    <div class="setting-item">
+      <span>Voice runtime</span>
+      <strong>{{ selectedVoice().name }}</strong>
+      <small>{{ selectedVoice().id === 'kokoro' ? selectedKokoroVoice().name + ' · ' + voiceBackendInfo : voiceBackendInfo }}</small>
+    </div>
+  </section>
+
+  <section class="section diagnostics-section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Hardware</p>
+        <h3>This device</h3>
+      </div>
+    </div>
+    <p class="hint">{{ hardwareReadinessDetails() }}</p>
+
+    <div class="diagnostic-summary">
+      <div>
+        <span>Status</span>
+        <strong>{{ hardwareReadinessLabel() }}</strong>
+      </div>
+      <div>
+        <span>Runtime path</span>
+        <strong>{{ hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+      </div>
+    </div>
+
+    <div class="diagnostic-grid">
+      <div class="diagnostic-item">
+        <span>OS and browser</span>
+        <strong>{{ hardware()?.os || 'Checking' }} · {{ hardware()?.browser || 'Checking' }}</strong>
+        <small>{{ hardware()?.androidWebView ? 'Android WebView compatibility mode' : hardware()?.platform || 'Platform unknown' }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>CPU and memory</span>
+        <strong>{{ hardware()?.cores || 'Unknown' }} cores</strong>
+        <small>{{ formatMemory(hardware()?.memoryGb) }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>WebGPU</span>
+        <strong>{{ hardware()?.hasWebGPU ? 'Detected' : 'Not used' }}</strong>
+        <small>{{ hardware()?.maxComputeWorkgroupStorageSize ? 'Workgroup storage ' + hardware()?.maxComputeWorkgroupStorageSize + ' bytes' : 'No compatible adapter for Ava' }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>Conversation model</span>
+        <strong>{{ conversationRuntimeLabel() }}</strong>
+        <small>Configured: {{ selectedConversationModel().name }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>Agent model</span>
+        <strong>{{ agentRuntimeLabel() }}</strong>
+        <small>Configured: {{ selectedAgentModel().name }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>Speech model</span>
+        <strong>{{ speechModelName }}</strong>
+        <small>{{ speechLoadInfo || 'Not loaded yet' }}</small>
+      </div>
     </div>
   </section>
 

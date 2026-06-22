@@ -117,7 +117,9 @@ h1 {
 }
 
 .capability-grid,
-.option-list {
+.option-list,
+.device-readiness,
+.device-grid {
   display: grid;
   gap: 10px;
 }
@@ -127,6 +129,8 @@ h1 {
 }
 
 .capability-grid div,
+.readiness-card,
+.device-grid div,
 .download-panel,
 .option-item {
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -134,12 +138,31 @@ h1 {
   background: rgba(255, 255, 255, 0.065);
 }
 
-.capability-grid div {
+.capability-grid div,
+.readiness-card,
+.device-grid div {
   min-height: 144px;
   padding: 16px;
   display: grid;
   align-content: space-between;
   gap: 16px;
+}
+
+.device-readiness {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.readiness-card:first-child {
+  border-color: rgba(85, 199, 184, 0.32);
+  background: rgba(85, 199, 184, 0.12);
+}
+
+.device-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.device-grid div {
+  min-height: 112px;
 }
 
 strong {
@@ -294,11 +317,15 @@ button:not(:disabled):hover {
   }
 
   .capability-grid,
-  .option-list {
+  .option-list,
+  .device-readiness,
+  .device-grid {
     grid-template-columns: 1fr;
   }
 
   .capability-grid div,
+  .readiness-card,
+  .device-grid div,
   .option-item {
     min-height: 108px;
   }

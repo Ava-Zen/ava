@@ -1,5 +1,6 @@
 import { Component, ElementRef, EventEmitter, Output, ViewChild, computed, inject, signal } from '@angular/core';
 import { OnboardingService } from '../services/onboarding';
+import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 
 interface OnboardingOption {
   id: string;
@@ -15,6 +16,7 @@ interface OnboardingOption {
 })
 export class Onboarding {
   private readonly onboarding = inject(OnboardingService);
+  private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
   private nameInputElement?: ElementRef<HTMLInputElement>;
 
   @Output() completed = new EventEmitter<void>();
@@ -27,12 +29,15 @@ export class Onboarding {
   protected readonly primaryUse = signal('Everyday companion');
   protected readonly preferredInput = signal<'voice' | 'text' | 'both'>('both');
   protected readonly downloadConsent = signal(false);
+  protected readonly hardware = this.hardwareDiagnostics.diagnostics;
+  protected readonly hardwareReadinessLabel = this.hardwareDiagnostics.readinessLabel;
+  protected readonly hardwareReadinessDetails = this.hardwareDiagnostics.readinessDetails;
 
-  protected readonly totalSteps = 4;
+  protected readonly totalSteps = 5;
   protected readonly progress = computed(() => `${((this.step() + 1) / this.totalSteps) * 100}%`);
   protected readonly canContinue = computed(() => {
     if (this.step() === 1) return this.name().trim().length > 0;
-    if (this.step() === 2) return this.downloadConsent();
+    if (this.step() === 3) return this.downloadConsent();
     return true;
   });
 
@@ -87,6 +92,10 @@ export class Onboarding {
   protected setDownloadConsent(event: Event): void {
     const input = event.target as HTMLInputElement | null;
     this.downloadConsent.set(!!input?.checked);
+  }
+
+  protected formatMemory(memoryGb: number | undefined): string {
+    return memoryGb ? `${memoryGb} GB reported` : 'Not reported';
   }
 
   protected next(): void {

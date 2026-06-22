@@ -290,6 +290,55 @@ input:focus {
   font-size: 1.28rem;
 }
 
+.diagnostics-section {
+  display: grid;
+  gap: 14px;
+}
+.diagnostic-summary,
+.diagnostic-grid {
+  display: grid;
+  gap: 10px;
+}
+.diagnostic-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.diagnostic-summary div,
+.diagnostic-item {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+.diagnostic-summary div:first-child {
+  background: rgba(85, 199, 184, 0.12);
+  border-color: rgba(85, 199, 184, 0.25);
+}
+.diagnostic-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.diagnostic-item {
+  display: grid;
+  gap: 8px;
+}
+.diagnostic-summary span,
+.diagnostic-item span,
+.diagnostic-item small {
+  color: #aeb9c9;
+  font-size: 0.94rem;
+  line-height: 1.4;
+}
+.diagnostic-summary strong,
+.diagnostic-item strong {
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+.diagnostic-summary strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.22rem;
+}
+
 /* Voice / TTS picker */
 .voice-list {
   display: grid;
@@ -507,7 +556,9 @@ input:focus {
     justify-content: flex-end;
   }
   .create-section,
-  .settings-grid {
+  .settings-grid,
+  .diagnostic-summary,
+  .diagnostic-grid {
     grid-template-columns: 1fr;
   }
   .danger-zone,

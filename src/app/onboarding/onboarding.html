@@ -71,6 +71,44 @@
 
       @if (step() === 2) {
         <section class="onboarding-step">
+          <p class="overline">This device</p>
+          <h1 id="onboarding-title">Check local AI readiness.</h1>
+          <p class="lead">{{ hardwareReadinessDetails() }}</p>
+
+          <div class="device-readiness">
+            <div class="readiness-card">
+              <span>Status</span>
+              <strong>{{ hardwareReadinessLabel() }}</strong>
+            </div>
+            <div class="readiness-card">
+              <span>Runtime path</span>
+              <strong>{{ hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+            </div>
+          </div>
+
+          <div class="device-grid" aria-label="Device hardware details">
+            <div>
+              <strong>{{ hardware()?.os || 'Checking' }} · {{ hardware()?.browser || 'Checking' }}</strong>
+              <span>{{ hardware()?.androidWebView ? 'Android WebView compatibility mode' : hardware()?.platform || 'Platform unknown' }}</span>
+            </div>
+            <div>
+              <strong>{{ hardware()?.cores || 'Unknown' }} CPU cores</strong>
+              <span>{{ formatMemory(hardware()?.memoryGb) }}</span>
+            </div>
+            <div>
+              <strong>{{ hardware()?.hasWebGPU ? 'WebGPU detected' : 'WebGPU not used' }}</strong>
+              <span>{{ hardware()?.supportsLlmWebGPU ? 'Ava can try GPU-backed chat' : 'Ava will use smaller CPU-backed models' }}</span>
+            </div>
+          </div>
+
+          <p class="fine-print">
+            Cloud AI is planned for Ava later. Right now, conversation, speech, and voice run locally on this device.
+          </p>
+        </section>
+      }
+
+      @if (step() === 3) {
+        <section class="onboarding-step">
           <p class="overline">Local intelligence</p>
           <h1 id="onboarding-title">Ava needs model files to think.</h1>
           <p class="lead">
@@ -89,7 +127,7 @@
         </section>
       }
 
-      @if (step() === 3) {
+      @if (step() === 4) {
         <section class="onboarding-step">
           <p class="overline">How you will use Ava</p>
           <h1 id="onboarding-title">Choose a starting feel.</h1>

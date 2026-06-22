@@ -103,6 +103,10 @@ export class App {
 
   /** Name of the currently selected text-to-speech voice. */
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
+  protected readonly voiceBackendInfo = computed(() => {
+    if (this.tts.selectedVoiceId() === 'system') return 'System speechSynthesis';
+    return this.kokoroLoadInfo() || 'Kokoro selected; loads on first use';
+  });
   protected readonly manualInputEnabled = signal(false);
   protected readonly composerMenuOpen = signal(false);
   protected readonly manualPrompt = signal('');

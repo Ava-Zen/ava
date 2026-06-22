@@ -405,6 +405,9 @@
     <div class="settings-overlay" (click)="closeSettings()">
       <div class="settings-modal" (click)="$event.stopPropagation()">
         <app-settings
+          [speechModelName]="speechModelName()"
+          [speechLoadInfo]="modelLoadInfo()"
+          [voiceBackendInfo]="voiceBackendInfo()"
           (close)="closeSettings()"
           (selectGarden)="selectGarden($event)"
           (createGarden)="onCreateGarden($event)"

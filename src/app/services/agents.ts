@@ -78,6 +78,7 @@ export class AgentsService {
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly activeModel = signal<LlmModelOption | null>(null);
 
   /** Reactive list of agent tasks (most recent last). */
   readonly tasks = signal<AgentTask[]>([]);
@@ -107,12 +108,14 @@ export class AgentsService {
     this.generator = null;
     this.loadPromise = null;
     this.isReady.set(false);
+    this.activeModel.set(null);
   }
 
   resetLoadedModel(): void {
     this.generator = null;
     this.loadPromise = null;
     this.isReady.set(false);
+    this.activeModel.set(null);
   }
 
   /**
@@ -168,6 +171,7 @@ export class AgentsService {
 
     this.isLoading.set(true);
     this.isReady.set(false);
+    this.activeModel.set(null);
 
     const { supportsLlmWebGPU } = await detectDeviceCapability();
     const candidates = this.buildCandidateModels(preferredModel, supportsLlmWebGPU);
@@ -185,6 +189,7 @@ export class AgentsService {
             });
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
+            this.activeModel.set(model);
             console.info(`[Qwen] Loaded ${model.id} with ${attempt.label}`);
             return this.generator;
           } catch (err) {

@@ -96,6 +96,7 @@ export class LlmService {
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly activeModel = signal<LlmModelOption | null>(null);
   readonly thinkingTrace = signal<string[]>([]);
 
   private generator: any = null;
@@ -124,6 +125,7 @@ export class LlmService {
     this.loadPromise = null;
     this.loadedDevice = null;
     this.isReady.set(false);
+    this.activeModel.set(null);
   }
 
   /**
@@ -148,6 +150,7 @@ export class LlmService {
 
     this.isLoading.set(true);
     this.isReady.set(false);
+    this.activeModel.set(null);
 
     const { supportsLlmWebGPU } = await detectDeviceCapability();
     const useWebGPU = supportsLlmWebGPU && !wasmOnly && !isAndroidWebView();
@@ -164,6 +167,7 @@ export class LlmService {
             this.generator = await this.loadPipeline(repoId, attempt);
             this.loadInfo.set(`${model.name} · ${attempt.label}`);
             this.isReady.set(true);
+            this.activeModel.set(model);
             this.loadedDevice = attempt.device;
             console.info(`[Gemma] Loaded ${repoId} with ${attempt.label}`);
             return this.generator;
