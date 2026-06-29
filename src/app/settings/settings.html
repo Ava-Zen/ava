@@ -214,6 +214,26 @@
     </div>
   </section>
 
+  @if (mcpServerUrl()) {
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Integrations</p>
+        <h3>MCP voice server</h3>
+      </div>
+    </div>
+    <p class="hint">
+      Other local agents (Claude, GitHub Copilot, etc.) can borrow Ava's voice through an MCP
+      server hosted while Ava is open.
+    </p>
+    <div class="setting-item">
+      <span>Endpoint</span>
+      <strong>{{ mcpServerUrl() }}</strong>
+      <small>Tools: speak, list_voices · loopback only</small>
+    </div>
+  </section>
+  }
+
   <section class="section diagnostics-section">
     <div class="section-heading">
       <div>

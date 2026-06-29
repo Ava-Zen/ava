@@ -1,6 +1,7 @@
-import { Component, Output, EventEmitter, inject, Input, computed } from '@angular/core';
+import { Component, Output, EventEmitter, inject, Input, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { invoke } from '@tauri-apps/api/core';
 import { Garden, GardensService } from '../services/gardens';
 import { TtsService, TtsEngine } from '../services/tts';
 import { LlmService } from '../services/llm';
@@ -45,6 +46,22 @@ export class Settings {
   protected readonly agentLoading = this.agentsService.isLoading;
   protected readonly selectedVoice = this.ttsService.selectedVoice;
   protected readonly selectedKokoroVoice = this.ttsService.selectedKokoroVoice;
+
+  // MCP voice server: lets other local agents call Ava to speak.
+  protected readonly mcpServerUrl = signal<string | null>(null);
+
+  constructor() {
+    void this.loadMcpServerInfo();
+  }
+
+  private async loadMcpServerInfo() {
+    try {
+      const info = await invoke<{ url: string }>('mcp_server_info');
+      this.mcpServerUrl.set(info.url);
+    } catch {
+      this.mcpServerUrl.set(null);
+    }
+  }
 
   @Input() speechModelName = 'Moonshine';
   @Input() speechLoadInfo = '';

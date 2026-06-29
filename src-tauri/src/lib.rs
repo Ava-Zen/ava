@@ -2,6 +2,21 @@ use std::{env, fs, io};
 
 use tauri::Manager;
 
+mod mcp;
+
+#[tauri::command]
+fn mcp_tts_complete(bridge: tauri::State<mcp::McpBridge>, id: u64, ok: bool) {
+  bridge.complete(id, ok);
+}
+
+#[tauri::command]
+fn mcp_server_info() -> serde_json::Value {
+  serde_json::json!({
+    "url": format!("http://127.0.0.1:{}", mcp::MCP_PORT),
+    "port": mcp::MCP_PORT,
+  })
+}
+
 #[tauri::command]
 fn suggested_user_name() -> Option<String> {
   [
@@ -106,9 +121,17 @@ pub fn run() {
             .build(),
         )?;
       }
+      // Host the MCP TTS server on desktop so other local agents can borrow Ava's voice.
+      #[cfg(desktop)]
+      mcp::start(app.handle().clone());
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![suggested_user_name, reset_app_cache])
+    .invoke_handler(tauri::generate_handler![
+      suggested_user_name,
+      reset_app_cache,
+      mcp_tts_complete,
+      mcp_server_info
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
