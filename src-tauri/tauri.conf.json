@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Ava",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "identifier": "com.ava-zen.ava",
   "build": {
     "frontendDist": "../dist/ava/browser",
