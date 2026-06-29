@@ -1347,7 +1347,8 @@ export class App {
       this.respond(gardenId, reply || 'I am not sure how to answer that just yet.');
     } catch (e) {
       console.error('Gemma reply failed', e);
-      this.respond(gardenId, 'Sorry, I could not think that through just now.');
+      const friendly = this.llm.friendlyError(e);
+      this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.');
     }
   }
 

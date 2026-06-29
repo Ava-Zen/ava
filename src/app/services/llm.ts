@@ -330,6 +330,28 @@ export class LlmService {
     return /WebGPU|WebNN|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU|NPU/i.test(message);
   }
 
+  /**
+   * Turns a raw generation/load failure into a short, friendly explanation the
+   * user can act on. Returns null when the error is not one we recognise.
+   */
+  friendlyError(error: unknown): string | null {
+    const message = String((error as any)?.message ?? error);
+    const onCpu = this.loadedDevice === 'wasm';
+
+    if (/workgroup storage|compute pipeline|GroupQueryAttention/i.test(message)) {
+      return onCpu
+        ? "This device ran low on memory for Ava's chat model. Try a smaller model in Settings or close some apps."
+        : "Your graphics chip can't fit this chat model in accelerated mode. Switch to CPU in Settings → Conversation model, or pick a smaller model.";
+    }
+    if (/out of memory|oom|allocation failed|enough memory|insufficient/i.test(message)) {
+      return 'Ava ran out of memory loading the chat model. Close some apps, free up space, or pick a smaller model in Settings.';
+    }
+    if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
+      return "Ava's hardware acceleration hit a snag. Switch to CPU in Settings → Conversation model and try again.";
+    }
+    return null;
+  }
+
   private extractText(output: any, promptPrefix = ''): string {
     try {
       const generated = output?.[0]?.generated_text;

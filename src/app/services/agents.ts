@@ -168,7 +168,7 @@ export class AgentsService {
       console.error('[Qwen agent] task failed', err);
       this.patchTask(taskId, {
         status: 'error',
-        error: err?.message ?? 'Agent task failed.',
+        error: this.friendlyError(err) ?? err?.message ?? 'Agent task failed.',
       });
     }
   }
@@ -310,6 +310,28 @@ export class AgentsService {
 
   private isMissingChatTemplateError(error: unknown): boolean {
     return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
+  }
+
+  /**
+   * Turns a raw agent failure into a short, friendly explanation. Returns null
+   * when the error is not one we recognise.
+   */
+  friendlyError(error: unknown): string | null {
+    const message = String((error as any)?.message ?? error);
+    const onCpu = this.loadedDevice === 'wasm';
+
+    if (/workgroup storage|compute pipeline|GroupQueryAttention/i.test(message)) {
+      return onCpu
+        ? 'This device ran low on memory for the agent model. Try a smaller model in Settings or close some apps.'
+        : "Your graphics chip can't fit this agent model in accelerated mode. Switch to CPU in Settings, or pick a smaller model.";
+    }
+    if (/out of memory|oom|allocation failed|enough memory|insufficient/i.test(message)) {
+      return 'The agent ran out of memory. Close some apps, free up space, or pick a smaller model in Settings.';
+    }
+    if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
+      return 'The agent hit a hardware acceleration snag. Switch to CPU in Settings and try again.';
+    }
+    return null;
   }
 
   clearCompleted(): void {
