@@ -486,6 +486,57 @@ input:focus {
   border-color: transparent;
 }
 
+.chip-remove {
+  margin-left: 6px;
+  opacity: 0.65;
+  font-weight: 900;
+}
+.chip-remove:hover {
+  opacity: 1;
+  color: #ff8a8a;
+}
+.clone-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.clone-name {
+  flex: 1 1 140px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6edf7;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.95rem;
+}
+.clone-btn {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6edf7;
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-size: 0.95rem;
+  font-weight: 740;
+  cursor: pointer;
+}
+.clone-btn:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+}
+.clone-btn.recording {
+  color: #061013;
+  background: linear-gradient(135deg, #ff8a8a, #ffd0a6);
+  border-color: transparent;
+}
+.clone-btn.upload {
+  display: inline-flex;
+  align-items: center;
+}
+.error {
+  color: #ff8a8a;
+}
+
 .model-groups,
 .model-list {
   display: grid;

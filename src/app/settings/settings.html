@@ -159,7 +159,7 @@
         <h3>Speech model</h3>
       </div>
     </div>
-    <p class="hint">Choose how Ava speaks. Both voices run fully on this device.</p>
+    <p class="hint">Choose how Ava speaks. Every voice runs fully on this device.</p>
 
     <div class="voice-list">
       @for (voice of voices; track voice.id) {
@@ -189,6 +189,49 @@
                   </button>
                 }
               </div>
+            </div>
+          }
+
+          @if (voice.id === 'custom' && selectedVoiceId() === 'custom') {
+            <div class="speaker-picker">
+              @if (customVoices().length) {
+                <span class="speaker-label">Your voices</span>
+                <div class="speaker-chips">
+                  @for (cv of customVoices(); track cv.id) {
+                    <button
+                      class="speaker-chip"
+                      [class.active]="cv.id === selectedCustomVoiceId()"
+                      (click)="selectCustomVoice(cv.id)">
+                      {{ cv.name }}
+                      <span class="chip-remove" (click)="removeCustomVoice(cv.id); $event.stopPropagation()" title="Delete voice">×</span>
+                    </button>
+                  }
+                </div>
+              }
+
+              <div class="clone-tools">
+                <input
+                  class="clone-name"
+                  type="text"
+                  placeholder="Voice name"
+                  [ngModel]="newVoiceName()"
+                  (ngModelChange)="newVoiceName.set($event)"
+                  [disabled]="customVoiceBuilding()" />
+                @if (!isRecording()) {
+                  <button class="clone-btn" (click)="startRecording()" [disabled]="customVoiceBuilding()">Record</button>
+                } @else {
+                  <button class="clone-btn recording" (click)="stopRecording()">Stop ({{ recordSeconds() }}s)</button>
+                }
+                <label class="clone-btn upload">
+                  Upload
+                  <input type="file" accept="audio/*" (change)="onSampleUpload($event)" hidden [disabled]="customVoiceBuilding()" />
+                </label>
+              </div>
+              <small class="hint">
+                Record at least {{ minSampleSeconds }} seconds of clear speech, or upload a sample.
+                @if (customVoiceBuilding()) { <strong>{{ customVoiceStatus() }}</strong> }
+                @if (customVoiceError()) { <strong class="error">{{ customVoiceError() }}</strong> }
+              </small>
             </div>
           }
         </article>

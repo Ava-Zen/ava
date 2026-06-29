@@ -9,6 +9,7 @@ import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
+import { CustomVoiceService } from './services/custom-voice';
 import { LlmService, ChatTurn } from './services/llm';
 import { AgentsService } from './services/agents';
 import { OnboardingService } from './services/onboarding';
@@ -77,6 +78,7 @@ export class App {
 
   private readonly gardensService = inject(GardensService);
   private readonly tts = inject(TtsService);
+  private readonly customVoice = inject(CustomVoiceService);
   private readonly llm = inject(LlmService);
   private readonly agents = inject(AgentsService);
   private readonly onboarding = inject(OnboardingService);
@@ -106,6 +108,11 @@ export class App {
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
   protected readonly voiceBackendInfo = computed(() => {
     if (this.tts.selectedVoiceId() === 'system') return 'System speechSynthesis';
+    if (this.tts.selectedVoiceId() === 'custom') {
+      return this.customVoice.selectedVoice()?.name
+        ? `Cloned: ${this.customVoice.selectedVoice()!.name}`
+        : 'No cloned voice yet';
+    }
     return this.kokoroLoadInfo() || 'Kokoro selected; loads on first use';
   });
   protected readonly manualInputEnabled = signal(false);
@@ -1397,6 +1404,11 @@ export class App {
       if (handled || this.speechGen !== id) return;
     }
 
+    if (this.tts.selectedVoiceId() === 'custom' && this.customVoice.hasVoices()) {
+      const handled = await this.speakWithCustom(text, id);
+      if (handled || this.speechGen !== id) return;
+    }
+
     if (this.speechGen !== id) return;
     await this.speakWithSystem(text, id);
   }
@@ -1452,6 +1464,54 @@ export class App {
       return true;
     } catch (e) {
       console.warn('Kokoro TTS failed, falling back', e);
+      return false;
+    }
+  }
+
+  /**
+   * Speaks using the user's cloned voice (SpeechT5 + speaker embedding). Each
+   * sentence chunk is synthesised, then the next is prepared while this one
+   * plays. Returns false on a first-chunk failure so the system voice can take
+   * over.
+   */
+  private async speakWithCustom(text: string, id: number): Promise<boolean> {
+    const spoken = markdownToPlainText(text);
+    const chunks = splitIntoSpeechChunks(spoken);
+    if (chunks.length === 0) return true;
+
+    try {
+      const synth = (chunk: string) =>
+        this.customVoice.synthesize(chunk).then(({ samples, rate }) =>
+          this.createWavBlob(samples, rate)
+        );
+
+      let pending: Promise<Blob> | null = synth(chunks[0]);
+
+      for (let i = 0; i < chunks.length; i++) {
+        if (this.speechGen !== id) return true;
+
+        let blob: Blob;
+        try {
+          blob = await pending!;
+        } catch (e) {
+          if (i === 0) return false;
+          console.warn('Custom voice synthesis failed, stopping playback', e);
+          break;
+        }
+
+        pending = i + 1 < chunks.length ? synth(chunks[i + 1]) : null;
+        if (this.speechGen !== id) return true;
+
+        const ok = await this.playChunk(blob, id);
+        if (!ok) {
+          if (this.speechGen !== id) return true;
+          if (i === 0) return false;
+          break;
+        }
+      }
+      return true;
+    } catch (e) {
+      console.warn('Custom voice TTS failed, falling back', e);
       return false;
     }
   }
@@ -1845,6 +1905,24 @@ export class App {
       }
     }
     // Fallback so the sample is still heard even if Kokoro is unavailable
+    this.speakWithSystem(text, ++this.speechGen);
+  }
+
+  /** Plays a short spoken sample of a cloned custom voice when selected. */
+  protected async previewCustomVoice(voiceId: string) {
+    const name = this.customVoice.voices().find(v => v.id === voiceId)?.name ?? 'your voice';
+    const text = `Hi, this is ${name}. How are you feeling today?`;
+
+    this.stopCurrentAudio();
+    if (this.synth) this.synth.cancel();
+
+    try {
+      this.status.set('speaking');
+      const { samples, rate } = await this.customVoice.synthesize(text, voiceId);
+      if (await this.playAudioBlob(this.createWavBlob(samples, rate))) return;
+    } catch (e) {
+      console.warn('Custom voice preview failed', e);
+    }
     this.speakWithSystem(text, ++this.speechGen);
   }
 
