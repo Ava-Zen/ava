@@ -89,6 +89,22 @@ The initial UI uses the Web Speech API (SpeechRecognition + SpeechSynthesis) for
 
 Future: full local LLM inference (llama.cpp / MLX / ONNX), Nostr sync, device routing, persistent memory, proactive agency.
 
+## MCP Voice Server (lend Ava's voice to other agents)
+
+Ava can host a local **MCP server** so other agents (GitHub Copilot, Claude Desktop, Cursor) can call Ava to speak text aloud. On desktop it listens on the loopback endpoint `http://127.0.0.1:7456` while Ava is open and exposes `speak` and `list_voices` tools.
+
+Add to VS Code via `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "ava-tts": { "type": "http", "url": "http://127.0.0.1:7456" }
+  }
+}
+```
+
+See [docs/mcp-tts-server.md](docs/mcp-tts-server.md) for Claude Desktop, Cursor, and curl examples.
+
 ## Next Steps (aligned with Technical Spec)
 
 - [ ] Add Nostr identity (keypair) + relay connectivity

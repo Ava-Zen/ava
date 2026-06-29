@@ -2,6 +2,7 @@ import { Component, signal, computed, effect, ViewChild, ElementRef, inject, Hos
 import { RouterOutlet } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { Onboarding } from './onboarding/onboarding';
 import { env, pipeline } from '@huggingface/transformers';
@@ -164,6 +165,37 @@ export class App {
       this.messages(); // track changes
       this.scrollToBottom();
     });
+
+    this.registerMcpTtsBridge();
+  }
+
+  /**
+   * Lets other local agents borrow Ava's voice through the MCP server hosted in
+   * the Rust backend. Each `mcp-tts-request` carries text to speak; once
+   * playback finishes we acknowledge the backend so the MCP call can return.
+   */
+  private async registerMcpTtsBridge() {
+    if (typeof window === 'undefined') return;
+    try {
+      await listen<{ id: number; text: string; voice?: string }>('mcp-tts-request', async event => {
+        const { id, text, voice } = event.payload;
+        let ok = false;
+        try {
+          if (voice) this.tts.setKokoroVoice(voice);
+          await this.speak(text);
+          ok = true;
+        } catch (e) {
+          console.warn('MCP TTS request failed', e);
+        }
+        try {
+          await invoke('mcp_tts_complete', { id, ok });
+        } catch {
+          // backend not reachable (e.g. browser-only) — ignore
+        }
+      });
+    } catch {
+      // Tauri not available (plain browser) — MCP bridge stays inert.
+    }
   }
 
   protected selectGarden(id: string) {
