@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 
-export type TtsEngine = 'kokoro' | 'custom' | 'system';
+export type TtsEngine = 'kokoro' | 'system';
 
 export interface TtsVoiceOption {
   id: TtsEngine;
@@ -31,11 +31,6 @@ export class TtsService {
       id: 'kokoro',
       name: 'Kokoro 82M',
       description: 'On-device neural voice. Fast, warm and natural.',
-    },
-    {
-      id: 'custom',
-      name: 'Custom Voice',
-      description: 'Clone your own voice from a recording. Runs fully on-device.',
     },
     {
       id: 'system',
@@ -103,7 +98,7 @@ export class TtsService {
   }
 
   private isValidVoice(v: unknown): v is TtsEngine {
-    return v === 'kokoro' || v === 'custom' || v === 'system';
+    return v === 'kokoro' || v === 'system';
   }
 
   private isValidKokoroVoice(v: unknown): v is string {

@@ -6,7 +6,6 @@ import { Garden, GardensService } from '../services/gardens';
 import { TtsService, TtsEngine } from '../services/tts';
 import { MCP_PRESETS, McpService, GITHUB_OAUTH_DEFAULTS } from '../services/mcp';
 import { McpAuthMethod, McpServerConfig, McpServerStatus } from '../services/mcp/mcp-types';
-import { CustomVoiceService } from '../services/custom-voice';
 import { LlmService } from '../services/llm';
 import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
@@ -22,7 +21,6 @@ export class Settings {
   private readonly gardensService = inject(GardensService);
   private readonly ttsService = inject(TtsService);
   private readonly mcp = inject(McpService);
-  private readonly customVoiceService = inject(CustomVoiceService);
   private readonly llmService = inject(LlmService);
   private readonly agentsService = inject(AgentsService);
   private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
@@ -178,12 +176,6 @@ export class Settings {
   protected readonly selectedVoiceId = this.ttsService.selectedVoiceId;
   protected readonly kokoroVoices = this.ttsService.kokoroVoices;
   protected readonly selectedKokoroVoiceId = this.ttsService.selectedKokoroVoiceId;
-  // Custom voice cloning
-  protected readonly customVoices = this.customVoiceService.voices;
-  protected readonly selectedCustomVoiceId = this.customVoiceService.selectedId;
-  protected readonly customVoiceBuilding = this.customVoiceService.isBuilding;
-  protected readonly customVoiceStatus = this.customVoiceService.buildStatus;
-  protected readonly minSampleSeconds = this.customVoiceService.minSampleSeconds;
   protected readonly isRecording = signal(false);
   protected readonly recordSeconds = signal(0);
   protected readonly newVoiceName = signal('');
@@ -251,15 +243,6 @@ export class Settings {
     this.previewVoice.emit(id);
   }
 
-  selectCustomVoice(id: string) {
-    this.customVoiceService.select(id);
-    this.previewCustomVoice.emit(id);
-  }
-
-  removeCustomVoice(id: string) {
-    this.customVoiceService.removeVoice(id);
-  }
-
   async startRecording() {
     this.customVoiceError.set('');
     if (this.isRecording()) return;
@@ -273,7 +256,6 @@ export class Settings {
       };
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
-        void this.buildVoiceFromChunks();
       };
       recorder.start();
       this.isRecording.set(true);
@@ -292,41 +274,6 @@ export class Settings {
       this.recordTimer = null;
     }
     this.mediaRecorder?.stop();
-  }
-
-  async onSampleUpload(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    this.customVoiceError.set('');
-    try {
-      await this.buildVoiceFromBlob(file);
-    } catch {
-      this.customVoiceError.set('Could not read that audio file.');
-    }
-  }
-
-  private async buildVoiceFromChunks() {
-    if (this.recordedChunks.length === 0) return;
-    const blob = new Blob(this.recordedChunks, { type: this.recordedChunks[0].type || 'audio/webm' });
-    this.recordedChunks = [];
-    await this.buildVoiceFromBlob(blob);
-  }
-
-  private async buildVoiceFromBlob(blob: Blob) {
-    try {
-      const buffer = await blob.arrayBuffer();
-      const ctx = new AudioContext();
-      const decoded = await ctx.decodeAudioData(buffer);
-      const samples = decoded.getChannelData(0);
-      const name = this.newVoiceName().trim() || `My voice ${this.customVoices().length + 1}`;
-      await this.customVoiceService.addVoice(name, new Float32Array(samples), decoded.sampleRate);
-      await ctx.close();
-      this.newVoiceName.set('');
-    } catch (e) {
-      this.customVoiceError.set((e as Error)?.message || 'Could not build a voice from that sample.');
-    }
   }
 
   selectConversationModel(id: string) {
@@ -355,7 +302,6 @@ export class Settings {
   @Output() updateGarden = new EventEmitter<{id: string; name: string; description?: string}>();
   @Output() deleteGarden = new EventEmitter<string>();
   @Output() previewVoice = new EventEmitter<string>();
-  @Output() previewCustomVoice = new EventEmitter<string>();
   @Output() resetCache = new EventEmitter<void>();
 
   // Local form state
