@@ -125,7 +125,7 @@ export class App {
   protected readonly activityBadgeLabel = computed(() => {
     if (this.isModelLoading()) return 'Loading speech';
     if (this.isKokoroLoading()) return 'Loading voice';
-    if (this.llm.isLoading()) return 'Loading chat';
+    if (this.llm.isLoading()) return 'Loading chat model… please wait';
     if (this.agents.isLoading()) return 'Loading agent';
     if (this.isGeneratingAudioFile()) return 'Generating audio';
     if (this.isThinking()) return 'Thinking';
