@@ -581,8 +581,12 @@ export class App {
   private readonly SPEECH_THRESHOLD = 0.007; // adaptive energy VAD floor
   private readonly MIN_SPEECH_SAMPLES = 16000 * 0.35; // ~0.35s min
   private readonly SILENCE_FOR_COMMIT = 16000 * 0.7; // ~0.7s silence to commit
+  private readonly SPEECH_ONSET_SAMPLES = 16000 * 0.16; // ~0.16s of sustained energy before wake
+  private readonly SPEECH_COOLDOWN_MS = 1200;
   private noiseFloor = 0.003;
   private speechSamples = 0;
+  private speechCandidateSamples = 0;
+  private speechCooldownUntil = 0;
   private isCommitInProgress = false;
   private isLiveTranscriptInProgress = false;
 
@@ -916,6 +920,8 @@ export class App {
       this.isSpeechActive = false;
       this.silenceSamples = 0;
       this.speechSamples = 0;
+      this.speechCandidateSamples = 0;
+      this.speechCooldownUntil = 0;
       this.isCommitInProgress = false;
       this.isLiveTranscriptInProgress = false;
       this.noiseFloor = 0.003;
@@ -959,40 +965,48 @@ export class App {
         // Convert to mono float32 (already should be)
         const samples = new Float32Array(inputBuffer);
 
-        // Simple energy-based VAD
+        // Simple energy-based VAD with hysteresis and onset gating
         const energy = this.calculateEnergy(samples);
         const speechThreshold = this.currentSpeechThreshold();
-        const isSpeech = this.isSpeechActive
-          ? energy > speechThreshold * 0.62
-          : energy > speechThreshold;
+        const now = Date.now();
+        const isAboveThreshold = energy > speechThreshold;
 
-        if (isSpeech) {
-          if (!this.isSpeechActive) {
-            this.isSpeechActive = true;
-            this.silenceSamples = 0;
-            this.speechSamples = 0;
+        if (this.speechCooldownUntil > now) {
+          this.updateNoiseFloor(energy);
+          this.appendToRollingContext(samples);
+          return;
+        }
+
+        if (!this.isSpeechActive) {
+          if (isAboveThreshold) {
+            this.speechCandidateSamples += samples.length;
+            this.appendToRollingContext(samples);
+            if (this.speechCandidateSamples >= this.SPEECH_ONSET_SAMPLES) {
+              this.isSpeechActive = true;
+              this.silenceSamples = 0;
+              this.speechSamples = 0;
+              this.speechCandidateSamples = 0;
+              this.appendToBuffer(samples);
+            }
+          } else {
+            this.speechCandidateSamples = 0;
+            this.updateNoiseFloor(energy);
+            this.appendToRollingContext(samples);
           }
-          // Append to current utterance buffer
+        } else if (isAboveThreshold) {
           this.appendToBuffer(samples);
           this.speechSamples += samples.length;
           this.silenceSamples = 0;
-        } else if (this.isSpeechActive) {
+        } else {
           this.silenceSamples += samples.length;
-          // Still append a little silence padding
           this.appendToBuffer(samples);
 
-          // If enough silence after speech, commit current utterance
           if (this.silenceSamples >= this.SILENCE_FOR_COMMIT && this.speechSamples >= this.MIN_SPEECH_SAMPLES) {
             this.commitCurrentUtterance();
           }
-        } else {
-          this.updateNoiseFloor(energy);
-          // Not in speech, keep small rolling context (last 1s) for better start of next utterance
-          this.appendToRollingContext(samples);
         }
 
         // Live / continuous transcription updates (throttled)
-        const now = Date.now();
         if (this.isSpeechActive &&
             this.moonshineBuffer.length > 0 &&
             (now - this.lastLiveUpdate > 1800) && // occasional live text, final transcription has priority
@@ -1056,7 +1070,7 @@ export class App {
   }
 
   private currentSpeechThreshold(): number {
-    return Math.max(this.SPEECH_THRESHOLD, this.noiseFloor * 3.2);
+    return Math.max(this.SPEECH_THRESHOLD, this.noiseFloor * 4.2);
   }
 
   private updateNoiseFloor(energy: number) {
@@ -1112,6 +1126,7 @@ export class App {
   private async commitCurrentUtterance() {
     if (this.isCommitInProgress) return;
     this.isCommitInProgress = true;
+    this.speechCooldownUntil = Date.now() + this.SPEECH_COOLDOWN_MS;
     await this.waitForLiveTranscriptToSettle();
 
     const bufferToTranscribe = this.moonshineBuffer;
@@ -1134,7 +1149,6 @@ export class App {
       if (live) {
         this.currentTranscript.set('');
         this.lastLiveUpdate = 0;
-        this.pauseVoiceCapture();
         this.handleUserSpeech(live);
         return;
       }
@@ -1144,7 +1158,6 @@ export class App {
       }
       this.currentTranscript.set('Transcribing...');
       this.status.set('thinking');
-      this.pauseVoiceCapture();
 
       const result: any = await this.transcribeWithRecovery(bufferToTranscribe);
       let finalText = (result?.text || '').trim();

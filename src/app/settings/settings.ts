@@ -54,6 +54,7 @@ export class Settings {
       if (s.oauth?.clientId) this.oauthClientDrafts[s.id] = s.oauth.clientId;
       if (s.oauth?.scope) this.oauthScopeDrafts[s.id] = s.oauth.scope;
     }
+    void this.loadMcpServerInfo();
   }
 
   statusFor(id: string): McpServerStatus | undefined {
@@ -207,10 +208,6 @@ export class Settings {
 
   // MCP voice server: lets other local agents call Ava to speak.
   protected readonly mcpServerUrl = signal<string | null>(null);
-
-  constructor() {
-    void this.loadMcpServerInfo();
-  }
 
   private async loadMcpServerInfo() {
     try {
