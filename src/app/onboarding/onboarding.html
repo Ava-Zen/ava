@@ -1,0 +1,169 @@
+<div class="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+  <section class="onboarding-shell">
+    <header class="onboarding-header">
+      <div class="brand-lockup">
+        <img src="ava-mark.svg" alt="" aria-hidden="true" />
+        <span>Ava</span>
+      </div>
+      <div class="step-meter" aria-hidden="true">
+        <span [style.width]="progress()"></span>
+      </div>
+    </header>
+
+    <div class="onboarding-body">
+      @if (step() === 0) {
+        <section class="onboarding-step intro">
+          <p class="overline">First run</p>
+          <h1 id="onboarding-title">Set up Ava on this device.</h1>
+          <p class="lead">
+            Ava is a local voice companion. She can listen, answer questions, summarize files,
+            generate spoken audio, and run longer background tasks while keeping your gardens on this device.
+          </p>
+          <div class="capability-grid" aria-label="Ava capabilities">
+            <div>
+              <strong>Voice</strong>
+              <span>Speak naturally, pause replies, and switch voices.</span>
+            </div>
+            <div>
+              <strong>Text and files</strong>
+              <span>Type prompts, attach text files, and ask for summaries or drafts.</span>
+            </div>
+            <div>
+              <strong>Agents</strong>
+              <span>Ask for deeper work when a quick answer is not enough.</span>
+            </div>
+          </div>
+        </section>
+      }
+
+      @if (step() === 1) {
+        <section class="onboarding-step">
+          <p class="overline">Name</p>
+          <h1 id="onboarding-title">What should Ava call you?</h1>
+          <label class="field">
+            <span>Your name</span>
+            <input
+              #nameInput
+              type="text"
+              autocomplete="name"
+              [value]="name()"
+              (input)="onNameInput($event)"
+              placeholder="Your name"
+            />
+          </label>
+
+          <label class="field">
+            <span>Pronunciation or nickname</span>
+            <input
+              type="text"
+              [value]="pronunciation()"
+              (input)="onPronunciationInput($event)"
+              placeholder="Optional"
+            />
+          </label>
+
+          <p class="fine-print">
+            Device account names are only a best guess. If Ava filled this incorrectly, just type
+            the name or pronunciation you want saved locally.
+          </p>
+        </section>
+      }
+
+      @if (step() === 2) {
+        <section class="onboarding-step">
+          <p class="overline">This device</p>
+          <h1 id="onboarding-title">Check local AI readiness.</h1>
+          <p class="lead">{{ hardwareReadinessDetails() }}</p>
+
+          <div class="device-readiness">
+            <div class="readiness-card">
+              <span>Status</span>
+              <strong>{{ hardwareReadinessLabel() }}</strong>
+            </div>
+            <div class="readiness-card">
+              <span>Runtime path</span>
+              <strong>{{ hardware()?.hasWebNN ? 'WebNN NPU/GPU available' : hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+            </div>
+          </div>
+
+          <div class="device-grid" aria-label="Device hardware details">
+            <div>
+              <strong>{{ hardware()?.os || 'Checking' }} · {{ hardware()?.browser || 'Checking' }}</strong>
+              <span>{{ hardware()?.androidWebView ? 'Android WebView compatibility mode' : hardware()?.platform || 'Platform unknown' }}</span>
+            </div>
+            <div>
+              <strong>{{ hardware()?.cores || 'Unknown' }} CPU cores</strong>
+              <span>{{ formatMemory(hardware()?.memoryGb) }}</span>
+            </div>
+            <div>
+              <strong>{{ hardware()?.hasWebNN ? 'WebNN detected' : hardware()?.hasWebGPU ? 'WebGPU detected' : 'No accelerator exposed' }}</strong>
+              <span>{{ hardware()?.hasWebNN ? 'Ava can try NPU/GPU-backed chat' : hardware()?.supportsLlmWebGPU ? 'Ava can try GPU-backed chat' : 'Ava will use smaller CPU-backed models' }}</span>
+            </div>
+          </div>
+
+          <p class="fine-print">
+            Cloud AI is planned for Ava later. Right now, conversation, speech, and voice run locally on this device.
+          </p>
+        </section>
+      }
+
+      @if (step() === 3) {
+        <section class="onboarding-step">
+          <p class="overline">Local intelligence</p>
+          <h1 id="onboarding-title">Ava needs model files to think.</h1>
+          <p class="lead">
+            During use, Ava will download gigabytes of intelligence models for speech,
+            voice, conversation, and background agent work. These files are stored on this
+            device and can be deleted later with Reset Cache in Settings.
+          </p>
+          <div class="download-panel">
+            <strong>Expect large downloads</strong>
+            <span>Conversation models are roughly 0.3-1.5 GB. Agent models can be 0.6-4 GB. Voice and speech models add more local data.</span>
+          </div>
+          <label class="consent-row">
+            <input type="checkbox" [checked]="downloadConsent()" (change)="setDownloadConsent($event)" />
+            <span>I understand Ava may download and store gigabytes of model data on this device.</span>
+          </label>
+        </section>
+      }
+
+      @if (step() === 4) {
+        <section class="onboarding-step">
+          <p class="overline">How you will use Ava</p>
+          <h1 id="onboarding-title">Choose a starting feel.</h1>
+          <div class="option-list">
+            @for (option of useOptions; track option.id) {
+              <button
+                type="button"
+                class="option-item"
+                [class.active]="primaryUse() === option.id"
+                (click)="setPrimaryUse(option.id)"
+              >
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.description }}</span>
+              </button>
+            }
+          </div>
+
+          <div class="segmented" aria-label="Preferred input mode">
+            <button type="button" [class.active]="preferredInput() === 'voice'" (click)="setPreferredInput('voice')">Voice</button>
+            <button type="button" [class.active]="preferredInput() === 'both'" (click)="setPreferredInput('both')">Both</button>
+            <button type="button" [class.active]="preferredInput() === 'text'" (click)="setPreferredInput('text')">Text</button>
+          </div>
+
+          <p class="fine-print">
+            Try commands like “summarize this,” “turn this into action items,”
+            “draft a reply,” “explain this simply,” or attach a text file from the add menu.
+          </p>
+        </section>
+      }
+    </div>
+
+    <footer class="onboarding-actions">
+      <button type="button" class="secondary-btn" (click)="back()" [disabled]="step() === 0">Back</button>
+      <button type="button" class="continue-btn" (click)="next()" [disabled]="!canContinue()">
+        {{ step() === totalSteps - 1 ? 'Start Ava' : 'Continue' }}
+      </button>
+    </footer>
+  </section>
+</div>

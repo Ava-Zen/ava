@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
-import { detectDeviceCapability, DeviceTier } from './device-capability';
+import { detectDeviceCapability, DeviceTier, isAndroidWebView } from './device-capability';
 
 export interface ChatTurn {
   role: 'system' | 'user' | 'assistant';
@@ -8,14 +8,24 @@ export interface ChatTurn {
 }
 
 export interface LlmModelOption {
-  /** Hugging Face ONNX repo id (transformers.js compatible). */
+  /** Stable UI/config id. */
   id: string;
+  /** Hugging Face ONNX repo id (transformers.js compatible). */
+  repoId?: string;
   /** Friendly label shown in the UI. */
   name: string;
   /** Rough on-disk / VRAM footprint, for user guidance. */
   size: string;
   /** Device tier this option is the default for. */
   tier: DeviceTier;
+}
+
+type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
+
+interface LoadAttempt {
+  device: InferenceDevice;
+  dtype: string;
+  label: string;
 }
 
 /**
@@ -33,17 +43,27 @@ const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
     tier: 'low',
   },
   medium: {
-    id: 'onnx-community/gemma-3-1b-it-ONNX',
+    id: 'gemma-3-1b',
+    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
     name: 'Gemma 1B',
     size: '~1 GB',
     tier: 'medium',
   },
   high: {
-    id: 'onnx-community/gemma-3-1b-it-ONNX',
+    id: 'gemma-3-1b-hq',
+    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
     name: 'Gemma 1B (HQ)',
     size: '~1.5 GB',
     tier: 'high',
   },
+};
+
+const UNCENSORED_CHAT_MODEL: LlmModelOption = {
+  id: 'qwen3-heretic-0.6b',
+  repoId: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
+  name: 'Qwen3 Heretic 0.6B',
+  size: '~0.6 GB',
+  tier: 'medium',
 };
 
 const SYSTEM_PROMPT =
@@ -55,12 +75,15 @@ const SYSTEM_PROMPT =
 @Injectable({ providedIn: 'root' })
 export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
+  private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
+  private readonly ANDROID_LOAD_TIMEOUT_MS = 180000;
 
   /** All available Gemma options, one recommended per device tier. */
   readonly models: LlmModelOption[] = [
     GEMMA_MODELS.low,
     GEMMA_MODELS.medium,
     GEMMA_MODELS.high,
+    UNCENSORED_CHAT_MODEL,
   ];
 
   /** The chosen model id (auto-selected by hardware, user-overridable). */
@@ -69,13 +92,18 @@ export class LlmService {
   readonly selectedModel = computed(
     () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
   );
+  readonly isUncensoredMode = computed(() => this.selectedModel().id === UNCENSORED_CHAT_MODEL.id);
+  readonly uncensoredModel = UNCENSORED_CHAT_MODEL;
 
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly activeModel = signal<LlmModelOption | null>(null);
+  readonly thinkingTrace = signal<string[]>([]);
 
   private generator: any = null;
   private loadPromise: Promise<any> | null = null;
+  private loadedDevice: InferenceDevice | null = null;
 
   /** Picks the best default model for this device unless the user has overridden it. */
   async autoSelectModel(): Promise<void> {
@@ -90,13 +118,16 @@ export class LlmService {
     this.modelId.set(id);
     try {
       localStorage.setItem(this.STORAGE_KEY, id);
+      localStorage.removeItem(this.UNCENSORED_STORAGE_KEY);
     } catch {
       // ignore persistence errors
     }
     // Force a reload on next generate.
     this.generator = null;
     this.loadPromise = null;
+    this.loadedDevice = null;
     this.isReady.set(false);
+    this.activeModel.set(null);
   }
 
   /**
@@ -115,47 +146,105 @@ export class LlmService {
     }
   }
 
-  private async load(): Promise<any> {
+  async reloadOnCpu(): Promise<any> {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    this.activeModel.set(null);
+    return await this.load(true);
+  }
+
+  private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
-    const modelId = this.modelId();
+    const preferredModel = this.selectedModel();
 
     this.isLoading.set(true);
     this.isReady.set(false);
+    this.activeModel.set(null);
 
-    const { hasWebGPU } = await detectDeviceCapability();
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
-    if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
-    }
-    attempts.push(
-      { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
-      { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-    );
+    const capability = await detectDeviceCapability();
+    const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
+    const hasAccelerator = acceleratorAttempts.length > 0;
+    const candidates = this.buildCandidateModels(preferredModel, hasAccelerator);
+    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
 
     let lastError: unknown = null;
     try {
-      for (const attempt of attempts) {
-        try {
-          this.loadInfo.set(`loading ${this.selectedModel().name} (${attempt.label})…`);
-          this.generator = await pipeline('text-generation', modelId, {
-            device: attempt.device,
-            dtype: attempt.dtype as any,
-          });
-          this.loadInfo.set(`${this.selectedModel().name} · ${attempt.label}`);
-          this.isReady.set(true);
-          console.info(`[Gemma] Loaded ${modelId} with ${attempt.label}`);
-          return this.generator;
-        } catch (err) {
-          lastError = err;
-          console.warn(`[Gemma] ${attempt.label} failed`, err);
-          this.generator = null;
+      for (const model of candidates) {
+        for (const attempt of attempts) {
+          try {
+            this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
+            const repoId = model.repoId ?? model.id;
+            this.generator = await this.loadPipeline(repoId, attempt);
+            this.loadInfo.set(`${model.name} · ${attempt.label}`);
+            this.isReady.set(true);
+            this.activeModel.set(model);
+            this.loadedDevice = attempt.device;
+            console.info(`[Gemma] Loaded ${repoId} with ${attempt.label}`);
+            return this.generator;
+          } catch (err) {
+            lastError = err;
+            console.warn(`[Gemma] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
+            this.generator = null;
+            this.loadedDevice = null;
+          }
         }
       }
-      this.loadInfo.set('Gemma could not be loaded.');
+      this.loadInfo.set(hasAccelerator
+        ? 'GPU/NPU chat failed. CPU fallback is available in Settings.'
+        : 'Gemma could not be loaded.');
       throw lastError ?? new Error('Gemma load failed');
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
+    if (!useAccelerator) {
+      return [GEMMA_MODELS.low];
+    }
+
+    const fallbackModel = GEMMA_MODELS.low;
+    return preferredModel.id === fallbackModel.id
+      ? [preferredModel]
+      : [preferredModel, fallbackModel];
+  }
+
+  private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
+    const attempts: LoadAttempt[] = [];
+    if (capability.hasWebNN) {
+      attempts.push({ device: 'webnn-npu', dtype: 'q4', label: 'webnn-npu/q4' });
+      attempts.push({ device: 'webnn-gpu', dtype: 'q4', label: 'webnn-gpu/q4' });
+    }
+    if (capability.supportsLlmWebGPU) {
+      attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
+      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
+    }
+    return attempts;
+  }
+
+  private buildCpuLoadAttempts(): LoadAttempt[] {
+    return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
+  }
+
+  private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
+    const load = pipeline('text-generation', repoId, {
+      device: attempt.device,
+      dtype: attempt.dtype as any,
+    });
+
+    if (!isAndroidWebView()) return await load;
+
+    return await Promise.race([
+      load,
+      new Promise((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error(`Timed out loading ${repoId} (${attempt.label}) on Android WebView`)),
+          this.ANDROID_LOAD_TIMEOUT_MS
+        );
+      }),
+    ]);
   }
 
   /**
@@ -163,7 +252,7 @@ export class LlmService {
    * History should be the recent conversation turns (excluding the system prompt).
    */
   async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
-    const generator = await this.ensureLoaded();
+    this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
 
     const messages: ChatTurn[] = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -171,26 +260,108 @@ export class LlmService {
       { role: 'user', content: userText },
     ];
 
-    const output: any = await generator(messages, {
+    const options = {
       max_new_tokens: 192,
       do_sample: true,
       temperature: 0.7,
       top_p: 0.9,
-    });
+    };
 
-    return this.extractText(output);
+    try {
+      const generator = await this.ensureLoaded();
+      return await this.runGeneration(generator, messages, userText, history, options);
+    } catch (e) {
+      if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
+        console.warn('[Gemma] Accelerator generation failed; CPU fallback is available in Settings', e);
+        this.loadInfo.set('GPU/NPU chat failed during generation. CPU fallback is available in Settings.');
+      }
+      this.thinkingTrace.set([]);
+      throw e;
+    }
   }
 
-  private extractText(output: any): string {
+  private async runGeneration(
+    generator: any,
+    messages: ChatTurn[],
+    userText: string,
+    history: ChatTurn[],
+    options: Record<string, unknown>
+  ): Promise<string> {
+    let output: any;
+    let promptPrefix = '';
+    try {
+      this.thinkingTrace.set(['Preparing context', 'Generating reply']);
+      output = await generator(messages, options);
+    } catch (e) {
+      if (!this.isMissingChatTemplateError(e)) throw e;
+      this.thinkingTrace.set(['Preparing context', 'Using plain prompt fallback', 'Generating reply']);
+      promptPrefix = this.buildPlainPrompt(userText, history);
+      output = await generator(promptPrefix, options);
+    }
+
+    this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
+    const reply = this.extractText(output, promptPrefix);
+    this.thinkingTrace.set([]);
+    return reply;
+  }
+
+  private buildPlainPrompt(userText: string, history: ChatTurn[]): string {
+    const turns = history
+      .filter(turn => turn.role !== 'system')
+      .map(turn =>
+        `<|im_start|>${turn.role === 'assistant' ? 'assistant' : 'user'}\n${turn.content}<|im_end|>`
+      )
+      .join('\n');
+
+    return [
+      `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>`,
+      turns,
+      `<|im_start|>user\n${userText}<|im_end|>`,
+      '<|im_start|>assistant\n',
+    ].filter(Boolean).join('\n');
+  }
+
+  private isMissingChatTemplateError(error: unknown): boolean {
+    return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
+  }
+
+  private isRecoverableAcceleratorRuntimeError(error: unknown): boolean {
+    const message = String((error as any)?.message ?? error);
+    return /WebGPU|WebNN|GroupQueryAttention|workgroup storage|compute pipeline|OrtRun|GPU|NPU/i.test(message);
+  }
+
+  /**
+   * Turns a raw generation/load failure into a short, friendly explanation the
+   * user can act on. Returns null when the error is not one we recognise.
+   */
+  friendlyError(error: unknown): string | null {
+    const message = String((error as any)?.message ?? error);
+    const onCpu = this.loadedDevice === 'wasm';
+
+    if (/workgroup storage|compute pipeline|GroupQueryAttention/i.test(message)) {
+      return onCpu
+        ? "This device ran low on memory for Ava's chat model. Try a smaller model in Settings or close some apps."
+        : "Your graphics chip can't fit this chat model in accelerated mode. Switch to CPU in Settings → Conversation model, or pick a smaller model.";
+    }
+    if (/out of memory|oom|allocation failed|enough memory|insufficient/i.test(message)) {
+      return 'Ava ran out of memory loading the chat model. Close some apps, free up space, or pick a smaller model in Settings.';
+    }
+    if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
+      return "Ava's hardware acceleration hit a snag. Switch to CPU in Settings → Conversation model and try again.";
+    }
+    return null;
+  }
+
+  private extractText(output: any, promptPrefix = ''): string {
     try {
       const generated = output?.[0]?.generated_text;
       if (Array.isArray(generated)) {
         // Chat-format output: take the final assistant turn.
         const last = generated.at(-1);
-        return (last?.content ?? '').toString().trim();
+        return this.cleanGeneratedText((last?.content ?? '').toString(), promptPrefix);
       }
       if (typeof generated === 'string') {
-        return generated.trim();
+        return this.cleanGeneratedText(generated, promptPrefix);
       }
     } catch {
       // fall through
@@ -198,9 +369,25 @@ export class LlmService {
     return '';
   }
 
+  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+    let cleaned = text;
+    if (promptPrefix && cleaned.startsWith(promptPrefix)) {
+      cleaned = cleaned.slice(promptPrefix.length);
+    }
+    cleaned = cleaned
+      .replace(/<\|im_start\|>\s*assistant\s*/gi, '')
+      .replace(/<\|im_end\|>/gi, '')
+      .replace(/^(System|User|Ava|Assistant):[\s\S]*?\bAva:\s*/i, '')
+      .trim();
+    return cleaned;
+  }
+
   private loadStoredModel(): string {
     try {
+      if (localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1') return UNCENSORED_CHAT_MODEL.id;
       const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (stored === 'onnx-community/gemma-3-1b-it-ONNX') return GEMMA_MODELS.medium.id;
+      if (stored === UNCENSORED_CHAT_MODEL.repoId) return UNCENSORED_CHAT_MODEL.id;
       if (stored && this.modelExists(stored)) return stored;
     } catch {
       // ignore
@@ -209,7 +396,7 @@ export class LlmService {
   }
 
   private modelExists(id: string): boolean {
-    return [GEMMA_MODELS.low.id, GEMMA_MODELS.medium.id, GEMMA_MODELS.high.id].includes(id);
+    return this.models.some(model => model.id === id);
   }
 
   private hasUserOverride(): boolean {

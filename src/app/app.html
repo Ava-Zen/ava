@@ -3,10 +3,7 @@
     <section class="companion-grid" [class.chat-active]="chatStarted()">
       <section class="voice-console" [class.mini]="chatStarted()" aria-labelledby="voice-title">
         <button type="button" class="garden-eyebrow" (click)="openSettings()" title="Switch garden">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 21c4-4 7-7.7 7-11a7 7 0 1 0-14 0c0 3.3 3 7 7 11Z"></path>
-            <path d="M12 12.2A2.2 2.2 0 1 0 12 7.8a2.2 2.2 0 0 0 0 4.4Z"></path>
-          </svg>
+          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
           <span>{{ currentGarden()?.name || 'Personal Garden' }}</span>
         </button>
 
@@ -22,6 +19,8 @@
               } @else {
                 Speaking with you.
               }
+            } @else if (userName()) {
+              I am here, {{ userName() }}.
             } @else {
               I am here.
             }
@@ -36,14 +35,16 @@
           (click)="toggleVoice()"
           (keydown.enter)="toggleVoice()"
           title="Toggle listening (Space)"
-          [attr.aria-label]="isListening() ? 'Stop listening' : 'Start speaking with Ava'">
+          [attr.aria-label]="voiceEnabled() ? 'Turn off Ava voice channel' : 'Start speaking with Ava'"
+        >
           <span class="orb-ring"></span>
           <span
             class="orb"
             [class.listening]="isListening() || isLoadingModel()"
             [class.thinking]="isThinking()"
             [class.speaking]="status() === 'speaking'"
-            [class.loading]="isLoadingModel()">
+            [class.loading]="isLoadingModel()"
+          >
             <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
               <rect x="9" y="2" width="6" height="12" rx="3"></rect>
               <path d="M5 11a7 7 0 0 0 14 0"></path>
@@ -55,17 +56,20 @@
 
         <div class="voice-status">
           @if (isLoadingModel()) {
-            <span>Loading Moonshine Base</span>
+            <span>Loading {{ speechModelName() }}</span>
             <small>{{ modelLoadInfo() || 'preparing local model' }}</small>
           } @else if (isListening()) {
             <span>Voice channel open</span>
-            <small>Moonshine Base ({{ modelLoadInfo() || 'auto' }})</small>
+            <small>{{ speechModelName() }} ({{ modelLoadInfo() || 'auto' }})</small>
           } @else if (isThinking()) {
             <span>Ava is reflecting</span>
-            <small>Working inside {{ currentGarden()?.name || 'this garden' }}</small>
+            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Working inside ' + (currentGarden()?.name || 'this garden') }}</small>
           } @else if (status() === 'speaking') {
             <span>{{ voiceName() }} speaking</span>
-            <small>Ava voice active</small>
+            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
+          } @else if (voiceEnabled()) {
+            <span>Voice channel on</span>
+            <small>Ready to listen</small>
           } @else {
             <span>Ready when you are</span>
             <small>Local speech and voice</small>
@@ -78,86 +82,322 @@
       </section>
 
       @if (chatStarted()) {
-      <section class="history-panel" aria-label="Conversation history" animate.leave="panel-leave">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Conversation</p>
-            <h2>{{ messages().length }} moments</h2>
+        <section
+          class="history-panel"
+          aria-label="Conversation history"
+          animate.leave="panel-leave"
+        >
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>{{ messages().length }} moments</h2>
+            </div>
+            <span class="privacy-badge" [class.busy]="activityBadgeBusy()">
+              {{ activityBadgeLabel() }}
+            </span>
           </div>
-          <span class="privacy-badge">Local first</span>
-        </div>
 
-        <div class="transcript" aria-live="polite" #transcript>
-          @for (msg of messages(); track msg.timestamp) {
-            <article class="message" [class.user]="msg.role === 'user'" [class.ava]="msg.role === 'ava'">
-              <div class="message-bubble">
-                <div class="message-meta">
-                  <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
-                  <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
-                </div>
-                @if (msg.role === 'ava') {
-                  <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
-                } @else {
-                  <div class="message-text">{{ msg.text }}</div>
-                }
-              </div>
-            </article>
+          @if (isThinking() && llmThinkingTrace().length) {
+            <div class="thinking-trace" aria-label="Ava thinking status">
+              @for (step of llmThinkingTrace(); track step) {
+                <span>{{ step }}</span>
+              }
+            </div>
           }
-        </div>
-      </section>
+
+          <div class="transcript" aria-live="polite" #transcript>
+            @for (msg of messages(); track msg.timestamp) {
+              <article
+                class="message"
+                [class.user]="msg.role === 'user'"
+                [class.ava]="msg.role === 'ava'"
+                [class.pending]="msg.pending"
+              >
+                <div class="message-bubble">
+                  <div class="message-meta">
+                    <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
+                    <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
+                  </div>
+                  @if (msg.role === 'ava') {
+                    <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                    @if (audioDownloadFor(msg); as download) {
+                      <div class="audio-download">
+                        <div class="audio-file">
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M9 18V5l12-2v13"></path>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <circle cx="18" cy="16" r="3"></circle>
+                          </svg>
+                          <small>{{ download.filename }}</small>
+                        </div>
+                        <div class="audio-controls">
+                          <button
+                            class="message-action"
+                            type="button"
+                            (click)="toggleAudioPreview(download)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              @if (isAudioPreviewActive(download.id)) {
+                                <rect x="7" y="5" width="4" height="14" rx="1"></rect>
+                                <rect x="13" y="5" width="4" height="14" rx="1"></rect>
+                              } @else {
+                                <path d="M8 5v14l11-7z"></path>
+                              }
+                            </svg>
+                            <span>{{ isAudioPreviewActive(download.id) ? 'Pause' : 'Play' }}</span>
+                          </button>
+                          <button
+                            class="message-action"
+                            type="button"
+                            (click)="saveAudioDownload(download)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M12 3v12"></path>
+                              <path d="M7 10l5 5 5-5"></path>
+                              <path d="M5 21h14"></path>
+                            </svg>
+                            <span>Save</span>
+                          </button>
+                        </div>
+                      </div>
+                    }
+                    @if (audioExportTaskFor(msg); as task) {
+                      @if (task.status === 'running') {
+                        <div class="message-actions">
+                          <button
+                            class="message-action danger"
+                            type="button"
+                            (click)="stopAudioExport(task.id)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                            </svg>
+                            <span>Stop</span>
+                          </button>
+                        </div>
+                      }
+                    }
+                  } @else {
+                    <div class="message-text">{{ msg.text }}</div>
+                  }
+                </div>
+              </article>
+            }
+          </div>
+        </section>
       }
     </section>
 
     <footer class="ava-footer" aria-label="Conversation actions">
-      <button class="tool-btn" (click)="clearConversation()" aria-label="Clear conversation">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 6h18"></path>
-          <path d="M8 6V4h8v2"></path>
-          <path d="M19 6l-1 14H6L5 6"></path>
-          <path d="M10 11v5"></path>
-          <path d="M14 11v5"></path>
-        </svg>
-        <span>Clear</span>
-      </button>
-      @if (status() === 'speaking') {
-        <button class="tool-btn" (click)="togglePause()" [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            @if (isPaused()) {
-              <path d="M8 5v14l11-7z"></path>
-            } @else {
-              <rect x="7" y="5" width="4" height="14" rx="1"></rect>
-              <rect x="13" y="5" width="4" height="14" rx="1"></rect>
-            }
-          </svg>
-          <span>{{ isPaused() ? 'Resume' : 'Pause' }}</span>
-        </button>
-        <button class="tool-btn stop" (click)="stopSpeaking()" aria-label="Stop speaking">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
-          </svg>
-          <span>Stop voice</span>
-        </button>
-      }
-      <button class="primary-tool" (click)="toggleVoice()" aria-label="Toggle voice">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          @if (isListening()) {
-            <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
-          } @else {
-            <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-            <path d="M5 11a7 7 0 0 0 14 0"></path>
-            <path d="M12 18v4"></path>
-            <path d="M8 22h8"></path>
+      <div class="footer-side footer-side-start">
+        <div class="action-menu-shell" #primaryActionShell>
+          <button
+            class="tool-btn add-tool"
+            type="button"
+            [attr.aria-expanded]="composerMenuOpen()"
+            aria-haspopup="menu"
+            aria-label="Open add menu"
+            title="Add"
+            (click)="onAddButtonClick($event)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14"></path>
+              <path d="M5 12h14"></path>
+            </svg>
+          </button>
+
+          @if (composerMenuOpen()) {
+            <div class="action-menu" role="menu" aria-label="Add options">
+              <div class="menu-header">
+                <span>Actions</span>
+                <button
+                  class="menu-close"
+                  type="button"
+                  aria-label="Close add menu"
+                  (click)="composerMenuOpen.set(false)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 6l12 12"></path>
+                    <path d="M18 6L6 18"></path>
+                  </svg>
+                </button>
+              </div>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="openFilePicker()"
+              >
+                <strong>Add files</strong>
+                <span>Attach local text files into the manual prompt</span>
+              </button>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="openAudioFilePicker()"
+                [disabled]="isGeneratingAudioFile()"
+              >
+                <strong>Generate audio file</strong>
+                <span>Upload text and download Ava speaking it as WAV</span>
+              </button>
+              <button
+                class="menu-action"
+                type="button"
+                role="menuitem"
+                (click)="setManualInputMode(!manualInputEnabled())"
+              >
+                <strong>{{
+                  manualInputEnabled() ? 'Use voice button' : 'Use text input'
+                }}</strong>
+                <span>{{
+                  manualInputEnabled()
+                    ? 'Swap the composer back to Speak'
+                    : 'Replace Speak with a manual prompt field'
+                }}</span>
+              </button>
+
+              <div class="menu-divider"></div>
+
+              <p class="menu-label">Built-in prompts</p>
+              <div class="quick-prompt-list">
+                @for (prompt of quickPrompts; track prompt.label) {
+                  <button
+                    class="quick-prompt"
+                    type="button"
+                    role="menuitem"
+                    (click)="queueQuickPrompt(prompt.text)"
+                  >
+                    {{ prompt.label }}
+                  </button>
+                }
+              </div>
+
+              <div class="menu-divider"></div>
+
+              <button
+                class="menu-action danger"
+                type="button"
+                role="menuitem"
+                (click)="clearConversation()"
+              >
+                <strong>Clear conversation</strong>
+                <span>Reset the current garden's visible chat</span>
+              </button>
+            </div>
           }
-        </svg>
-        <span>{{ isListening() ? 'Stop mic' : 'Speak' }}</span>
-      </button>
-      <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
-          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .1l-.3.2a1.7 1.7 0 0 0-.9 1.6v.3H10v-.3a1.7 1.7 0 0 0-.9-1.6l-.3-.2a1.7 1.7 0 0 0-2-.1l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 5 15l-.1-.4a1.7 1.7 0 0 0-1.4-1.1H3v-4h.5a1.7 1.7 0 0 0 1.4-1.1L5 8a1.7 1.7 0 0 0-.3-1.9L4.6 6l2-3.4.2.1a1.7 1.7 0 0 0 2-.1l.3-.2A1.7 1.7 0 0 0 10 1h4a1.7 1.7 0 0 0 .9 1.4l.3.2a1.7 1.7 0 0 0 2 .1l.2-.1 2 3.4-.1.1A1.7 1.7 0 0 0 19 8l.1.4a1.7 1.7 0 0 0 1.4 1.1h.5v4h-.5a1.7 1.7 0 0 0-1.4 1.1l-.1.4Z"></path>
-        </svg>
-        <span>Settings</span>
-      </button>
+        </div>
+        @if (status() === 'speaking') {
+          <button
+            class="tool-btn"
+            (click)="togglePause()"
+            [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              @if (isPaused()) {
+                <path d="M8 5v14l11-7z"></path>
+              } @else {
+                <rect x="7" y="5" width="4" height="14" rx="1"></rect>
+                <rect x="13" y="5" width="4" height="14" rx="1"></rect>
+              }
+            </svg>
+            <span>{{ isPaused() ? 'Resume' : 'Pause' }}</span>
+          </button>
+          <button class="tool-btn stop" (click)="stopSpeaking()" aria-label="Stop speaking">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+            <span>Stop voice</span>
+          </button>
+        }
+      </div>
+
+      <div class="footer-center">
+        <div class="composer-stack">
+          <div class="composer-row">
+            @if (manualInputEnabled()) {
+              <label class="manual-composer">
+                <span class="sr-only">Manual prompt</span>
+                <textarea
+                  class="manual-input"
+                  rows="1"
+                  [value]="manualPrompt()"
+                  (input)="onManualPromptInput($event)"
+                  (keydown)="onManualPromptKeydown($event)"
+                  placeholder="Type a prompt, add a file, or insert a built-in message"
+                ></textarea>
+              </label>
+            }
+
+            <div class="action-menu-shell">
+              @if (manualInputEnabled()) {
+                <button
+                  class="primary-tool send-tool"
+                  type="button"
+                  [disabled]="!canSubmitManualPrompt()"
+                  aria-label="Send manual prompt"
+                  (click)="onPrimaryActionClick()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 12 20 4 15 20 11 13 4 12Z"></path>
+                  </svg>
+                  <span>Send</span>
+                </button>
+              } @else {
+                <button
+                  class="primary-tool"
+                  type="button"
+                  aria-label="Toggle voice"
+                  (click)="onPrimaryActionClick()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    @if (voiceEnabled()) {
+                      <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
+                    } @else {
+                      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                      <path d="M5 11a7 7 0 0 0 14 0"></path>
+                      <path d="M12 18v4"></path>
+                      <path d="M8 22h8"></path>
+                    }
+                  </svg>
+                  <span>{{ voiceButtonLabel() }}</span>
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (composerNotice()) {
+            <p class="composer-note">{{ composerNotice() }}</p>
+          }
+        </div>
+      </div>
+
+      <div class="footer-side footer-side-end">
+        <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
+          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
+          <span>Settings</span>
+        </button>
+      </div>
+
+      <input
+        #filePicker
+        class="sr-only"
+        type="file"
+        multiple
+        aria-label="Choose files to add to the manual prompt"
+        title="Choose files to add to the manual prompt"
+        accept=".txt,.md,.markdown,.json,.csv,.ts,.tsx,.js,.jsx,.html,.css,.scss,.xml,.yml,.yaml,.log,text/*"
+        (change)="onFilesSelected($event)"
+      />
+      <input
+        #audioFilePicker
+        class="sr-only"
+        type="file"
+        aria-label="Choose a text file to turn into Ava audio"
+        title="Choose a text file to turn into Ava audio"
+        accept=".txt,.md,.markdown,.json,.csv,.log,text/*"
+        (change)="onAudioFileSelected($event)"
+      />
     </footer>
   </div>
 
@@ -165,15 +405,24 @@
     <div class="settings-overlay" (click)="closeSettings()">
       <div class="settings-modal" (click)="$event.stopPropagation()">
         <app-settings
+          [speechModelName]="speechModelName()"
+          [speechLoadInfo]="modelLoadInfo()"
+          [voiceBackendInfo]="voiceBackendInfo()"
           (close)="closeSettings()"
           (selectGarden)="selectGarden($event)"
           (createGarden)="onCreateGarden($event)"
           (updateGarden)="onUpdateGarden($event)"
           (deleteGarden)="onDeleteGarden($event)"
           (previewVoice)="previewVoice($event)"
+          (previewCustomVoice)="previewCustomVoice($event)"
+          (resetCache)="onResetCache()"
         ></app-settings>
       </div>
     </div>
+  }
+
+  @if (showOnboarding()) {
+    <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
   }
 
   <router-outlet />

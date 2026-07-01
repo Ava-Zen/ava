@@ -105,11 +105,61 @@
   <section class="section">
     <div class="section-heading">
       <div>
+        <p class="overline">Conversation</p>
+        <h3>Models</h3>
+      </div>
+    </div>
+    <p class="hint">Pick separate local models for quick conversation replies and background agent tasks. Experimental Heretic models are less-filtered and may be less stable.</p>
+
+    <div class="model-groups">
+      <div>
+        <p class="speaker-label">Conversation</p>
+        <div class="model-list">
+          @for (model of conversationModels; track model.id) {
+            <button
+              class="model-item"
+              [class.active]="model.id === selectedConversationModel().id"
+              (click)="selectConversationModel(model.id)"
+            >
+              <span class="voice-radio" aria-hidden="true"></span>
+              <span>
+                <strong>{{ model.name }}</strong>
+                <small>{{ model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : 'Stable' }}</small>
+              </span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div>
+        <p class="speaker-label">Background Agent</p>
+        <div class="model-list">
+          @for (model of agentModels; track model.id) {
+            <button
+              class="model-item"
+              [class.active]="model.id === selectedAgentModel().id"
+              (click)="selectAgentModel(model.id)"
+            >
+              <span class="voice-radio" aria-hidden="true"></span>
+              <span>
+                <strong>{{ model.name }}</strong>
+                <small>{{ model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : 'Stable' }}</small>
+              </span>
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
         <p class="overline">Voice</p>
         <h3>Speech model</h3>
       </div>
     </div>
-    <p class="hint">Choose how Ava speaks. Both voices run fully on this device.</p>
+    <p class="hint">Choose how Ava speaks. Every voice runs fully on this device.</p>
 
     <div class="voice-list">
       @for (voice of voices; track voice.id) {
@@ -139,6 +189,49 @@
                   </button>
                 }
               </div>
+            </div>
+          }
+
+          @if (voice.id === 'custom' && selectedVoiceId() === 'custom') {
+            <div class="speaker-picker">
+              @if (customVoices().length) {
+                <span class="speaker-label">Your voices</span>
+                <div class="speaker-chips">
+                  @for (cv of customVoices(); track cv.id) {
+                    <button
+                      class="speaker-chip"
+                      [class.active]="cv.id === selectedCustomVoiceId()"
+                      (click)="selectCustomVoice(cv.id)">
+                      {{ cv.name }}
+                      <span class="chip-remove" (click)="removeCustomVoice(cv.id); $event.stopPropagation()" title="Delete voice">×</span>
+                    </button>
+                  }
+                </div>
+              }
+
+              <div class="clone-tools">
+                <input
+                  class="clone-name"
+                  type="text"
+                  placeholder="Voice name"
+                  [ngModel]="newVoiceName()"
+                  (ngModelChange)="newVoiceName.set($event)"
+                  [disabled]="customVoiceBuilding()" />
+                @if (!isRecording()) {
+                  <button class="clone-btn" (click)="startRecording()" [disabled]="customVoiceBuilding()">Record</button>
+                } @else {
+                  <button class="clone-btn recording" (click)="stopRecording()">Stop ({{ recordSeconds() }}s)</button>
+                }
+                <label class="clone-btn upload">
+                  Upload
+                  <input type="file" accept="audio/*" (change)="onSampleUpload($event)" hidden [disabled]="customVoiceBuilding()" />
+                </label>
+              </div>
+              <small class="hint">
+                Record at least {{ minSampleSeconds }} seconds of clear speech, or upload a sample.
+                @if (customVoiceBuilding()) { <strong>{{ customVoiceStatus() }}</strong> }
+                @if (customVoiceError()) { <strong class="error">{{ customVoiceError() }}</strong> }
+              </small>
             </div>
           }
         </article>
@@ -328,14 +421,125 @@
   <section class="section settings-grid">
     <div class="setting-item">
       <span>Speech recognition</span>
-      <strong>Moonshine Base</strong>
-      <small>Local STT</small>
+      <strong>{{ speechModelName }}</strong>
+      <small>{{ speechLoadInfo || 'Loads on first voice use' }}</small>
     </div>
     <div class="setting-item">
       <span>Storage</span>
       <strong>Local first</strong>
       <small>Gardens in this device</small>
     </div>
+    <div class="setting-item">
+      <span>Voice runtime</span>
+      <strong>{{ selectedVoice().name }}</strong>
+      <small>{{ selectedVoice().id === 'kokoro' ? selectedKokoroVoice().name + ' · ' + voiceBackendInfo : voiceBackendInfo }}</small>
+    </div>
+  </section>
+
+  @if (mcpServerUrl()) {
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Integrations</p>
+        <h3>MCP voice server</h3>
+      </div>
+    </div>
+    <p class="hint">
+      Other local agents (Claude, GitHub Copilot, etc.) can borrow Ava's voice through an MCP
+      server hosted while Ava is open.
+    </p>
+    <div class="setting-item">
+      <span>Endpoint</span>
+      <strong>{{ mcpServerUrl() }}</strong>
+      <small>Tools: speak, list_voices · loopback only</small>
+    </div>
+  </section>
+  }
+
+  <section class="section diagnostics-section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Hardware</p>
+        <h3>This device</h3>
+      </div>
+    </div>
+    <p class="hint">{{ hardwareReadinessDetails() }}</p>
+
+    <div class="diagnostic-summary">
+      <div>
+        <span>Status</span>
+        <strong>{{ hardwareReadinessLabel() }}</strong>
+      </div>
+      <div>
+        <span>Runtime path</span>
+        <strong>{{ hardware()?.hasWebNN ? 'WebNN NPU/GPU available' : hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
+      </div>
+    </div>
+
+    <div class="diagnostic-grid">
+      <div class="diagnostic-item">
+        <span>OS and browser</span>
+        <strong>{{ hardware()?.os || 'Checking' }} · {{ hardware()?.browser || 'Checking' }}</strong>
+        <small>{{ hardware()?.androidWebView ? 'Android WebView compatibility mode' : hardware()?.platform || 'Platform unknown' }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>CPU and memory</span>
+        <strong>{{ hardware()?.cores || 'Unknown' }} cores</strong>
+        <small>{{ formatMemory(hardware()?.memoryGb) }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>Accelerators</span>
+        <strong>{{ hardware()?.hasWebNN ? 'WebNN detected' : hardware()?.hasWebGPU ? 'WebGPU detected' : 'Not available' }}</strong>
+        <small>{{ hardware()?.maxComputeWorkgroupStorageSize ? 'WebGPU workgroup storage ' + hardware()?.maxComputeWorkgroupStorageSize + ' bytes' : 'Ava tries NPU/GPU before CPU when exposed' }}</small>
+      </div>
+      <div class="diagnostic-item">
+        <span>Conversation model</span>
+        <strong>{{ conversationRuntimeLabel() }}</strong>
+        <small>Configured: {{ selectedConversationModel().name }}</small>
+        <button
+          class="fallback-btn"
+          type="button"
+          (click)="fallbackConversationToCpu()"
+          [disabled]="conversationLoading()"
+        >
+          Use CPU fallback
+        </button>
+      </div>
+      <div class="diagnostic-item">
+        <span>Agent model</span>
+        <strong>{{ agentRuntimeLabel() }}</strong>
+        <small>Configured: {{ selectedAgentModel().name }}</small>
+        <button
+          class="fallback-btn"
+          type="button"
+          (click)="fallbackAgentToCpu()"
+          [disabled]="agentLoading()"
+        >
+          Use CPU fallback
+        </button>
+      </div>
+      <div class="diagnostic-item">
+        <span>Speech model</span>
+        <strong>{{ speechModelName }}</strong>
+        <small>{{ speechLoadInfo || 'Not loaded yet' }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="section danger-zone">
+    <div>
+      <p class="overline">Fresh start</p>
+      <h3>Reset local cache</h3>
+      <p class="hint">Delete downloaded models, reset settings, clear local databases, and show onboarding again.</p>
+    </div>
+    <button class="reset-btn" type="button" (click)="resetEverything()">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+        <path d="M3 4v6h6"></path>
+        <path d="M9 12h6"></path>
+      </svg>
+      <span>Reset Cache</span>
+    </button>
   </section>
 
   <footer class="settings-footer">

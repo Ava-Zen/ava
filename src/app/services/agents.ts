@@ -58,6 +58,21 @@ const QWEN_MODELS: Record<DeviceTier, LlmModelOption> = {
   },
 };
 
+const UNCENSORED_AGENT_MODEL: LlmModelOption = {
+  id: 'onnx-community/Qwen3-0.6B-heretic-abliterated-uncensored-ONNX',
+  name: 'Qwen3 Heretic 0.6B',
+  size: '~0.6 GB',
+  tier: 'medium',
+};
+
+type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
+
+interface LoadAttempt {
+  device: InferenceDevice;
+  dtype: string;
+  label: string;
+}
+
 const AGENT_SYSTEM_PROMPT =
   'You are an autonomous background agent working on behalf of Ava, a voice ' +
   'companion. You are given a single task and must complete it carefully and ' +
@@ -72,6 +87,7 @@ export class AgentsService {
     QWEN_MODELS.low,
     QWEN_MODELS.medium,
     QWEN_MODELS.high,
+    UNCENSORED_AGENT_MODEL,
   ];
 
   private readonly modelId = signal<string>(this.loadStoredModel());
@@ -83,6 +99,7 @@ export class AgentsService {
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly activeModel = signal<LlmModelOption | null>(null);
 
   /** Reactive list of agent tasks (most recent last). */
   readonly tasks = signal<AgentTask[]>([]);
@@ -99,6 +116,7 @@ export class AgentsService {
     string,
     { tools: AgentToolDef[]; exec: AgentToolExecutor }
   >();
+  private loadedDevice: InferenceDevice | null = null;
 
   async autoSelectModel(): Promise<void> {
     if (this.hasUserOverride()) return;
@@ -116,7 +134,26 @@ export class AgentsService {
     }
     this.generator = null;
     this.loadPromise = null;
+    this.loadedDevice = null;
     this.isReady.set(false);
+    this.activeModel.set(null);
+  }
+
+  resetLoadedModel(): void {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    this.activeModel.set(null);
+  }
+
+  async reloadOnCpu(): Promise<any> {
+    this.generator = null;
+    this.loadPromise = null;
+    this.loadedDevice = null;
+    this.isReady.set(false);
+    this.activeModel.set(null);
+    return await this.load(true);
   }
 
   /**
@@ -158,7 +195,7 @@ export class AgentsService {
       console.error('[Qwen agent] task failed', err);
       this.patchTask(taskId, {
         status: 'error',
-        error: err?.message ?? 'Agent task failed.',
+        error: this.friendlyError(err) ?? err?.message ?? 'Agent task failed.',
       });
     } finally {
       this.toolContext.delete(taskId);
@@ -177,47 +214,81 @@ export class AgentsService {
     }
   }
 
-  private async load(): Promise<any> {
+  private async load(wasmOnly = false): Promise<any> {
     await this.autoSelectModel();
-    const modelId = this.modelId();
+    const preferredModel = this.selectedModel();
 
     this.isLoading.set(true);
     this.isReady.set(false);
+    this.activeModel.set(null);
 
-    const { hasWebGPU } = await detectDeviceCapability();
-    const attempts: Array<{ device: 'webgpu' | 'wasm'; dtype: string; label: string }> = [];
-    if (hasWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
-    }
-    attempts.push(
-      { device: 'wasm', dtype: 'q4', label: 'wasm/q4' },
-      { device: 'wasm', dtype: 'q8', label: 'wasm/q8' }
-    );
+    const capability = await detectDeviceCapability();
+    const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
+    const hasAccelerator = acceleratorAttempts.length > 0;
+    const candidates = this.buildCandidateModels(preferredModel, hasAccelerator);
+    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
 
     let lastError: unknown = null;
     try {
-      for (const attempt of attempts) {
-        try {
-          this.loadInfo.set(`loading ${this.selectedModel().name} (${attempt.label})…`);
-          this.generator = await pipeline('text-generation', modelId, {
-            device: attempt.device,
-            dtype: attempt.dtype as any,
-          });
-          this.loadInfo.set(`${this.selectedModel().name} · ${attempt.label}`);
-          this.isReady.set(true);
-          console.info(`[Qwen] Loaded ${modelId} with ${attempt.label}`);
-          return this.generator;
-        } catch (err) {
-          lastError = err;
-          console.warn(`[Qwen] ${attempt.label} failed`, err);
-          this.generator = null;
+      for (const model of candidates) {
+        for (const attempt of attempts) {
+          try {
+            this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
+            this.generator = await pipeline('text-generation', model.id, {
+              device: attempt.device,
+              dtype: attempt.dtype as any,
+            });
+            this.loadInfo.set(`${model.name} · ${attempt.label}`);
+            this.isReady.set(true);
+            this.activeModel.set(model);
+            this.loadedDevice = attempt.device;
+            console.info(`[Qwen] Loaded ${model.id} with ${attempt.label}`);
+            return this.generator;
+          } catch (err) {
+            lastError = err;
+            console.warn(`[Qwen] ${model.id} ${attempt.label} failed`, err);
+            this.generator = null;
+            this.loadedDevice = null;
+          }
         }
       }
-      this.loadInfo.set('Qwen could not be loaded.');
+      this.loadInfo.set(hasAccelerator
+        ? 'GPU/NPU agent failed. CPU fallback is available in Settings.'
+        : 'Qwen could not be loaded.');
       throw lastError ?? new Error('Qwen load failed');
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
+    const fallbackModel = QWEN_MODELS.low;
+    if (!useAccelerator) {
+      return preferredModel.id === UNCENSORED_AGENT_MODEL.id
+        ? [preferredModel, fallbackModel]
+        : [fallbackModel];
+    }
+
+    return preferredModel.id === fallbackModel.id
+      ? [preferredModel]
+      : [preferredModel, fallbackModel];
+  }
+
+  private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
+    const attempts: LoadAttempt[] = [];
+    if (capability.hasWebNN) {
+      attempts.push({ device: 'webnn-npu', dtype: 'q4', label: 'webnn-npu/q4' });
+      attempts.push({ device: 'webnn-gpu', dtype: 'q4', label: 'webnn-gpu/q4' });
+    }
+    if (capability.supportsLlmWebGPU) {
+      attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
+      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
+    }
+    return attempts;
+  }
+
+  private buildCpuLoadAttempts(): LoadAttempt[] {
+    return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
   }
 
   /** Runs a single agent generation. Exposed for advanced/manual use. */
@@ -230,14 +301,66 @@ export class AgentsService {
       { role: 'user', content: prompt },
     ];
 
-    const output: any = await generator(messages, {
+    const options = {
       max_new_tokens: 1024,
       do_sample: true,
       temperature: 0.6,
       top_p: 0.95,
-    });
+    };
 
-    return this.extractText(output);
+    let output: any;
+    let promptPrefix = '';
+    try {
+      output = await generator(messages, options);
+    } catch (e) {
+      if (!this.isMissingChatTemplateError(e)) throw e;
+      promptPrefix = this.buildPlainPrompt(prompt, history);
+      output = await generator(promptPrefix, options);
+    }
+
+    return this.extractText(output, promptPrefix);
+  }
+
+  private buildPlainPrompt(prompt: string, history: ChatTurn[]): string {
+    const turns = history
+      .filter(turn => turn.role !== 'system')
+      .map(turn =>
+        `<|im_start|>${turn.role === 'assistant' ? 'assistant' : 'user'}\n${turn.content}<|im_end|>`
+      )
+      .join('\n');
+
+    return [
+      `<|im_start|>system\n${AGENT_SYSTEM_PROMPT}<|im_end|>`,
+      turns,
+      `<|im_start|>user\n${prompt}<|im_end|>`,
+      '<|im_start|>assistant\n',
+    ].filter(Boolean).join('\n');
+  }
+
+  private isMissingChatTemplateError(error: unknown): boolean {
+    return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
+  }
+
+  /**
+   * Turns a raw agent failure into a short, friendly explanation. Returns null
+   * when the error is not one we recognise.
+   */
+  friendlyError(error: unknown): string | null {
+    const message = String((error as any)?.message ?? error);
+    const onCpu = this.loadedDevice === 'wasm';
+
+    if (/workgroup storage|compute pipeline|GroupQueryAttention/i.test(message)) {
+      return onCpu
+        ? 'This device ran low on memory for the agent model. Try a smaller model in Settings or close some apps.'
+        : "Your graphics chip can't fit this agent model in accelerated mode. Switch to CPU in Settings, or pick a smaller model.";
+    }
+    if (/out of memory|oom|allocation failed|enough memory|insufficient/i.test(message)) {
+      return 'The agent ran out of memory. Close some apps, free up space, or pick a smaller model in Settings.';
+    }
+    if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
+      return 'The agent hit a hardware acceleration snag. Switch to CPU in Settings and try again.';
+    }
+    return null;
   }
 
   /**
@@ -381,20 +504,31 @@ export class AgentsService {
     );
   }
 
-  private extractText(output: any): string {
+  private extractText(output: any, promptPrefix = ''): string {
     try {
       const generated = output?.[0]?.generated_text;
       if (Array.isArray(generated)) {
         const last = generated.at(-1);
-        return this.stripThinking((last?.content ?? '').toString()).trim();
+        return this.cleanGeneratedText((last?.content ?? '').toString(), promptPrefix);
       }
       if (typeof generated === 'string') {
-        return this.stripThinking(generated).trim();
+        return this.cleanGeneratedText(generated, promptPrefix);
       }
     } catch {
       // fall through
     }
     return '';
+  }
+
+  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+    let cleaned = text;
+    if (promptPrefix && cleaned.startsWith(promptPrefix)) {
+      cleaned = cleaned.slice(promptPrefix.length);
+    }
+    cleaned = cleaned
+      .replace(/<\|im_start\|>\s*assistant\s*/gi, '')
+      .replace(/<\|im_end\|>/gi, '');
+    return this.stripThinking(cleaned).trim();
   }
 
   /** Qwen3 can emit <think>…</think> reasoning blocks; remove them from results. */
@@ -413,7 +547,7 @@ export class AgentsService {
   }
 
   private modelExists(id: string): boolean {
-    return [QWEN_MODELS.low.id, QWEN_MODELS.medium.id, QWEN_MODELS.high.id].includes(id);
+    return this.models.some(model => model.id === id);
   }
 
   private hasUserOverride(): boolean {
