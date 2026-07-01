@@ -25,6 +25,7 @@ const DEFAULT_KOKORO_VOICE = 'af_bella';
 @Injectable({ providedIn: 'root' })
 export class TtsService {
   private readonly STORAGE_KEY = 'ava-tts-config';
+  private readonly kokoroPreviewBasePath = '/audio/kokoro';
 
   readonly voices: TtsVoiceOption[] = [
     {
@@ -70,6 +71,12 @@ export class TtsService {
   setKokoroVoice(id: string) {
     this.config.update(c => ({ ...c, kokoroVoice: id }));
     this.save();
+  }
+
+  getKokoroPreviewAudioUrl(id: string): string {
+    return this.kokoroVoices.some(v => v.id === id)
+      ? `${this.kokoroPreviewBasePath}/${id}.wav`
+      : `${this.kokoroPreviewBasePath}/${DEFAULT_KOKORO_VOICE}.wav`;
   }
 
   private load(): TtsConfig {

@@ -1919,28 +1919,33 @@ export class App {
     });
   }
 
-  /** Plays a short spoken sample of a Kokoro speaker when it is selected. */
+  /** Plays a pre-generated sample for a Kokoro speaker when it is selected. */
   protected async previewVoice(voiceId: string) {
-    const name = this.tts.kokoroVoices.find(v => v.id === voiceId)?.name ?? 'Ava';
-    const text = `Hi, I am ${name}, how are you feeling today?`;
+    const previewUrl = this.tts.getKokoroPreviewAudioUrl(voiceId);
+    const resolvedUrl = new URL(previewUrl, window.location.href).toString();
 
     this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
 
-    if (!this.kokoro) {
-      await this.preloadKokoro().catch(() => {});
+    try {
+      this.status.set('speaking');
+      const player = new Audio(resolvedUrl);
+      this.currentAudio = player;
+      player.onended = () => {
+        if (this.currentAudio === player) this.currentAudio = null;
+        if (this.status() === 'speaking') this.status.set('idle');
+      };
+      player.onerror = () => {
+        if (this.currentAudio === player) this.currentAudio = null;
+        if (this.status() === 'speaking') this.status.set('idle');
+      };
+      await player.play();
+    } catch (e) {
+      console.warn('Voice preview failed', e);
+      const name = this.tts.kokoroVoices.find(v => v.id === voiceId)?.name ?? 'Ava';
+      const text = `Hi, I am ${name}, how are you feeling today?`;
+      this.speakWithSystem(text, ++this.speechGen);
     }
-    if (this.kokoro) {
-      try {
-        this.status.set('speaking');
-        const audio = await this.kokoro.generate(text, { voice: voiceId, speed: 0.98 });
-        if (await this.playAudioBlob(audio.toBlob())) return;
-      } catch (e) {
-        console.warn('Voice preview failed', e);
-      }
-    }
-    // Fallback so the sample is still heard even if Kokoro is unavailable
-    this.speakWithSystem(text, ++this.speechGen);
   }
 
   private stopCurrentAudio() {
