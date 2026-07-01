@@ -3,6 +3,27 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Install dependencies",
+      "type": "shell",
+      "command": "npm install",
+      "inAgents": true,
+      "runOptions": {
+        "runOn": "worktreeCreated"
+      }
+    },
+    {
+      "label": "Start web dev server",
+      "type": "shell",
+      "command": "npm run start",
+      "inAgents": true
+    },
+    {
+      "label": "Start Tauri desktop dev",
+      "type": "shell",
+      "command": "npm run tauri:dev",
+      "inAgents": true
+    },
+    {
       "type": "npm",
       "script": "start",
       "isBackground": true,
