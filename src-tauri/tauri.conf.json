@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Ava",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "identifier": "com.ava-zen.ava",
   "build": {
     "frontendDist": "../dist/ava/browser",
@@ -28,7 +28,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["ava"]
+        "schemes": [
+          "ava"
+        ]
       }
     }
   },
