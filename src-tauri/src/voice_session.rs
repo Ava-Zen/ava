@@ -37,35 +37,73 @@ pub fn voice_session_stop() -> Result<(), String> {
 fn call_service(method: &str) -> Result<(), String> {
   use jni::objects::{JClass, JObject, JValue};
 
-  let ctx = ndk_context::android_context();
-  let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
-  let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-  let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+  fn inner_call_service(method: &str) -> Result<(), String> {
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| format!("JNI VM init failed: {e}"))?;
+    let mut env = vm
+      .attach_current_thread()
+      .map_err(|e| format!("JNI thread attach failed: {e}"))?;
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
 
-  let loader = env
-    .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-    .and_then(|v| v.l())
-    .map_err(|e| e.to_string())?;
-  let class_name = env
-    .new_string("com.ava_zen.ava.VoiceSessionService")
-    .map_err(|e| e.to_string())?;
-  let class_obj = env
-    .call_method(
-      &loader,
-      "loadClass",
-      "(Ljava/lang/String;)Ljava/lang/Class;",
-      &[JValue::Object(&JObject::from(class_name))],
-    )
-    .and_then(|v| v.l())
-    .map_err(|e| e.to_string())?;
+    if env
+      .exception_check()
+      .map_err(|e| format!("JNI exception check failed: {e}"))?
+    {
+      env.exception_describe();
+      env.exception_clear();
+      return Err("Java threw an exception before the voice session command ran".to_string());
+    }
 
-  env
-    .call_static_method(
-      JClass::from(class_obj),
-      method,
-      "(Landroid/content/Context;)V",
-      &[JValue::Object(&context)],
-    )
-    .map_err(|e| e.to_string())?;
-  Ok(())
+    let loader = env
+      .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+      .and_then(|v| v.l())
+      .map_err(|e| format!("getClassLoader failed: {e}"))?;
+    let class_name = env
+      .new_string("com.ava_zen.ava.VoiceSessionService")
+      .map_err(|e| format!("JNI string creation failed: {e}"))?;
+    let class_obj = env
+      .call_method(
+        &loader,
+        "loadClass",
+        "(Ljava/lang/String;)Ljava/lang/Class;",
+        &[JValue::Object(&JObject::from(class_name))],
+      )
+      .and_then(|v| v.l())
+      .map_err(|e| format!("VoiceSessionService class lookup failed: {e}"))?;
+
+    env
+      .call_static_method(
+        JClass::from(class_obj),
+        method,
+        "(Landroid/content/Context;)V",
+        &[JValue::Object(&context)],
+      )
+      .map_err(|e| format!("voice session {method} failed: {e}"))?;
+
+    if env
+      .exception_check()
+      .map_err(|e| format!("JNI exception check failed after {method}: {e}"))?
+    {
+      env.exception_describe();
+      env.exception_clear();
+      return Err(format!("voice session {method} threw a Java exception"));
+    }
+
+    Ok(())
+  }
+
+  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner_call_service(method))) {
+    Ok(result) => result,
+    Err(payload) => {
+      let message = match payload.downcast_ref::<&str>() {
+        Some(value) => value.to_string(),
+        None => match payload.downcast_ref::<String>() {
+          Some(value) => value.clone(),
+          None => "unknown panic".to_string(),
+        },
+      };
+      log::error!("voice session JNI bridge panicked: {message}");
+      Err(format!("voice session JNI bridge panicked: {message}"))
+    }
+  }
 }
