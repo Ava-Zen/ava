@@ -6,6 +6,7 @@ import {
   LlmModelOption,
   LoadedBackendModel,
 } from './chat-backend';
+import { isAndroidWebView } from '../device-capability';
 
 /**
  * Conversation catalogue for the native engine (llama.cpp, GGUF, Q4_K_M).
@@ -93,7 +94,7 @@ export class NativeLlamaBackend implements ChatBackend {
 
   /** Returns a backend instance when the Tauri host reports a usable engine. */
   static async detect(): Promise<NativeLlamaBackend | null> {
-    if (!isTauri()) return null;
+    if (!isTauri() || isAndroidWebView()) return null;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const status = await invoke<NativeLlmStatus>('llm_native_status');
@@ -105,6 +106,10 @@ export class NativeLlamaBackend implements ChatBackend {
   }
 
   async load(preferred: LlmModelOption, options: ChatBackendLoadOptions): Promise<LoadedBackendModel> {
+    if (isAndroidWebView()) {
+      throw new Error('Native model loading is disabled on Android; the web engine will be used instead');
+    }
+
     const gguf = preferred.gguf;
     if (!gguf) {
       throw new Error(`Model ${preferred.id} has no GGUF build for the native engine`);

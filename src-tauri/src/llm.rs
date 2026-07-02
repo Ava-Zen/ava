@@ -271,7 +271,13 @@ pub struct NativeLlm {
 /// false, so older frontends keep working against newer hosts and vice versa.
 #[tauri::command]
 pub fn llm_native_status() -> NativeLlmStatus {
-  if cfg!(feature = "native-llm") {
+  if cfg!(target_os = "android") {
+    NativeLlmStatus {
+      available: false,
+      engine: "llama.cpp",
+      reason: "disabled on Android to avoid native model-load crashes; using the web engine instead",
+    }
+  } else if cfg!(feature = "native-llm") {
     NativeLlmStatus {
       available: true,
       engine: "llama.cpp",
@@ -325,6 +331,9 @@ mod imp {
     _display_name: Option<String>,
     _on_progress: Channel<LoadProgress>,
   ) -> Result<LoadResult, String> {
+    if cfg!(target_os = "android") {
+      return Err("Native LLM is disabled on Android; the web engine is used instead".into());
+    }
     Err("Native LLM engine is not bundled in this build".into())
   }
 
@@ -334,6 +343,9 @@ mod imp {
     _options: GenerateOptions,
     _on_token: Channel<String>,
   ) -> Result<String, String> {
+    if cfg!(target_os = "android") {
+      return Err("Native LLM is disabled on Android; the web engine is used instead".into());
+    }
     Err("Native LLM engine is not bundled in this build".into())
   }
 }
@@ -352,6 +364,10 @@ mod imp {
     display_name: Option<String>,
     on_progress: Channel<LoadProgress>,
   ) -> Result<LoadResult, String> {
+    if cfg!(target_os = "android") {
+      return Err("Native LLM is disabled on Android; the web engine is used instead".into());
+    }
+
     // Friendly name for UI progress lines; fall back to the file name.
     let display = display_name.unwrap_or_else(|| file.clone());
     let path = download_gguf(&app, &repo_id, &file, &display, &on_progress).await?;
@@ -379,6 +395,10 @@ mod imp {
     options: GenerateOptions,
     on_token: Channel<String>,
   ) -> Result<String, String> {
+    if cfg!(target_os = "android") {
+      return Err("Native LLM is disabled on Android; the web engine is used instead".into());
+    }
+
     let model = state
       .model
       .lock()

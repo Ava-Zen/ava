@@ -326,8 +326,10 @@
 
 .voice-status {
   width: min(460px, 100%);
-  justify-content: space-between;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px 16px;
   min-width: 0;
   padding: clamp(12px, 2vmin, 18px) clamp(14px, 2.4vmin, 22px);
   border-radius: 22px;
@@ -339,18 +341,17 @@
   min-width: 0;
   font-size: clamp(1rem, 2.4vmin, 1.28rem);
   font-weight: 780;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .voice-status small {
   min-width: 0;
   color: var(--muted);
   font-size: clamp(0.82rem, 1.8vmin, 1rem);
   text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 .live-transcript {
   width: min(520px, 100%);
@@ -1368,13 +1369,7 @@
     padding: 26px 18px;
   }
   .voice-status {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 6px;
-  }
-  .voice-status small {
-    text-align: center;
+    display: none;
   }
   .garden-eyebrow span {
     display: none;
