@@ -18,6 +18,11 @@ export interface LlmModelOption {
   size: string;
   /** Device tier this option is the default for. */
   tier: DeviceTier;
+  /**
+   * Preferred dtype on GPU/NPU accelerators, overriding the default q4.
+   * Some repos ship broken or missing variants for the default dtypes.
+   */
+  acceleratorDtype?: string;
 }
 
 type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
@@ -29,34 +34,65 @@ interface LoadAttempt {
 }
 
 /**
- * Catalogue of Gemma models used for *instant* spoken replies.
+ * Catalogue of models used for *instant* spoken replies.
  *
  * These are kept deliberately small so the first token arrives quickly.
- * Repo ids point at the publicly available transformers.js ONNX builds of the
- * Gemma family; swap them for newer Gemma builds as they are published.
+ * Repo ids point at the publicly available transformers.js ONNX builds;
+ * swap them for newer builds as they are published.
  */
-const GEMMA_MODELS: Record<DeviceTier, LlmModelOption> = {
-  low: {
-    id: 'onnx-community/gemma-3-270m-it-ONNX',
-    name: 'Gemma 270M',
-    size: '~0.3 GB',
-    tier: 'low',
-  },
-  medium: {
-    id: 'gemma-3-1b',
-    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
-    name: 'Gemma 1B',
-    size: '~1 GB',
-    tier: 'medium',
-  },
-  high: {
-    id: 'gemma-3-1b-hq',
-    repoId: 'onnx-community/gemma-3-1b-it-ONNX',
-    name: 'Gemma 1B (HQ)',
-    size: '~1.5 GB',
-    tier: 'high',
-  },
+const GEMMA_1B: LlmModelOption = {
+  id: 'gemma-3-1b',
+  repoId: 'onnx-community/gemma-3-1b-it-ONNX',
+  name: 'Gemma 1B',
+  size: '~1 GB',
+  tier: 'medium',
 };
+
+const GEMMA_1B_HQ: LlmModelOption = {
+  id: 'gemma-3-1b-hq',
+  repoId: 'onnx-community/gemma-3-1b-it-ONNX',
+  name: 'Gemma 1B (HQ)',
+  size: '~1.5 GB',
+  tier: 'high',
+};
+
+// Qwen3 ONNX builds are meant to run as q4f16 on GPU/NPU (per their model cards).
+const QWEN_0_6B: LlmModelOption = {
+  id: 'qwen3-0.6b',
+  repoId: 'onnx-community/Qwen3-0.6B-ONNX',
+  name: 'Qwen3 0.6B',
+  size: '~0.6 GB',
+  tier: 'low',
+  acceleratorDtype: 'q4f16',
+};
+
+const QWEN_1_7B: LlmModelOption = {
+  id: 'qwen3-1.7b',
+  repoId: 'onnx-community/Qwen3-1.7B-ONNX',
+  name: 'Qwen3 1.7B',
+  size: '~1.7 GB',
+  tier: 'medium',
+  acceleratorDtype: 'q4f16',
+};
+
+const QWEN_4B: LlmModelOption = {
+  id: 'qwen3-4b',
+  repoId: 'onnx-community/Qwen3-4B-ONNX',
+  name: 'Qwen3 4B',
+  size: '~4 GB',
+  tier: 'high',
+  acceleratorDtype: 'q4f16',
+};
+
+/** Default conversation model per device tier. */
+const DEFAULT_MODELS: Record<DeviceTier, LlmModelOption> = {
+  low: QWEN_0_6B,
+  medium: GEMMA_1B,
+  high: GEMMA_1B_HQ,
+};
+
+/** Smallest model, used as the fallback when the preferred one fails to load. */
+const FALLBACK_MODEL = QWEN_0_6B;
 
 const UNCENSORED_CHAT_MODEL: LlmModelOption = {
   id: 'qwen3-heretic-0.6b',
@@ -64,6 +100,10 @@ const UNCENSORED_CHAT_MODEL: LlmModelOption = {
   name: 'Qwen3 Heretic 0.6B',
   size: '~0.6 GB',
   tier: 'medium',
+  // This auto-converted export produces garbage tokens with plain q4 on
+  // WebGPU/WebNN, and its fp16/fp32 variants are broken or impractically
+  // large. q4f16 is the dtype the Qwen3 ONNX builds are meant to run with.
+  acceleratorDtype: 'q4f16',
 };
 
 const SYSTEM_PROMPT =
@@ -78,11 +118,13 @@ export class LlmService {
   private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
   private readonly ANDROID_LOAD_TIMEOUT_MS = 180000;
 
-  /** All available Gemma options, one recommended per device tier. */
+  /** All available conversation options, one recommended per device tier. */
   readonly models: LlmModelOption[] = [
-    GEMMA_MODELS.low,
-    GEMMA_MODELS.medium,
-    GEMMA_MODELS.high,
+    QWEN_0_6B,
+    GEMMA_1B,
+    GEMMA_1B_HQ,
+    QWEN_1_7B,
+    QWEN_4B,
     UNCENSORED_CHAT_MODEL,
   ];
 
@@ -110,7 +152,7 @@ export class LlmService {
   async autoSelectModel(): Promise<void> {
     if (this.hasUserOverride()) return;
     const { tier } = await detectDeviceCapability();
-    this.modelId.set(GEMMA_MODELS[tier].id);
+    this.modelId.set(DEFAULT_MODELS[tier].id);
   }
 
   /** Explicit user override of the model size. Persisted across sessions. */
@@ -174,7 +216,7 @@ export class LlmService {
     let lastError: unknown = null;
     try {
       for (const model of candidates) {
-        for (const attempt of attempts) {
+        for (const attempt of this.attemptsForModel(model, attempts)) {
           try {
             this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
             const repoId = model.repoId ?? model.id;
@@ -205,13 +247,12 @@ export class LlmService {
 
   private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
     if (!useAccelerator) {
-      return [GEMMA_MODELS.low];
+      return [FALLBACK_MODEL];
     }
 
-    const fallbackModel = GEMMA_MODELS.low;
-    return preferredModel.id === fallbackModel.id
+    return preferredModel.id === FALLBACK_MODEL.id
       ? [preferredModel]
-      : [preferredModel, fallbackModel];
+      : [preferredModel, FALLBACK_MODEL];
   }
 
   private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
@@ -222,13 +263,35 @@ export class LlmService {
     }
     if (capability.supportsLlmWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
-      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
+      // Note: not fp32 — the "fp32" model.onnx of these ONNX exports is a
+      // mixed-precision graph with fp16 Cast nodes that WebGPU sessions reject.
+      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
     }
     return attempts;
   }
 
   private buildCpuLoadAttempts(): LoadAttempt[] {
-    return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
+    // q4 keeps the CPU fallback download small; the fp32 exports of these
+    // repos ship multi-GB external data files.
+    return [{ device: 'wasm', dtype: 'q4', label: 'wasm/q4' }];
+  }
+
+  /** Applies a model's pinned accelerator dtype to the generic attempt list. */
+  private attemptsForModel(model: LlmModelOption, attempts: LoadAttempt[]): LoadAttempt[] {
+    const dtype = model.acceleratorDtype;
+    if (!dtype) return attempts;
+    const seen = new Set<string>();
+    return attempts
+      .map(attempt =>
+        attempt.device === 'wasm'
+          ? attempt
+          : { device: attempt.device, dtype, label: `${attempt.device}/${dtype}` }
+      )
+      .filter(attempt => {
+        if (seen.has(attempt.label)) return false;
+        seen.add(attempt.label);
+        return true;
+      });
   }
 
   private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
@@ -238,7 +301,10 @@ export class LlmService {
       dtype: attempt.dtype as any,
       progress_callback: (event: any) => {
         if (event?.status === 'progress') {
-          const progress = typeof event.progress === 'number' ? Math.round(event.progress * 100) : null;
+          // transformers.js reports progress as a 0–100 percentage already.
+          const progress = typeof event.progress === 'number'
+            ? Math.min(100, Math.round(event.progress))
+            : null;
           const file = event?.file ? ` · ${event.file}` : '';
           const suffix = progress != null ? ` (${progress}%)` : '';
           this.downloadStatus.set(`Downloading ${repoId}${file}${suffix}`);
@@ -268,12 +334,6 @@ export class LlmService {
   async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
     this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
 
-    const messages: ChatTurn[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...history,
-      { role: 'user', content: userText },
-    ];
-
     const options = {
       max_new_tokens: 192,
       do_sample: true,
@@ -283,6 +343,15 @@ export class LlmService {
 
     try {
       const generator = await this.ensureLoaded();
+      // Qwen3 models emit <think>…</think> reasoning that eats the short
+      // spoken-reply token budget; the /no_think soft switch disables it.
+      const active = this.activeModel();
+      const isQwen = /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
+      const messages: ChatTurn[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...history,
+        { role: 'user', content: isQwen ? `${userText} /no_think` : userText },
+      ];
       return await this.runGeneration(generator, messages, userText, history, options);
     } catch (e) {
       if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
@@ -390,6 +459,11 @@ export class LlmService {
     }
 
     cleaned = cleaned
+      // Remove Qwen3-style reasoning blocks; an unterminated <think> means the
+      // model never reached its answer, so drop everything from it onward.
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<think>[\s\S]*$/i, '')
+      .replace(/<\/?think>/gi, '')
       .replace(/<\|im_start\|>\s*(system|user|assistant)\s*/gi, '')
       .replace(/<\|im_end\|>/gi, '')
       .replace(/^\s*(system|user|assistant)\s*[:\-]\s*/gi, '')
@@ -408,13 +482,15 @@ export class LlmService {
     try {
       if (localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1') return UNCENSORED_CHAT_MODEL.id;
       const stored = localStorage.getItem(this.STORAGE_KEY);
-      if (stored === 'onnx-community/gemma-3-1b-it-ONNX') return GEMMA_MODELS.medium.id;
+      // Migrate legacy stored ids.
+      if (stored === 'onnx-community/gemma-3-1b-it-ONNX') return GEMMA_1B.id;
+      if (stored === 'onnx-community/gemma-3-270m-it-ONNX') return QWEN_0_6B.id;
       if (stored === UNCENSORED_CHAT_MODEL.repoId) return UNCENSORED_CHAT_MODEL.id;
       if (stored && this.modelExists(stored)) return stored;
     } catch {
       // ignore
     }
-    return GEMMA_MODELS.medium.id;
+    return GEMMA_1B.id;
   }
 
   private modelExists(id: string): boolean {

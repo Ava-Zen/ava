@@ -63,6 +63,10 @@ const UNCENSORED_AGENT_MODEL: LlmModelOption = {
   name: 'Qwen3 Heretic 0.6B',
   size: '~0.6 GB',
   tier: 'medium',
+  // This auto-converted export produces garbage tokens with plain q4 on
+  // WebGPU/WebNN, and its fp16/fp32 variants are broken or impractically
+  // large. q4f16 is the dtype the Qwen3 ONNX builds are meant to run with.
+  acceleratorDtype: 'q4f16',
 };
 
 type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
@@ -231,7 +235,7 @@ export class AgentsService {
     let lastError: unknown = null;
     try {
       for (const model of candidates) {
-        for (const attempt of attempts) {
+        for (const attempt of this.attemptsForModel(model, attempts)) {
           try {
             this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
             this.generator = await pipeline('text-generation', model.id, {
@@ -282,13 +286,33 @@ export class AgentsService {
     }
     if (capability.supportsLlmWebGPU) {
       attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
-      attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'webgpu/fp32' });
+      // Note: not fp32 — the "fp32" model.onnx of these ONNX exports is a
+      // mixed-precision graph with fp16 Cast nodes that WebGPU sessions reject.
+      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
     }
     return attempts;
   }
 
   private buildCpuLoadAttempts(): LoadAttempt[] {
     return [{ device: 'wasm', dtype: 'fp32', label: 'wasm/fp32' }];
+  }
+
+  /** Applies a model's pinned accelerator dtype to the generic attempt list. */
+  private attemptsForModel(model: LlmModelOption, attempts: LoadAttempt[]): LoadAttempt[] {
+    const dtype = model.acceleratorDtype;
+    if (!dtype) return attempts;
+    const seen = new Set<string>();
+    return attempts
+      .map(attempt =>
+        attempt.device === 'wasm'
+          ? attempt
+          : { device: attempt.device, dtype, label: `${attempt.device}/${dtype}` }
+      )
+      .filter(attempt => {
+        if (seen.has(attempt.label)) return false;
+        seen.add(attempt.label);
+        return true;
+      });
   }
 
   /** Runs a single agent generation. Exposed for advanced/manual use. */
