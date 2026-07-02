@@ -45,6 +45,33 @@ interface AudioExportTask {
   total: number;
 }
 
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to fallback
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Settings, Onboarding],
@@ -119,13 +146,17 @@ export class App {
   protected readonly audioExportTasks = signal<Record<string, AudioExportTask>>({});
   protected readonly activeAudioPreviewId = signal<string | null>(null);
   protected readonly audioPreviewPaused = signal(false);
+  protected readonly copiedMessageId = signal<string | null>(null);
   protected readonly canSubmitManualPrompt = computed(() =>
     this.manualPrompt().trim().length > 0 && !this.isThinking()
   );
+  protected readonly chatModelLoading = computed(() => this.llm.isLoading());
+  protected readonly chatModelLoadStatus = computed(() => this.llm.downloadStatus());
+
   protected readonly activityBadgeLabel = computed(() => {
     if (this.isModelLoading()) return 'Loading speech';
     if (this.isKokoroLoading()) return 'Loading voice';
-    if (this.llm.isLoading()) return 'Loading chat model… please wait';
+    if (this.chatModelLoading()) return this.chatModelLoadStatus() || 'Loading chat model… please wait';
     if (this.agents.isLoading()) return 'Loading agent';
     if (this.isGeneratingAudioFile()) return 'Generating audio';
     if (this.isThinking()) return 'Thinking';
@@ -689,6 +720,7 @@ export class App {
   protected readonly isLoadingModel = computed(() => this.isModelLoading());
   protected readonly speechModelName = signal<string>('Moonshine Base');
   protected modelLoadInfo = signal<string>('');  // e.g. "webgpu/q4" or "wasm/q8"
+  protected readonly modelDownloadStatus = computed(() => this.llm.downloadStatus());
 
   protected async toggleVoice() {
     if (this.voiceEnabled()) {
@@ -1747,6 +1779,18 @@ export class App {
 
   protected audioExportTaskFor(message: Message): AudioExportTask | null {
     return message.exportTaskId ? this.audioExportTasks()[message.exportTaskId] ?? null : null;
+  }
+
+  protected async copyMessage(message: Message): Promise<void> {
+    const ok = await copyTextToClipboard(message.text);
+    if (!ok) return;
+
+    this.copiedMessageId.set(`${message.role}-${message.timestamp.getTime()}`);
+    window.setTimeout(() => this.copiedMessageId.set(null), 1400);
+  }
+
+  protected isMessageCopied(message: Message): boolean {
+    return this.copiedMessageId() === `${message.role}-${message.timestamp.getTime()}`;
   }
 
   protected isAudioPreviewActive(downloadId: string): boolean {

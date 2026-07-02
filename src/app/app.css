@@ -559,6 +559,7 @@
   justify-content: flex-end;
 }
 .message-bubble {
+  position: relative;
   max-width: min(84%, 640px);
   padding: 13px 18px 14px;
   border-radius: 24px;
@@ -586,6 +587,46 @@
   justify-content: space-between;
   gap: 14px;
   margin-bottom: 5px;
+}
+.message-copy {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(13, 20, 24, 0.75);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.message-bubble:hover .message-copy,
+.message-bubble:focus-within .message-copy {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.message-copy:hover {
+  border-color: rgba(85, 199, 184, 0.42);
+  background: rgba(20, 31, 36, 0.92);
+}
+.message-copy svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .message-role {
   color: var(--muted);

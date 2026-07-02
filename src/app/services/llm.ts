@@ -98,6 +98,7 @@ export class LlmService {
   readonly isLoading = signal(false);
   readonly isReady = signal(false);
   readonly loadInfo = signal('');
+  readonly downloadStatus = signal('');
   readonly activeModel = signal<LlmModelOption | null>(null);
   readonly thinkingTrace = signal<string[]>([]);
 
@@ -162,6 +163,7 @@ export class LlmService {
     this.isLoading.set(true);
     this.isReady.set(false);
     this.activeModel.set(null);
+    this.downloadStatus.set('Preparing model download…');
 
     const capability = await detectDeviceCapability();
     const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
@@ -197,6 +199,7 @@ export class LlmService {
       throw lastError ?? new Error('Gemma load failed');
     } finally {
       this.isLoading.set(false);
+      this.downloadStatus.set('');
     }
   }
 
@@ -229,9 +232,20 @@ export class LlmService {
   }
 
   private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
+    this.downloadStatus.set(`Downloading ${repoId} (${attempt.label})…`);
     const load = pipeline('text-generation', repoId, {
       device: attempt.device,
       dtype: attempt.dtype as any,
+      progress_callback: (event: any) => {
+        if (event?.status === 'progress') {
+          const progress = typeof event.progress === 'number' ? Math.round(event.progress * 100) : null;
+          const file = event?.file ? ` · ${event.file}` : '';
+          const suffix = progress != null ? ` (${progress}%)` : '';
+          this.downloadStatus.set(`Downloading ${repoId}${file}${suffix}`);
+        } else if (event?.status === 'done') {
+          this.downloadStatus.set(`Downloaded ${repoId}`);
+        }
+      },
     });
 
     if (!isAndroidWebView()) return await load;
@@ -369,17 +383,25 @@ export class LlmService {
     return '';
   }
 
-  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+  sanitizeModelOutput(text: string, promptPrefix = ''): string {
     let cleaned = text;
     if (promptPrefix && cleaned.startsWith(promptPrefix)) {
       cleaned = cleaned.slice(promptPrefix.length);
     }
+
     cleaned = cleaned
-      .replace(/<\|im_start\|>\s*assistant\s*/gi, '')
+      .replace(/<\|im_start\|>\s*(system|user|assistant)\s*/gi, '')
       .replace(/<\|im_end\|>/gi, '')
+      .replace(/^\s*(system|user|assistant)\s*[:\-]\s*/gi, '')
       .replace(/^(System|User|Ava|Assistant):[\s\S]*?\bAva:\s*/i, '')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
+
     return cleaned;
+  }
+
+  private cleanGeneratedText(text: string, promptPrefix = ''): string {
+    return this.sanitizeModelOutput(text, promptPrefix);
   }
 
   private loadStoredModel(): string {

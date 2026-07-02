@@ -55,9 +55,9 @@
         </button>
 
         <div class="voice-status">
-          @if (isLoadingModel()) {
-            <span>Loading {{ speechModelName() }}</span>
-            <small>{{ modelLoadInfo() || 'preparing local model' }}</small>
+          @if (isLoadingModel() || chatModelLoading()) {
+            <span>{{ chatModelLoading() ? 'Loading chat model' : 'Loading ' + speechModelName() }}</span>
+            <small>{{ chatModelLoading() ? (chatModelLoadStatus() || modelLoadInfo() || 'please wait') : (modelDownloadStatus() || modelLoadInfo() || 'preparing local model') }}</small>
           } @else if (isListening()) {
             <span>Voice channel open</span>
             <small>{{ speechModelName() }} ({{ modelLoadInfo() || 'auto' }})</small>
@@ -118,6 +118,18 @@
                     <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
                     <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
                   </div>
+                  <button
+                    class="message-copy"
+                    type="button"
+                    [attr.aria-label]="'Copy ' + (msg.role === 'ava' ? 'Ava' : 'your') + ' message'"
+                    (click)="copyMessage(msg)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>{{ isMessageCopied(msg) ? 'Copied' : 'Copy' }}</span>
+                  </button>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
                     @if (audioDownloadFor(msg); as download) {
