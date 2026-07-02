@@ -115,7 +115,7 @@
       <div>
         <p class="speaker-label">Conversation</p>
         <div class="model-list">
-          @for (model of conversationModels; track model.id) {
+          @for (model of conversationModels(); track model.id) {
             <button
               class="model-item"
               [class.active]="model.id === selectedConversationModel().id"

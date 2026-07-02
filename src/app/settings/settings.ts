@@ -178,10 +178,7 @@ export class Settings {
   protected readonly selectedKokoroVoiceId = this.ttsService.selectedKokoroVoiceId;
   protected readonly isRecording = signal(false);
   protected readonly recordSeconds = signal(0);
-  protected readonly newVoiceName = signal('');
-  protected readonly customVoiceError = signal('');
   private mediaRecorder: MediaRecorder | null = null;
-  private recordedChunks: Blob[] = [];
   private recordTimer: ReturnType<typeof setInterval> | null = null;
   protected readonly conversationModels = this.llmService.models;
   protected readonly selectedConversationModel = this.llmService.selectedModel;
@@ -244,16 +241,11 @@ export class Settings {
   }
 
   async startRecording() {
-    this.customVoiceError.set('');
     if (this.isRecording()) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.recordedChunks = [];
       const recorder = new MediaRecorder(stream);
       this.mediaRecorder = recorder;
-      recorder.ondataavailable = e => {
-        if (e.data.size > 0) this.recordedChunks.push(e.data);
-      };
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
       };
@@ -262,7 +254,7 @@ export class Settings {
       this.recordSeconds.set(0);
       this.recordTimer = setInterval(() => this.recordSeconds.update(s => s + 1), 1000);
     } catch {
-      this.customVoiceError.set('Microphone access was denied.');
+      console.warn('Microphone access was denied.');
     }
   }
 

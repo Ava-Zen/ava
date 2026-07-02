@@ -2,6 +2,7 @@ use std::{env, fs, io};
 
 use tauri::Manager;
 
+mod llm;
 mod mcp;
 
 #[tauri::command]
@@ -116,6 +117,7 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_deep_link::init())
+    .manage(llm::NativeLlm::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -142,7 +144,11 @@ pub fn run() {
       suggested_user_name,
       reset_app_cache,
       mcp_tts_complete,
-      mcp_server_info
+      mcp_server_info,
+      llm::llm_native_status,
+      llm::llm_load_model,
+      llm::llm_generate,
+      llm::llm_cancel
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

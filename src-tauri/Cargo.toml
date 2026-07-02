@@ -27,3 +27,14 @@ tauri-plugin-http = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 tiny_http = "0.12"
+llama-cpp-2 = { version = "0.1", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+
+[features]
+# Embedded llama.cpp inference engine (GGUF models). Off by default so plain
+# builds don't require the native toolchain (CMake + C/C++ compiler).
+native-llm = ["dep:llama-cpp-2", "dep:encoding_rs"]
+# GPU-accelerated variants — enable the one matching the target platform:
+native-llm-cuda = ["native-llm", "llama-cpp-2/cuda"]
+native-llm-vulkan = ["native-llm", "llama-cpp-2/vulkan"]
+native-llm-metal = ["native-llm", "llama-cpp-2/metal"]

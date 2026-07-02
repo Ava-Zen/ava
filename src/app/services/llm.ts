@@ -1,37 +1,20 @@
 import { Injectable, signal, computed } from '@angular/core';
-import { pipeline } from '@huggingface/transformers';
-import { detectDeviceCapability, DeviceTier, isAndroidWebView } from './device-capability';
+import { detectDeviceCapability, DeviceTier } from './device-capability';
+import {
+  ChatBackend,
+  ChatTurn,
+  LlmModelOption,
+  resolveChatBackend,
+} from './llm/chat-backend';
+import {
+  NativeLlamaBackend,
+  NATIVE_CHAT_MODELS,
+  NATIVE_DEFAULT_MODELS,
+  NATIVE_FALLBACK_MODEL,
+} from './llm/native-llama-backend';
 
-export interface ChatTurn {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface LlmModelOption {
-  /** Stable UI/config id. */
-  id: string;
-  /** Hugging Face ONNX repo id (transformers.js compatible). */
-  repoId?: string;
-  /** Friendly label shown in the UI. */
-  name: string;
-  /** Rough on-disk / VRAM footprint, for user guidance. */
-  size: string;
-  /** Device tier this option is the default for. */
-  tier: DeviceTier;
-  /**
-   * Preferred dtype on GPU/NPU accelerators, overriding the default q4.
-   * Some repos ship broken or missing variants for the default dtypes.
-   */
-  acceleratorDtype?: string;
-}
-
-type InferenceDevice = 'webnn-npu' | 'webnn-gpu' | 'webgpu' | 'wasm';
-
-interface LoadAttempt {
-  device: InferenceDevice;
-  dtype: string;
-  label: string;
-}
+// Re-exported for existing consumers (AgentsService, components, specs).
+export type { ChatTurn, LlmModelOption } from './llm/chat-backend';
 
 /**
  * Catalogue of models used for *instant* spoken replies.
@@ -84,7 +67,7 @@ const QWEN_4B: LlmModelOption = {
   acceleratorDtype: 'q4f16',
 };
 
-/** Default conversation model per device tier. */
+/** Default conversation model per device tier (web/transformers.js engine). */
 const DEFAULT_MODELS: Record<DeviceTier, LlmModelOption> = {
   low: QWEN_0_6B,
   medium: GEMMA_1B,
@@ -112,27 +95,37 @@ const SYSTEM_PROMPT =
   'sentences — unless the user explicitly asks for detail. Never use markdown, ' +
   'lists or emojis, because your reply will be spoken aloud.';
 
+/** Conversation options for the in-WebView (transformers.js) engine. */
+const WEB_CHAT_MODELS: LlmModelOption[] = [
+  QWEN_0_6B,
+  GEMMA_1B,
+  GEMMA_1B_HQ,
+  QWEN_1_7B,
+  QWEN_4B,
+  UNCENSORED_CHAT_MODEL,
+];
+
 @Injectable({ providedIn: 'root' })
 export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
   private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
-  private readonly ANDROID_LOAD_TIMEOUT_MS = 180000;
 
-  /** All available conversation options, one recommended per device tier. */
-  readonly models: LlmModelOption[] = [
-    QWEN_0_6B,
-    GEMMA_1B,
-    GEMMA_1B_HQ,
-    QWEN_1_7B,
-    QWEN_4B,
-    UNCENSORED_CHAT_MODEL,
-  ];
+  /** True when the Tauri host provides the native llama.cpp engine. */
+  private readonly nativeEngine = signal(false);
+
+  /**
+   * Available conversation options for the active engine: GGUF builds when the
+   * native engine is present, ONNX builds for the in-WebView engine.
+   */
+  readonly models = computed<LlmModelOption[]>(() =>
+    this.nativeEngine() ? NATIVE_CHAT_MODELS : WEB_CHAT_MODELS
+  );
 
   /** The chosen model id (auto-selected by hardware, user-overridable). */
   private readonly modelId = signal<string>(this.loadStoredModel());
 
   readonly selectedModel = computed(
-    () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+    () => this.models().find(m => m.id === this.modelId()) ?? this.models()[0]
   );
   readonly isUncensoredMode = computed(() => this.selectedModel().id === UNCENSORED_CHAT_MODEL.id);
   readonly uncensoredModel = UNCENSORED_CHAT_MODEL;
@@ -144,20 +137,29 @@ export class LlmService {
   readonly activeModel = signal<LlmModelOption | null>(null);
   readonly thinkingTrace = signal<string[]>([]);
 
-  private generator: any = null;
-  private loadPromise: Promise<any> | null = null;
-  private loadedDevice: InferenceDevice | null = null;
+  private backend: ChatBackend | null = null;
+  private loadPromise: Promise<ChatBackend> | null = null;
+  private loadedDevice: string | null = null;
+
+  constructor() {
+    // Probe the host early so Settings shows the right catalogue before the
+    // first generation. Cheap: one IPC call, no model download.
+    void NativeLlamaBackend.detect().then(backend => {
+      if (backend) this.nativeEngine.set(true);
+    });
+  }
 
   /** Picks the best default model for this device unless the user has overridden it. */
   async autoSelectModel(): Promise<void> {
     if (this.hasUserOverride()) return;
     const { tier } = await detectDeviceCapability();
-    this.modelId.set(DEFAULT_MODELS[tier].id);
+    const defaults = this.nativeEngine() ? NATIVE_DEFAULT_MODELS : DEFAULT_MODELS;
+    this.modelId.set(defaults[tier].id);
   }
 
   /** Explicit user override of the model size. Persisted across sessions. */
   setModel(id: string): void {
-    if (!this.models.some(m => m.id === id)) return;
+    if (!this.models().some(m => m.id === id)) return;
     this.modelId.set(id);
     try {
       localStorage.setItem(this.STORAGE_KEY, id);
@@ -166,7 +168,8 @@ export class LlmService {
       // ignore persistence errors
     }
     // Force a reload on next generate.
-    this.generator = null;
+    this.backend?.dispose();
+    this.backend = null;
     this.loadPromise = null;
     this.loadedDevice = null;
     this.isReady.set(false);
@@ -174,11 +177,12 @@ export class LlmService {
   }
 
   /**
-   * Lazily loads the Gemma generation pipeline with WebGPU → WASM fallback.
-   * Safe to call repeatedly; the underlying load happens only once.
+   * Lazily loads the chat engine (native llama.cpp in Tauri builds, otherwise
+   * transformers.js in the WebView). Safe to call repeatedly; the underlying
+   * load happens only once.
    */
-  async ensureLoaded(): Promise<any> {
-    if (this.generator) return this.generator;
+  async ensureLoaded(): Promise<ChatBackend> {
+    if (this.backend?.isLoaded()) return this.backend;
     if (this.loadPromise) return this.loadPromise;
 
     this.loadPromise = this.load();
@@ -189,8 +193,9 @@ export class LlmService {
     }
   }
 
-  async reloadOnCpu(): Promise<any> {
-    this.generator = null;
+  async reloadOnCpu(): Promise<ChatBackend> {
+    this.backend?.dispose();
+    this.backend = null;
     this.loadPromise = null;
     this.loadedDevice = null;
     this.isReady.set(false);
@@ -198,133 +203,43 @@ export class LlmService {
     return await this.load(true);
   }
 
-  private async load(wasmOnly = false): Promise<any> {
-    await this.autoSelectModel();
-    const preferredModel = this.selectedModel();
-
+  private async load(cpuOnly = false): Promise<ChatBackend> {
     this.isLoading.set(true);
     this.isReady.set(false);
     this.activeModel.set(null);
     this.downloadStatus.set('Preparing model download…');
 
-    const capability = await detectDeviceCapability();
-    const acceleratorAttempts = wasmOnly ? [] : this.buildAcceleratorAttempts(capability);
-    const hasAccelerator = acceleratorAttempts.length > 0;
-    const candidates = this.buildCandidateModels(preferredModel, hasAccelerator);
-    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
-
-    let lastError: unknown = null;
     try {
-      for (const model of candidates) {
-        for (const attempt of this.attemptsForModel(model, attempts)) {
-          try {
-            this.loadInfo.set(`loading ${model.name} (${attempt.label})…`);
-            const repoId = model.repoId ?? model.id;
-            this.generator = await this.loadPipeline(repoId, attempt);
-            this.loadInfo.set(`${model.name} · ${attempt.label}`);
-            this.isReady.set(true);
-            this.activeModel.set(model);
-            this.loadedDevice = attempt.device;
-            console.info(`[Gemma] Loaded ${repoId} with ${attempt.label}`);
-            return this.generator;
-          } catch (err) {
-            lastError = err;
-            console.warn(`[Gemma] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
-            this.generator = null;
-            this.loadedDevice = null;
-          }
-        }
-      }
+      const backend = await resolveChatBackend();
+      this.nativeEngine.set(backend.kind === 'native-llama');
+      await this.autoSelectModel();
+      const preferredModel = this.selectedModel();
+      const fallback = backend.kind === 'native-llama' ? NATIVE_FALLBACK_MODEL : FALLBACK_MODEL;
+
+      const loaded = await backend.load(preferredModel, {
+        fallback,
+        cpuOnly,
+        onLoadInfo: info => this.loadInfo.set(info),
+        onDownloadStatus: status => this.downloadStatus.set(status),
+      });
+
+      this.backend = backend;
+      this.loadedDevice = loaded.device;
+      this.loadInfo.set(loaded.label);
+      this.isReady.set(true);
+      this.activeModel.set(loaded.model);
+      return backend;
+    } catch (err) {
+      const capability = await detectDeviceCapability();
+      const hasAccelerator = !cpuOnly && (capability.hasWebNN || capability.supportsLlmWebGPU);
       this.loadInfo.set(hasAccelerator
         ? 'GPU/NPU chat failed. CPU fallback is available in Settings.'
-        : 'Gemma could not be loaded.');
-      throw lastError ?? new Error('Gemma load failed');
+        : 'The chat model could not be loaded.');
+      throw err;
     } finally {
       this.isLoading.set(false);
       this.downloadStatus.set('');
     }
-  }
-
-  private buildCandidateModels(preferredModel: LlmModelOption, useAccelerator: boolean): LlmModelOption[] {
-    if (!useAccelerator) {
-      return [FALLBACK_MODEL];
-    }
-
-    return preferredModel.id === FALLBACK_MODEL.id
-      ? [preferredModel]
-      : [preferredModel, FALLBACK_MODEL];
-  }
-
-  private buildAcceleratorAttempts(capability: Awaited<ReturnType<typeof detectDeviceCapability>>): LoadAttempt[] {
-    const attempts: LoadAttempt[] = [];
-    if (capability.hasWebNN) {
-      attempts.push({ device: 'webnn-npu', dtype: 'q4', label: 'webnn-npu/q4' });
-      attempts.push({ device: 'webnn-gpu', dtype: 'q4', label: 'webnn-gpu/q4' });
-    }
-    if (capability.supportsLlmWebGPU) {
-      attempts.push({ device: 'webgpu', dtype: 'q4', label: 'webgpu/q4' });
-      // Note: not fp32 — the "fp32" model.onnx of these ONNX exports is a
-      // mixed-precision graph with fp16 Cast nodes that WebGPU sessions reject.
-      attempts.push({ device: 'webgpu', dtype: 'q4f16', label: 'webgpu/q4f16' });
-    }
-    return attempts;
-  }
-
-  private buildCpuLoadAttempts(): LoadAttempt[] {
-    // q4 keeps the CPU fallback download small; the fp32 exports of these
-    // repos ship multi-GB external data files.
-    return [{ device: 'wasm', dtype: 'q4', label: 'wasm/q4' }];
-  }
-
-  /** Applies a model's pinned accelerator dtype to the generic attempt list. */
-  private attemptsForModel(model: LlmModelOption, attempts: LoadAttempt[]): LoadAttempt[] {
-    const dtype = model.acceleratorDtype;
-    if (!dtype) return attempts;
-    const seen = new Set<string>();
-    return attempts
-      .map(attempt =>
-        attempt.device === 'wasm'
-          ? attempt
-          : { device: attempt.device, dtype, label: `${attempt.device}/${dtype}` }
-      )
-      .filter(attempt => {
-        if (seen.has(attempt.label)) return false;
-        seen.add(attempt.label);
-        return true;
-      });
-  }
-
-  private async loadPipeline(repoId: string, attempt: LoadAttempt): Promise<any> {
-    this.downloadStatus.set(`Downloading ${repoId} (${attempt.label})…`);
-    const load = pipeline('text-generation', repoId, {
-      device: attempt.device,
-      dtype: attempt.dtype as any,
-      progress_callback: (event: any) => {
-        if (event?.status === 'progress') {
-          // transformers.js reports progress as a 0–100 percentage already.
-          const progress = typeof event.progress === 'number'
-            ? Math.min(100, Math.round(event.progress))
-            : null;
-          const file = event?.file ? ` · ${event.file}` : '';
-          const suffix = progress != null ? ` (${progress}%)` : '';
-          this.downloadStatus.set(`Downloading ${repoId}${file}${suffix}`);
-        } else if (event?.status === 'done') {
-          this.downloadStatus.set(`Downloaded ${repoId}`);
-        }
-      },
-    });
-
-    if (!isAndroidWebView()) return await load;
-
-    return await Promise.race([
-      load,
-      new Promise((_, reject) => {
-        window.setTimeout(
-          () => reject(new Error(`Timed out loading ${repoId} (${attempt.label}) on Android WebView`)),
-          this.ANDROID_LOAD_TIMEOUT_MS
-        );
-      }),
-    ]);
   }
 
   /**
@@ -334,16 +249,9 @@ export class LlmService {
   async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
     this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
 
-    const options = {
-      max_new_tokens: 192,
-      do_sample: true,
-      temperature: 0.7,
-      top_p: 0.9,
-    };
-
     try {
-      const generator = await this.ensureLoaded();
-      // Qwen3 models emit <think>…</think> reasoning that eats the short
+      const backend = await this.ensureLoaded();
+      // Qwen models emit <think>…</think> reasoning that eats the short
       // spoken-reply token budget; the /no_think soft switch disables it.
       const active = this.activeModel();
       const isQwen = /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
@@ -352,60 +260,27 @@ export class LlmService {
         ...history,
         { role: 'user', content: isQwen ? `${userText} /no_think` : userText },
       ];
-      return await this.runGeneration(generator, messages, userText, history, options);
+
+      this.thinkingTrace.set(['Preparing context', 'Generating reply']);
+      const raw = await backend.generate(messages, {
+        maxNewTokens: 192,
+        doSample: true,
+        temperature: 0.7,
+        topP: 0.9,
+      });
+
+      this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
+      const reply = this.sanitizeModelOutput(raw);
+      this.thinkingTrace.set([]);
+      return reply;
     } catch (e) {
       if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
-        console.warn('[Gemma] Accelerator generation failed; CPU fallback is available in Settings', e);
+        console.warn('[LLM] Accelerator generation failed; CPU fallback is available in Settings', e);
         this.loadInfo.set('GPU/NPU chat failed during generation. CPU fallback is available in Settings.');
       }
       this.thinkingTrace.set([]);
       throw e;
     }
-  }
-
-  private async runGeneration(
-    generator: any,
-    messages: ChatTurn[],
-    userText: string,
-    history: ChatTurn[],
-    options: Record<string, unknown>
-  ): Promise<string> {
-    let output: any;
-    let promptPrefix = '';
-    try {
-      this.thinkingTrace.set(['Preparing context', 'Generating reply']);
-      output = await generator(messages, options);
-    } catch (e) {
-      if (!this.isMissingChatTemplateError(e)) throw e;
-      this.thinkingTrace.set(['Preparing context', 'Using plain prompt fallback', 'Generating reply']);
-      promptPrefix = this.buildPlainPrompt(userText, history);
-      output = await generator(promptPrefix, options);
-    }
-
-    this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
-    const reply = this.extractText(output, promptPrefix);
-    this.thinkingTrace.set([]);
-    return reply;
-  }
-
-  private buildPlainPrompt(userText: string, history: ChatTurn[]): string {
-    const turns = history
-      .filter(turn => turn.role !== 'system')
-      .map(turn =>
-        `<|im_start|>${turn.role === 'assistant' ? 'assistant' : 'user'}\n${turn.content}<|im_end|>`
-      )
-      .join('\n');
-
-    return [
-      `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>`,
-      turns,
-      `<|im_start|>user\n${userText}<|im_end|>`,
-      '<|im_start|>assistant\n',
-    ].filter(Boolean).join('\n');
-  }
-
-  private isMissingChatTemplateError(error: unknown): boolean {
-    return /chat_template|apply_chat_template/i.test(String((error as any)?.message ?? error));
   }
 
   private isRecoverableAcceleratorRuntimeError(error: unknown): boolean {
@@ -435,23 +310,6 @@ export class LlmService {
     return null;
   }
 
-  private extractText(output: any, promptPrefix = ''): string {
-    try {
-      const generated = output?.[0]?.generated_text;
-      if (Array.isArray(generated)) {
-        // Chat-format output: take the final assistant turn.
-        const last = generated.at(-1);
-        return this.cleanGeneratedText((last?.content ?? '').toString(), promptPrefix);
-      }
-      if (typeof generated === 'string') {
-        return this.cleanGeneratedText(generated, promptPrefix);
-      }
-    } catch {
-      // fall through
-    }
-    return '';
-  }
-
   sanitizeModelOutput(text: string, promptPrefix = ''): string {
     let cleaned = text;
     if (promptPrefix && cleaned.startsWith(promptPrefix)) {
@@ -474,10 +332,6 @@ export class LlmService {
     return cleaned;
   }
 
-  private cleanGeneratedText(text: string, promptPrefix = ''): string {
-    return this.sanitizeModelOutput(text, promptPrefix);
-  }
-
   private loadStoredModel(): string {
     try {
       if (localStorage.getItem(this.UNCENSORED_STORAGE_KEY) === '1') return UNCENSORED_CHAT_MODEL.id;
@@ -494,7 +348,7 @@ export class LlmService {
   }
 
   private modelExists(id: string): boolean {
-    return this.models.some(model => model.id === id);
+    return this.models().some(model => model.id === id);
   }
 
   private hasUserOverride(): boolean {
