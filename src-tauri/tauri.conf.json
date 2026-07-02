@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Ava",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "identifier": "com.ava-zen.ava",
   "build": {
     "frontendDist": "../dist/ava/browser",
@@ -25,7 +25,10 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/models-web/**", "$APPDATA/models/**"]
+        "scope": [
+          "$APPDATA/models-web/**",
+          "$APPDATA/models/**"
+        ]
       }
     }
   },
