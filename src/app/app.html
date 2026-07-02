@@ -132,6 +132,11 @@
                   </button>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                    @if (msg.debug) {
+                      <small class="message-debug">
+                        {{ msg.debug.model }} · {{ formatGenDuration(msg.debug.durationMs) }}
+                      </small>
+                    }
                     @if (audioDownloadFor(msg); as download) {
                       <div class="audio-download">
                         <div class="audio-file">
@@ -382,10 +387,38 @@
       </div>
 
       <div class="footer-side footer-side-end">
-        <button class="tool-btn" (click)="openSettings()" title="Manage gardens and settings">
-          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
-          <span>Settings</span>
-        </button>
+        <div class="action-menu-shell" #settingsActionShell>
+          <button
+            class="tool-btn"
+            (click)="openSettings()"
+            (contextmenu)="onSettingsContextMenu($event)"
+            [attr.aria-expanded]="modelMenuOpen()"
+            aria-haspopup="menu"
+            title="Manage gardens and settings · right-click for quick model switch"
+          >
+            <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
+            <span>Settings</span>
+          </button>
+
+          @if (modelMenuOpen()) {
+            <div class="action-menu model-menu" role="menu" aria-label="Quick-select conversation model">
+              <p class="menu-label">Conversation model</p>
+              @for (model of conversationModels(); track model.id) {
+                <button
+                  class="menu-action"
+                  [class.active]="model.id === selectedConversationModelId()"
+                  type="button"
+                  role="menuitemradio"
+                  [attr.aria-checked]="model.id === selectedConversationModelId()"
+                  (click)="quickSelectModel(model.id)"
+                >
+                  <strong>{{ model.name }}</strong>
+                  <span>{{ model.size }}{{ model.id === selectedConversationModelId() ? ' · selected' : '' }}</span>
+                </button>
+              }
+            </div>
+          }
+        </div>
       </div>
 
       <input

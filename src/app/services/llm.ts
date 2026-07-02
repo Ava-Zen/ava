@@ -251,14 +251,18 @@ export class LlmService {
 
     try {
       const backend = await this.ensureLoaded();
-      // Qwen models emit <think>…</think> reasoning that eats the short
+      // Qwen3 ONNX builds emit <think>…</think> reasoning that eats the short
       // spoken-reply token budget; the /no_think soft switch disables it.
+      // Only the web engine needs it — newer Qwen3.5 GGUFs don't understand
+      // the marker and echo it back as text.
       const active = this.activeModel();
-      const isQwen = /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
+      const isWebQwen =
+        backend.kind === 'transformers-js' &&
+        /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
       const messages: ChatTurn[] = [
         { role: 'system', content: SYSTEM_PROMPT },
         ...history,
-        { role: 'user', content: isQwen ? `${userText} /no_think` : userText },
+        { role: 'user', content: isWebQwen ? `${userText} /no_think` : userText },
       ];
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply']);

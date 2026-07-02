@@ -22,6 +22,11 @@ interface Message {
   downloadId?: string;
   exportTaskId?: string;
   pending?: boolean;
+  /** Generation diagnostics shown in small text under Ava replies. */
+  debug?: {
+    model: string;
+    durationMs: number;
+  };
 }
 
 interface QuickPrompt {
@@ -115,6 +120,7 @@ export class App {
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('audioFilePicker') private audioFilePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
 
   // Gardens
   protected readonly gardens = this.gardensService.gardens;
@@ -139,6 +145,10 @@ export class App {
   });
   protected readonly manualInputEnabled = signal(false);
   protected readonly composerMenuOpen = signal(false);
+  /** Right-click quick-select menu for the conversation model. */
+  protected readonly modelMenuOpen = signal(false);
+  protected readonly conversationModels = this.llm.models;
+  protected readonly selectedConversationModelId = computed(() => this.llm.selectedModel().id);
   protected readonly manualPrompt = signal('');
   protected readonly composerNotice = signal('');
   protected readonly isGeneratingAudioFile = signal(false);
@@ -255,8 +265,9 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && this.composerMenuOpen()) {
+    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen())) {
       this.composerMenuOpen.set(false);
+      this.modelMenuOpen.set(false);
       return;
     }
 
@@ -276,11 +287,28 @@ export class App {
   @HostListener('document:mousedown', ['$event'])
   protected onDocumentMouseDown(event: MouseEvent) {
     this.closeComposerMenuIfOutside(event.target);
+    this.closeModelMenuIfOutside(event.target);
   }
 
   @HostListener('document:touchstart', ['$event'])
   protected onDocumentTouchStart(event: TouchEvent) {
     this.closeComposerMenuIfOutside(event.target);
+    this.closeModelMenuIfOutside(event.target);
+  }
+
+  /** Right-clicking the Settings button opens the model quick-select menu. */
+  protected onSettingsContextMenu(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.modelMenuOpen.update(open => !open);
+  }
+
+  protected quickSelectModel(id: string) {
+    this.modelMenuOpen.set(false);
+    if (id === this.selectedConversationModelId()) return;
+    this.llm.setModel(id);
+    // Warm the new model in the background so the next reply is fast.
+    void this.llm.ensureLoaded().catch(() => {});
   }
 
   protected closeSettings() {
@@ -1420,9 +1448,9 @@ export class App {
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */
-  private async respond(gardenId: string, response: string) {
+  private async respond(gardenId: string, response: string, debug?: Message['debug']) {
     const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
-    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date() };
+    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug };
     currentMsgs.push(avaMsg);
     this.setGardenMessages(gardenId, currentMsgs);
 
@@ -1436,7 +1464,7 @@ export class App {
     this.resumeVoiceCaptureIfEnabled();
   }
 
-  /** Routes an open-ended question to Gemma, speaking a filler line first. */
+  /** Routes an open-ended question to the local LLM, speaking a filler line first. */
   private async handleLlmReply(gardenId: string, text: string) {
     // Speak the filler immediately so the user knows Ava is working.
     this.status.set('speaking');
@@ -1444,10 +1472,15 @@ export class App {
 
     try {
       const history = this.buildChatHistory(gardenId);
+      const startedAt = performance.now();
       const reply = (await this.llm.generate(text, history)).trim();
-      this.respond(gardenId, reply || 'I am not sure how to answer that just yet.');
+      const debug: Message['debug'] = {
+        model: this.llm.activeModel()?.name ?? 'local model',
+        durationMs: performance.now() - startedAt,
+      };
+      this.respond(gardenId, reply || 'I am not sure how to answer that just yet.', debug);
     } catch (e) {
-      console.error('Gemma reply failed', e);
+      console.error('LLM reply failed', e);
       const friendly = this.llm.friendlyError(e);
       this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.');
     }
@@ -2236,6 +2269,12 @@ export class App {
     return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
+  protected formatGenDuration(ms: number): string {
+    if (ms < 1000) return `${Math.max(1, Math.round(ms))} ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+    return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+  }
+
   private appendToManualPrompt(text: string) {
     const current = this.manualPrompt().trim();
     this.manualPrompt.set(current ? `${current}\n\n${text}` : text);
@@ -2248,6 +2287,16 @@ export class App {
     const node = target as Node | null;
     if (shell && node && !shell.contains(node)) {
       this.composerMenuOpen.set(false);
+    }
+  }
+
+  private closeModelMenuIfOutside(target: EventTarget | null) {
+    if (!this.modelMenuOpen()) return;
+
+    const shell = this.settingsActionShellEl?.nativeElement;
+    const node = target as Node | null;
+    if (shell && node && !shell.contains(node)) {
+      this.modelMenuOpen.set(false);
     }
   }
 

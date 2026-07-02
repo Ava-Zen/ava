@@ -543,13 +543,15 @@
   gap: 16px;
   padding: 6px 6px 4px;
   scroll-behavior: smooth;
+  /* Keep the thin scrollbar's track allocated at all times and only change
+     its colour on hover — toggling scrollbar-width reflows the layout. */
   scrollbar-gutter: stable;
-  scrollbar-width: none;
-  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   transition: scrollbar-color 0.3s ease;
 }
 .transcript:hover {
-  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
 }
 .message {
   display: flex;
@@ -569,6 +571,17 @@
 }
 .message.ava .message-bubble {
   border-top-left-radius: 8px;
+}
+.message-debug {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+  color: rgba(174, 185, 201, 0.62);
+}
+.model-menu .menu-action.active {
+  border-color: rgba(85, 199, 184, 0.42);
+  background: linear-gradient(135deg, rgba(85, 199, 184, 0.16), rgba(189, 215, 166, 0.1));
 }
 .message.user .message-bubble {
   background: linear-gradient(135deg, rgba(85, 199, 184, 0.18), rgba(189, 215, 166, 0.12));
