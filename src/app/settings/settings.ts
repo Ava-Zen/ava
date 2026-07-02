@@ -10,6 +10,16 @@ import { LlmService } from '../services/llm';
 import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 
+interface ModelFileInfo {
+  name: string;
+  sizeBytes: number;
+  partial: boolean;
+}
+
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 @Component({
   selector: 'app-settings',
   standalone: true,
@@ -53,6 +63,7 @@ export class Settings {
       if (s.oauth?.scope) this.oauthScopeDrafts[s.id] = s.oauth.scope;
     }
     void this.loadMcpServerInfo();
+    void this.refreshModelFiles();
   }
 
   statusFor(id: string): McpServerStatus | undefined {
@@ -186,6 +197,13 @@ export class Settings {
   protected readonly conversationLoadInfo = this.llmService.loadInfo;
   protected readonly conversationReady = this.llmService.isReady;
   protected readonly conversationLoading = this.llmService.isLoading;
+
+  // Local model storage (Tauri: GGUF files in the app data dir).
+  protected readonly modelFiles = signal<ModelFileInfo[]>([]);
+  protected readonly modelStorageAvailable = signal(false);
+  protected readonly modelStorageTotal = computed(() =>
+    this.modelFiles().reduce((sum, file) => sum + file.sizeBytes, 0)
+  );
   protected readonly agentModels = this.agentsService.models;
   protected readonly selectedAgentModel = this.agentsService.selectedModel;
   protected readonly activeAgentModel = this.agentsService.activeModel;
@@ -229,6 +247,43 @@ export class Settings {
 
   protected formatMemory(memoryGb: number | undefined): string {
     return memoryGb ? `${memoryGb} GB reported` : 'Not reported';
+  }
+
+  protected async refreshModelFiles(): Promise<void> {
+    if (!isTauri()) return;
+    try {
+      const files = await invoke<ModelFileInfo[]>('llm_list_models');
+      this.modelFiles.set(files);
+      this.modelStorageAvailable.set(true);
+    } catch {
+      this.modelStorageAvailable.set(false);
+    }
+  }
+
+  protected async openModelsFolder(): Promise<void> {
+    try {
+      await invoke('llm_open_models_dir');
+    } catch {
+      // older host without the command
+    }
+  }
+
+  protected async deleteModelFile(name: string): Promise<void> {
+    if (!confirm(`Delete ${name}? It will be re-downloaded if the model is selected again.`)) return;
+    try {
+      await invoke('llm_delete_model', { name });
+    } catch {
+      // ignore; refresh shows the real state
+    }
+    await this.refreshModelFiles();
+  }
+
+  protected formatBytes(bytes: number): string {
+    const gb = 1024 ** 3;
+    const mb = 1024 ** 2;
+    if (bytes >= gb) return `${(bytes / gb).toFixed(2)} GB`;
+    if (bytes >= mb) return `${Math.round(bytes / mb)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
 
   selectVoice(id: TtsEngine) {

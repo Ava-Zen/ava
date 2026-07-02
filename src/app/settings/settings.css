@@ -575,6 +575,44 @@ input:focus {
   background: linear-gradient(135deg, rgba(85, 199, 184, 0.18), rgba(189, 215, 166, 0.12));
   border-color: rgba(85, 199, 184, 0.36);
 }
+.model-storage {
+  margin-top: 20px;
+  display: grid;
+  gap: 10px;
+}
+.storage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.storage-list {
+  display: grid;
+  gap: 10px;
+}
+.storage-item {
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.storage-item > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.storage-item strong {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.storage-item small {
+  color: #aeb9c9;
+  font-size: 0.92rem;
+}
 .model-item.active .voice-radio {
   border-color: var(--teal, #55c7b8);
 }

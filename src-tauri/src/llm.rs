@@ -64,6 +64,69 @@ pub struct LoadResult {
   pub label: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelFileInfo {
+  pub name: String,
+  pub size_bytes: u64,
+  /// True for interrupted downloads (`.part` files).
+  pub partial: bool,
+}
+
+/// Resolves (and creates) the directory GGUF models are downloaded into.
+fn models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+  use tauri::Manager;
+  let dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| e.to_string())?
+    .join("models");
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir)
+}
+
+/// Lists downloaded model files with their on-disk sizes.
+#[tauri::command]
+pub fn llm_list_models(app: tauri::AppHandle) -> Result<Vec<ModelFileInfo>, String> {
+  let dir = models_dir(&app)?;
+  let mut files: Vec<ModelFileInfo> = std::fs::read_dir(&dir)
+    .map_err(|e| e.to_string())?
+    .filter_map(|entry| {
+      let entry = entry.ok()?;
+      let meta = entry.metadata().ok()?;
+      if !meta.is_file() {
+        return None;
+      }
+      let name = entry.file_name().to_string_lossy().to_string();
+      let partial = name.ends_with(".part");
+      (name.ends_with(".gguf") || partial).then(|| ModelFileInfo {
+        name,
+        size_bytes: meta.len(),
+        partial,
+      })
+    })
+    .collect();
+  files.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+  Ok(files)
+}
+
+/// Opens the model storage folder in the system file manager.
+#[tauri::command]
+pub fn llm_open_models_dir(app: tauri::AppHandle) -> Result<(), String> {
+  let dir = models_dir(&app)?;
+  tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Deletes a downloaded model file (name only, no paths).
+#[tauri::command]
+pub fn llm_delete_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
+  if name.contains(['/', '\\']) || name.contains("..") {
+    return Err("Invalid file name".into());
+  }
+  let path = models_dir(&app)?.join(&name);
+  std::fs::remove_file(&path).map_err(|e| e.to_string())
+}
+
 /// Shared engine state managed by Tauri.
 #[derive(Default)]
 pub struct NativeLlm {
@@ -286,7 +349,7 @@ mod engine {
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, AddBos, LlamaChatMessage, LlamaModel},
+    model::{params::LlamaModelParams, AddBos, LlamaChatMessage, LlamaChatTemplate, LlamaModel},
     sampling::LlamaSampler,
   };
 
@@ -339,10 +402,7 @@ mod engine {
       .map(|m| LlamaChatMessage::new(m.role.clone(), m.content.clone()))
       .collect::<Result<_, _>>()
       .map_err(|e| e.to_string())?;
-    let template = model.chat_template(None).map_err(|e| e.to_string())?;
-    let prompt = model
-      .apply_chat_template(&template, &chat, true)
-      .map_err(|e| e.to_string())?;
+    let prompt = render_prompt(model, &chat)?;
 
     let tokens = model
       .str_to_token(&prompt, AddBos::Always)
@@ -409,5 +469,41 @@ mod engine {
       .duration_since(UNIX_EPOCH)
       .map(|d| d.subsec_nanos())
       .unwrap_or(0)
+  }
+
+  /// Renders the conversation into a prompt string.
+  ///
+  /// Prefers the Jinja template embedded in the GGUF. llama.cpp's minimal
+  /// template engine cannot parse some newer templates (e.g. Gemma 4's — it
+  /// fails with `ffi error -1`), so fall back to llama.cpp's *built-in named
+  /// handler* for the model's architecture family.
+  fn render_prompt(model: &LlamaModel, chat: &[LlamaChatMessage]) -> Result<String, String> {
+    let embedded = model
+      .chat_template(None)
+      .map_err(|e| e.to_string())
+      .and_then(|tmpl| model.apply_chat_template(&tmpl, chat, true).map_err(|e| e.to_string()));
+    let first_err = match embedded {
+      Ok(prompt) => return Ok(prompt),
+      Err(e) => e,
+    };
+
+    let arch = model
+      .meta_val_str("general.architecture")
+      .unwrap_or_default()
+      .to_lowercase();
+    let name = if arch.starts_with("gemma") {
+      "gemma"
+    } else if arch.starts_with("llama") {
+      "llama3"
+    } else {
+      // Qwen and most other instruct models speak ChatML.
+      "chatml"
+    };
+    log::warn!("embedded chat template failed ({first_err}); falling back to built-in '{name}'");
+
+    let tmpl = LlamaChatTemplate::new(name).map_err(|e| e.to_string())?;
+    model
+      .apply_chat_template(&tmpl, chat, true)
+      .map_err(|e| format!("embedded template failed ({first_err}); built-in '{name}' also failed: {e}"))
   }
 }

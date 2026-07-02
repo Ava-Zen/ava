@@ -150,6 +150,31 @@
         </div>
       </div>
     </div>
+
+    @if (modelStorageAvailable()) {
+      <div class="model-storage">
+        <div class="storage-heading">
+          <p class="speaker-label">Model storage</p>
+          <button class="ghost-btn" type="button" (click)="openModelsFolder()">Open folder</button>
+        </div>
+        @if (modelFiles().length) {
+          <div class="storage-list">
+            @for (file of modelFiles(); track file.name) {
+              <div class="storage-item">
+                <span>
+                  <strong>{{ file.name }}</strong>
+                  <small>{{ formatBytes(file.sizeBytes) }}@if (file.partial) { · incomplete download}</small>
+                </span>
+                <button class="ghost-btn" type="button" (click)="deleteModelFile(file.name)">Delete</button>
+              </div>
+            }
+          </div>
+          <p class="hint">{{ modelFiles().length }} file(s) · {{ formatBytes(modelStorageTotal()) }} on disk</p>
+        } @else {
+          <p class="hint">No models downloaded yet. Models are stored on disk after the first load.</p>
+        }
+      </div>
+    }
   </section>
 
   <section class="section">

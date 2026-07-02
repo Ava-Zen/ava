@@ -148,7 +148,10 @@ pub fn run() {
       llm::llm_native_status,
       llm::llm_load_model,
       llm::llm_generate,
-      llm::llm_cancel
+      llm::llm_cancel,
+      llm::llm_list_models,
+      llm::llm_open_models_dir,
+      llm::llm_delete_model
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
