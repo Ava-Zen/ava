@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
@@ -85,18 +86,30 @@ class VoiceSessionService : Service() {
     private const val NOTIFICATION_ID = 4210
 
     @JvmStatic
-    fun start(context: Context) {
-      val intent = Intent(context, VoiceSessionService::class.java)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        context.startForegroundService(intent)
-      } else {
-        context.startService(intent)
+    fun start(context: Context): Boolean {
+      return try {
+        val intent = Intent(context, VoiceSessionService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          context.startForegroundService(intent)
+        } else {
+          context.startService(intent)
+        }
+        true
+      } catch (error: Throwable) {
+        Log.e("VoiceSessionService", "Failed to start the voice-session foreground service", error)
+        false
       }
     }
 
     @JvmStatic
-    fun stop(context: Context) {
-      context.stopService(Intent(context, VoiceSessionService::class.java))
+    fun stop(context: Context): Boolean {
+      return try {
+        context.stopService(Intent(context, VoiceSessionService::class.java))
+        true
+      } catch (error: Throwable) {
+        Log.e("VoiceSessionService", "Failed to stop the voice-session foreground service", error)
+        false
+      }
     }
   }
 }

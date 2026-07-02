@@ -54,31 +54,28 @@ fn call_service(method: &str) -> Result<(), String> {
       return Err("Java threw an exception before the voice session command ran".to_string());
     }
 
-    let loader = env
-      .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
-      .and_then(|v| v.l())
-      .map_err(|e| format!("getClassLoader failed: {e}"))?;
-    let class_name = env
-      .new_string("com.ava_zen.ava.VoiceSessionService")
-      .map_err(|e| format!("JNI string creation failed: {e}"))?;
     let class_obj = env
-      .call_method(
-        &loader,
-        "loadClass",
-        "(Ljava/lang/String;)Ljava/lang/Class;",
-        &[JValue::Object(&JObject::from(class_name))],
-      )
-      .and_then(|v| v.l())
+      .find_class("com/ava_zen/ava/VoiceSessionService")
       .map_err(|e| format!("VoiceSessionService class lookup failed: {e}"))?;
 
-    env
+    let result = env
       .call_static_method(
         JClass::from(class_obj),
         method,
-        "(Landroid/content/Context;)V",
+        "(Landroid/content/Context;)Ljava/lang/Boolean;",
         &[JValue::Object(&context)],
       )
+      .and_then(|v| v.l())
       .map_err(|e| format!("voice session {method} failed: {e}"))?;
+
+    let success = env
+      .call_method(&result, "booleanValue", "()Z", &[])
+      .and_then(|v| v.z())
+      .map_err(|e| format!("voice session {method} result handling failed: {e}"))?;
+
+    if !success {
+      return Err(format!("voice session {method} reported a Java-side failure"));
+    }
 
     if env
       .exception_check()
