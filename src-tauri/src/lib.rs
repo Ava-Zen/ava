@@ -4,6 +4,7 @@ use tauri::Manager;
 
 mod llm;
 mod mcp;
+mod voice_session;
 
 #[tauri::command]
 fn mcp_tts_complete(bridge: tauri::State<mcp::McpBridge>, id: u64, ok: bool) {
@@ -151,7 +152,9 @@ pub fn run() {
       llm::llm_cancel,
       llm::llm_list_models,
       llm::llm_open_models_dir,
-      llm::llm_delete_model
+      llm::llm_delete_model,
+      voice_session::voice_session_start,
+      voice_session::voice_session_stop
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

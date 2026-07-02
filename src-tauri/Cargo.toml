@@ -30,6 +30,10 @@ tiny_http = "0.12"
 llama-cpp-2 = { version = "0.1", optional = true }
 encoding_rs = { version = "0.8", optional = true }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+
 [features]
 # Embedded llama.cpp inference engine (GGUF models). Off by default so plain
 # builds don't require the native toolchain (CMake + C/C++ compiler).

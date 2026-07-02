@@ -771,6 +771,9 @@ export class App {
 
   private async enableVoiceChannel() {
     this.voiceEnabled.set(true);
+    // Gemini-style background session: on Android a microphone foreground
+    // service keeps capture alive while the app is backgrounded.
+    this.setBackgroundVoiceSession(true);
     if (!this.isListening() && !this.isThinking() && this.status() !== 'speaking') {
       await this.startMoonshineListening();
     }
@@ -778,7 +781,17 @@ export class App {
 
   private disableVoiceChannel() {
     this.voiceEnabled.set(false);
+    this.setBackgroundVoiceSession(false);
     this.stopMoonshineListening();
+  }
+
+  /** Starts/stops the native background voice session (no-op outside Tauri). */
+  private setBackgroundVoiceSession(active: boolean) {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    invoke(active ? 'voice_session_start' : 'voice_session_stop').catch(err => {
+      // Older hosts without the command, or the OS denied the service.
+      console.warn('[voice] background session toggle failed', err);
+    });
   }
 
   private pauseVoiceCapture() {
