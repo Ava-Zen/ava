@@ -1,5 +1,6 @@
 import { pipeline } from '@huggingface/transformers';
 import { detectDeviceCapability, isAndroidWebView } from '../device-capability';
+import { installTauriModelCache, setModelCacheStatusHook } from './tauri-model-cache';
 import {
   ChatBackend,
   ChatBackendLoadOptions,
@@ -32,29 +33,38 @@ export class TransformersChatBackend implements ChatBackend {
   async load(preferred: LlmModelOption, options: ChatBackendLoadOptions): Promise<LoadedBackendModel> {
     this.dispose();
 
-    const capability = await detectDeviceCapability();
-    const acceleratorAttempts = options.cpuOnly ? [] : this.buildAcceleratorAttempts(capability);
-    const hasAccelerator = acceleratorAttempts.length > 0;
-    const candidates = this.buildCandidateModels(preferred, options.fallback, hasAccelerator);
-    const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
+    // In Tauri builds, model files are cached on disk by the host instead of
+    // the WebView's evictable (or unavailable) Cache Storage.
+    await installTauriModelCache();
+    setModelCacheStatusHook(status => options.onDownloadStatus?.(status));
 
-    let lastError: unknown = null;
-    for (const model of candidates) {
-      for (const attempt of this.attemptsForModel(model, attempts)) {
-        try {
-          options.onLoadInfo?.(`loading ${model.name} (${attempt.label})…`);
-          const repoId = model.repoId ?? model.id;
-          this.generator = await this.loadPipeline(repoId, model.name, attempt, options);
-          console.info(`[LLM] Loaded ${repoId} with ${attempt.label}`);
-          return { model, device: attempt.device, label: `${model.name} · ${attempt.label}` };
-        } catch (err) {
-          lastError = err;
-          console.warn(`[LLM] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
-          this.generator = null;
+    try {
+      const capability = await detectDeviceCapability();
+      const acceleratorAttempts = options.cpuOnly ? [] : this.buildAcceleratorAttempts(capability);
+      const hasAccelerator = acceleratorAttempts.length > 0;
+      const candidates = this.buildCandidateModels(preferred, options.fallback, hasAccelerator);
+      const attempts = hasAccelerator ? acceleratorAttempts : this.buildCpuLoadAttempts();
+
+      let lastError: unknown = null;
+      for (const model of candidates) {
+        for (const attempt of this.attemptsForModel(model, attempts)) {
+          try {
+            options.onLoadInfo?.(`loading ${model.name} (${attempt.label})…`);
+            const repoId = model.repoId ?? model.id;
+            this.generator = await this.loadPipeline(repoId, model.name, attempt, options);
+            console.info(`[LLM] Loaded ${repoId} with ${attempt.label}`);
+            return { model, device: attempt.device, label: `${model.name} · ${attempt.label}` };
+          } catch (err) {
+            lastError = err;
+            console.warn(`[LLM] ${model.repoId ?? model.id} ${attempt.label} failed`, err);
+            this.generator = null;
+          }
         }
       }
+      throw lastError ?? new Error('Chat model load failed');
+    } finally {
+      setModelCacheStatusHook(null);
     }
-    throw lastError ?? new Error('Chat model load failed');
   }
 
   async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<string> {

@@ -153,6 +153,7 @@ pub fn run() {
       llm::llm_list_models,
       llm::llm_open_models_dir,
       llm::llm_delete_model,
+      llm::web_model_cache_ensure,
       voice_session::voice_session_start,
       voice_session::voice_session_stop
     ])

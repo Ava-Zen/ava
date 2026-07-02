@@ -85,29 +85,151 @@ fn models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
   Ok(dir)
 }
 
-/// Lists downloaded model files with their on-disk sizes.
+/// Disk cache for the in-WebView (transformers.js) engine's model files.
+fn web_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+  use tauri::Manager;
+  let dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| e.to_string())?
+    .join("models-web");
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir)
+}
+
+/// Streams `url` to `dest`, resuming partial downloads via HTTP Range
+/// requests. Shared by the native GGUF loader and the web model cache, so it
+/// is not gated behind the `native-llm` feature.
+async fn download_to(
+  url: &str,
+  dest: &std::path::Path,
+  display: &str,
+  on_progress: &Channel<LoadProgress>,
+) -> Result<(), String> {
+  use std::io::Write;
+  use tauri_plugin_http::reqwest;
+
+  if dest.exists() {
+    return Ok(());
+  }
+
+  let file_name = dest
+    .file_name()
+    .map(|n| n.to_string_lossy().into_owned())
+    .unwrap_or_default();
+  let part = dest.with_file_name(format!("{file_name}.part"));
+  let resume_from = part.metadata().map(|m| m.len()).unwrap_or(0);
+
+  let client = reqwest::Client::new();
+  let mut request = client.get(url);
+  if resume_from > 0 {
+    request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
+  }
+
+  let mut response = request.send().await.map_err(|e| e.to_string())?;
+  if !response.status().is_success() {
+    return Err(format!(
+      "Download failed: HTTP {} for {url}",
+      response.status()
+    ));
+  }
+
+  // A plain 200 to a Range request means the server restarted from zero.
+  let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+  let mut downloaded = if resumed { resume_from } else { 0 };
+  let total = response.content_length().map(|len| len + downloaded);
+
+  let mut out = std::fs::OpenOptions::new()
+    .create(true)
+    .append(resumed)
+    .write(!resumed)
+    .truncate(!resumed)
+    .open(&part)
+    .map_err(|e| e.to_string())?;
+
+  while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+    out.write_all(&chunk).map_err(|e| e.to_string())?;
+    downloaded += chunk.len() as u64;
+    let progress = total.map(|t| downloaded as f64 / t as f64 * 100.0);
+    let _ = on_progress.send(LoadProgress {
+      status: format!("Downloading {display}"),
+      progress,
+    });
+  }
+  out.flush().map_err(|e| e.to_string())?;
+  drop(out);
+
+  std::fs::rename(&part, dest).map_err(|e| e.to_string())
+}
+
+/// Ensures a Hugging Face file used by the in-WebView engine is cached on
+/// disk, downloading it (resumably) on first use, and returns the local path.
+/// The WebView reads it back through the asset protocol, so models survive
+/// app restarts even where the WebView's Cache Storage is unavailable or
+/// evicted (notably Android).
+#[tauri::command]
+pub async fn web_model_cache_ensure(
+  app: tauri::AppHandle,
+  url: String,
+  on_progress: Channel<LoadProgress>,
+) -> Result<String, String> {
+  const PREFIX: &str = "https://huggingface.co/";
+  let rel = url
+    .strip_prefix(PREFIX)
+    .ok_or("Only Hugging Face URLs are cached")?;
+  let rel = rel.split(['?', '#']).next().unwrap_or_default();
+
+  let segments: Vec<&str> = rel.split('/').collect();
+  if segments.len() < 2 {
+    return Err("Unexpected model URL".into());
+  }
+  for segment in &segments {
+    if segment.is_empty() || *segment == "." || *segment == ".." || segment.contains(['\\', ':']) {
+      return Err("Invalid cache path".into());
+    }
+  }
+
+  let mut dest = web_models_dir(&app)?;
+  for parent in &segments[..segments.len() - 1] {
+    dest = dest.join(parent);
+  }
+  std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+  let file_name = segments.last().expect("length checked above");
+  dest = dest.join(file_name);
+
+  download_to(&url, &dest, file_name, &on_progress).await?;
+  Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Lists downloaded model files (native GGUFs and web-engine cache) with
+/// their on-disk sizes.
 #[tauri::command]
 pub fn llm_list_models(app: tauri::AppHandle) -> Result<Vec<ModelFileInfo>, String> {
-  let dir = models_dir(&app)?;
-  let mut files: Vec<ModelFileInfo> = std::fs::read_dir(&dir)
-    .map_err(|e| e.to_string())?
-    .filter_map(|entry| {
-      let entry = entry.ok()?;
-      let meta = entry.metadata().ok()?;
-      if !meta.is_file() {
-        return None;
-      }
-      let name = entry.file_name().to_string_lossy().to_string();
-      let partial = name.ends_with(".part");
-      (name.ends_with(".gguf") || partial).then(|| ModelFileInfo {
-        name,
-        size_bytes: meta.len(),
-        partial,
-      })
-    })
-    .collect();
+  let mut files = Vec::new();
+  collect_files(&models_dir(&app)?, "", &mut files);
+  collect_files(&web_models_dir(&app)?, "web/", &mut files);
   files.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
   Ok(files)
+}
+
+fn collect_files(dir: &std::path::Path, prefix: &str, out: &mut Vec<ModelFileInfo>) {
+  let Ok(entries) = std::fs::read_dir(dir) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    let Ok(meta) = entry.metadata() else { continue };
+    let name = entry.file_name().to_string_lossy().into_owned();
+    if meta.is_dir() {
+      collect_files(&entry.path(), &format!("{prefix}{name}/"), out);
+    } else if meta.is_file() {
+      let partial = name.ends_with(".part");
+      out.push(ModelFileInfo {
+        name: format!("{prefix}{name}"),
+        size_bytes: meta.len(),
+        partial,
+      });
+    }
+  }
 }
 
 /// Opens the model storage folder in the system file manager.
@@ -117,13 +239,22 @@ pub fn llm_open_models_dir(app: tauri::AppHandle) -> Result<(), String> {
   tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Deletes a downloaded model file (name only, no paths).
+/// Deletes a downloaded model file. Accepts the relative names produced by
+/// `llm_list_models` (`web/` prefix selects the web-engine cache).
 #[tauri::command]
 pub fn llm_delete_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
-  if name.contains(['/', '\\']) || name.contains("..") {
+  let (base, rel) = match name.strip_prefix("web/") {
+    Some(rest) => (web_models_dir(&app)?, rest),
+    None => (models_dir(&app)?, name.as_str()),
+  };
+  if rel.is_empty()
+    || rel
+      .split('/')
+      .any(|s| s.is_empty() || s == "." || s == ".." || s.contains(['\\', ':']))
+  {
     return Err("Invalid file name".into());
   }
-  let path = models_dir(&app)?.join(&name);
+  let path = base.join(rel);
   std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
@@ -209,10 +340,7 @@ mod imp {
 
 #[cfg(feature = "native-llm")]
 mod imp {
-  use std::{fs, path::PathBuf};
-
-  use tauri::Manager;
-  use tauri_plugin_http::reqwest;
+  use std::path::PathBuf;
 
   use super::*;
 
@@ -279,63 +407,9 @@ mod imp {
     display: &str,
     on_progress: &Channel<LoadProgress>,
   ) -> Result<PathBuf, String> {
-    let dir = app
-      .path()
-      .app_data_dir()
-      .map_err(|e| e.to_string())?
-      .join("models");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
-    let dest = dir.join(file);
-    if dest.exists() {
-      return Ok(dest);
-    }
-
-    let part = dir.join(format!("{file}.part"));
-    let resume_from = part.metadata().map(|m| m.len()).unwrap_or(0);
-
+    let dest = models_dir(app)?.join(file);
     let url = format!("https://huggingface.co/{repo_id}/resolve/main/{file}");
-    let client = reqwest::Client::new();
-    let mut request = client.get(&url);
-    if resume_from > 0 {
-      request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
-    }
-
-    let mut response = request.send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-      return Err(format!(
-        "Download failed: HTTP {} for {url}",
-        response.status()
-      ));
-    }
-
-    // A plain 200 to a Range request means the server restarted from zero.
-    let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-    let mut downloaded = if resumed { resume_from } else { 0 };
-    let total = response.content_length().map(|len| len + downloaded);
-
-    let mut out = fs::OpenOptions::new()
-      .create(true)
-      .append(resumed)
-      .write(!resumed)
-      .truncate(!resumed)
-      .open(&part)
-      .map_err(|e| e.to_string())?;
-
-    use std::io::Write;
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-      out.write_all(&chunk).map_err(|e| e.to_string())?;
-      downloaded += chunk.len() as u64;
-      let progress = total.map(|t| downloaded as f64 / t as f64 * 100.0);
-      let _ = on_progress.send(LoadProgress {
-        status: format!("Downloading {display}"),
-        progress,
-      });
-    }
-    out.flush().map_err(|e| e.to_string())?;
-    drop(out);
-
-    fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    download_to(&url, &dest, display, on_progress).await?;
     Ok(dest)
   }
 }
