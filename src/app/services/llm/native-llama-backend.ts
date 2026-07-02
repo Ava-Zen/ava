@@ -122,6 +122,7 @@ export class NativeLlamaBackend implements ChatBackend {
     const result = await invoke<{ device: string; label: string }>('llm_load_model', {
       repoId: gguf.repoId,
       file: gguf.file,
+      displayName: preferred.name,
       onProgress,
     });
 

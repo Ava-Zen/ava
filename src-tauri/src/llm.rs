@@ -161,9 +161,10 @@ pub async fn llm_load_model(
   state: tauri::State<'_, NativeLlm>,
   repo_id: String,
   file: String,
+  display_name: Option<String>,
   on_progress: Channel<LoadProgress>,
 ) -> Result<LoadResult, String> {
-  imp::load_model(app, state, repo_id, file, on_progress).await
+  imp::load_model(app, state, repo_id, file, display_name, on_progress).await
 }
 
 #[tauri::command]
@@ -190,6 +191,7 @@ mod imp {
     _state: tauri::State<'_, NativeLlm>,
     _repo_id: String,
     _file: String,
+    _display_name: Option<String>,
     _on_progress: Channel<LoadProgress>,
   ) -> Result<LoadResult, String> {
     Err("Native LLM engine is not bundled in this build".into())
@@ -219,12 +221,15 @@ mod imp {
     state: tauri::State<'_, NativeLlm>,
     repo_id: String,
     file: String,
+    display_name: Option<String>,
     on_progress: Channel<LoadProgress>,
   ) -> Result<LoadResult, String> {
-    let path = download_gguf(&app, &repo_id, &file, &on_progress).await?;
+    // Friendly name for UI progress lines; fall back to the file name.
+    let display = display_name.unwrap_or_else(|| file.clone());
+    let path = download_gguf(&app, &repo_id, &file, &display, &on_progress).await?;
 
     let _ = on_progress.send(LoadProgress {
-      status: format!("Loading {file}"),
+      status: format!("Loading {display} into memory"),
       progress: None,
     });
 
@@ -271,6 +276,7 @@ mod imp {
     app: &tauri::AppHandle,
     repo_id: &str,
     file: &str,
+    display: &str,
     on_progress: &Channel<LoadProgress>,
   ) -> Result<PathBuf, String> {
     let dir = app
@@ -322,7 +328,7 @@ mod imp {
       downloaded += chunk.len() as u64;
       let progress = total.map(|t| downloaded as f64 / t as f64 * 100.0);
       let _ = on_progress.send(LoadProgress {
-        status: format!("Downloading {file}"),
+        status: format!("Downloading {display}"),
         progress,
       });
     }

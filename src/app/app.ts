@@ -27,6 +27,8 @@ interface Message {
     model: string;
     durationMs: number;
   };
+  /** Original user prompt, set on failed/empty replies so they can be retried. */
+  retryFor?: string;
 }
 
 interface QuickPrompt {
@@ -176,6 +178,14 @@ export class App {
     return 'Local first';
   });
   protected readonly activityBadgeBusy = computed(() => this.activityBadgeLabel() !== 'Local first');
+  /** True while any local model is downloading or loading into memory. */
+  protected readonly activityBadgeSpinning = computed(() =>
+    this.isModelLoading() ||
+    this.isKokoroLoading() ||
+    this.chatModelLoading() ||
+    this.agents.isLoading() ||
+    this.isGeneratingAudioFile()
+  );
   private activeAudioExportController: AbortController | null = null;
   private audioPreviewPlayer: HTMLAudioElement | null = null;
 
@@ -1448,9 +1458,9 @@ export class App {
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */
-  private async respond(gardenId: string, response: string, debug?: Message['debug']) {
+  private async respond(gardenId: string, response: string, debug?: Message['debug'], retryFor?: string) {
     const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
-    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug };
+    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor };
     currentMsgs.push(avaMsg);
     this.setGardenMessages(gardenId, currentMsgs);
 
@@ -1478,12 +1488,28 @@ export class App {
         model: this.llm.activeModel()?.name ?? 'local model',
         durationMs: performance.now() - startedAt,
       };
-      this.respond(gardenId, reply || 'I am not sure how to answer that just yet.', debug);
+      if (reply) {
+        this.respond(gardenId, reply, debug);
+      } else {
+        this.respond(gardenId, 'I am not sure how to answer that just yet.', debug, text);
+      }
     } catch (e) {
       console.error('LLM reply failed', e);
       const friendly = this.llm.friendlyError(e);
-      this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.');
+      this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.', undefined, text);
     }
+  }
+
+  /** Re-runs a failed or empty reply with the original user prompt. */
+  protected async retryMessage(msg: Message) {
+    const retryFor = msg.retryFor;
+    if (!retryFor || this.isThinking()) return;
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    this.status.set('thinking');
+    this.isThinking.set(true);
+    await this.handleLlmReply(gardenId, retryFor);
   }
 
   /** Hands the request to a Qwen background agent and confirms by voice. */

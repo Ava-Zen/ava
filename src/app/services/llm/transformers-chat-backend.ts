@@ -44,7 +44,7 @@ export class TransformersChatBackend implements ChatBackend {
         try {
           options.onLoadInfo?.(`loading ${model.name} (${attempt.label})…`);
           const repoId = model.repoId ?? model.id;
-          this.generator = await this.loadPipeline(repoId, attempt, options);
+          this.generator = await this.loadPipeline(repoId, model.name, attempt, options);
           console.info(`[LLM] Loaded ${repoId} with ${attempt.label}`);
           return { model, device: attempt.device, label: `${model.name} · ${attempt.label}` };
         } catch (err) {
@@ -145,10 +145,11 @@ export class TransformersChatBackend implements ChatBackend {
 
   private async loadPipeline(
     repoId: string,
+    displayName: string,
     attempt: LoadAttempt,
     options: ChatBackendLoadOptions
   ): Promise<any> {
-    options.onDownloadStatus?.(`Downloading ${repoId} (${attempt.label})…`);
+    options.onDownloadStatus?.(`Downloading ${displayName} (${attempt.label})…`);
     const load = pipeline('text-generation', repoId, {
       device: attempt.device,
       dtype: attempt.dtype as any,
@@ -158,11 +159,10 @@ export class TransformersChatBackend implements ChatBackend {
           const progress = typeof event.progress === 'number'
             ? Math.min(100, Math.round(event.progress))
             : null;
-          const file = event?.file ? ` · ${event.file}` : '';
           const suffix = progress != null ? ` (${progress}%)` : '';
-          options.onDownloadStatus?.(`Downloading ${repoId}${file}${suffix}`);
+          options.onDownloadStatus?.(`Downloading ${displayName}${suffix}`);
         } else if (event?.status === 'done') {
-          options.onDownloadStatus?.(`Downloaded ${repoId}`);
+          options.onDownloadStatus?.(`Downloaded ${displayName}`);
         }
       },
     });
@@ -173,7 +173,7 @@ export class TransformersChatBackend implements ChatBackend {
       load,
       new Promise((_, reject) => {
         window.setTimeout(
-          () => reject(new Error(`Timed out loading ${repoId} (${attempt.label}) on Android WebView`)),
+          () => reject(new Error(`Timed out loading ${displayName} (${attempt.label}) on Android WebView`)),
           ANDROID_LOAD_TIMEOUT_MS
         );
       }),

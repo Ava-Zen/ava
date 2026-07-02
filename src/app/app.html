@@ -93,6 +93,9 @@
               <h2>{{ messages().length }} moments</h2>
             </div>
             <span class="privacy-badge" [class.busy]="activityBadgeBusy()">
+              @if (activityBadgeSpinning()) {
+                <span class="badge-spinner" aria-hidden="true"></span>
+              }
               {{ activityBadgeLabel() }}
             </span>
           </div>
@@ -136,6 +139,22 @@
                       <small class="message-debug">
                         {{ msg.debug.model }} · {{ formatGenDuration(msg.debug.durationMs) }}
                       </small>
+                    }
+                    @if (msg.retryFor) {
+                      <div class="message-actions">
+                        <button
+                          class="message-action"
+                          type="button"
+                          [disabled]="isThinking()"
+                          (click)="retryMessage(msg)"
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M21 12a9 9 0 1 1-2.6-6.4"></path>
+                            <path d="M21 3v6h-6"></path>
+                          </svg>
+                          <span>Retry</span>
+                        </button>
+                      </div>
                     }
                     @if (audioDownloadFor(msg); as download) {
                       <div class="audio-download">
