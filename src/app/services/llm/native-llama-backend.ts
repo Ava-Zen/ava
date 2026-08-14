@@ -2,6 +2,7 @@ import {
   ChatBackend,
   ChatBackendLoadOptions,
   ChatGenerateOptions,
+  ChatResult,
   ChatTurn,
   LlmModelOption,
   LoadedBackendModel,
@@ -139,7 +140,7 @@ export class NativeLlamaBackend implements ChatBackend {
     };
   }
 
-  async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<string> {
+  async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult> {
     if (!this.loaded) throw new Error('Native chat model is not loaded');
 
     const { invoke, Channel } = await import('@tauri-apps/api/core');
@@ -149,7 +150,7 @@ export class NativeLlamaBackend implements ChatBackend {
       onToken.onmessage = chunk => options.onToken?.(chunk);
     }
 
-    return await invoke<string>('llm_generate', {
+    const text = await invoke<string>('llm_generate', {
       messages,
       options: {
         maxNewTokens: options.maxNewTokens,
@@ -159,6 +160,7 @@ export class NativeLlamaBackend implements ChatBackend {
       },
       onToken,
     });
+    return { text };
   }
 
   isLoaded(): boolean {

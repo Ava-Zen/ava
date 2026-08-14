@@ -115,6 +115,12 @@ See [docs/mcp-tts-server.md](docs/mcp-tts-server.md) for Claude Desktop, Cursor,
 - [ ] Subscription / premium cloud model routing
 - [ ] Polish mobile layouts + system integrations (mic, notifications)
 
+## Ava Voice MCP
+
+In the .vscode/mcp.json there is a registration for Ava Voice MCP. This is used to run Ava Voice, for example after AI has completed a run.
+
+Run it like this: `Use the Ava voice tool to speak a 10-second summary of what I just asked and what you completed.`
+
 ## License
 
 See LICENSE. This is an early-stage project under active development.

@@ -9,6 +9,7 @@ import { McpAuthMethod, McpServerConfig, McpServerStatus } from '../services/mcp
 import { LlmService } from '../services/llm';
 import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
+import { XaiAuthService } from '../services/xai/xai-auth';
 
 interface ModelFileInfo {
   name: string;
@@ -34,6 +35,7 @@ export class Settings {
   private readonly llmService = inject(LlmService);
   private readonly agentsService = inject(AgentsService);
   private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
+  private readonly xai = inject(XaiAuthService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
@@ -55,6 +57,8 @@ export class Settings {
   oauthScopeDrafts: Record<string, string> = {};
   mcpBusy: Record<string, boolean> = {};
   mcpError = '';
+  apiKeyDraft = '';
+  xaiBusy = false;
 
   constructor() {
     // Seed per-server OAuth drafts from persisted config so saved values show.
@@ -64,6 +68,7 @@ export class Settings {
     }
     void this.loadMcpServerInfo();
     void this.refreshModelFiles();
+    if (this.xai.signedIn()) void this.ttsService.refreshGrokVoices();
   }
 
   statusFor(id: string): McpServerStatus | undefined {
@@ -212,6 +217,18 @@ export class Settings {
   protected readonly agentLoading = this.agentsService.isLoading;
   protected readonly selectedVoice = this.ttsService.selectedVoice;
   protected readonly selectedKokoroVoice = this.ttsService.selectedKokoroVoice;
+  protected readonly grokVoices = this.ttsService.grokVoiceCatalog;
+  protected readonly selectedGrokVoiceId = this.ttsService.selectedGrokVoiceId;
+  protected readonly xaiSignedIn = this.xai.signedIn;
+  protected readonly xaiNeedsReauth = this.xai.needsReauth;
+  protected readonly xaiMethod = this.xai.method;
+  protected readonly xaiAccount = this.xai.accountLabel;
+  protected readonly xaiError = this.xai.error;
+  protected readonly xaiPending = this.xai.loginPending;
+  protected readonly xaiDevice = this.xai.deviceLogin;
+  protected readonly grokCliAvailable = this.xai.grokCliAvailable;
+  protected readonly intelligenceMode = this.llmService.intelligenceMode;
+  protected readonly cloudExclusive = this.llmService.isCloudExclusive;
 
   // MCP voice server: lets other local agents call Ava to speak.
   protected readonly mcpServerUrl = signal<string | null>(null);
@@ -293,6 +310,81 @@ export class Settings {
   selectKokoroVoice(id: string) {
     this.ttsService.setKokoroVoice(id);
     this.previewVoice.emit(id);
+  }
+
+  selectGrokVoice(id: string) {
+    this.ttsService.setGrokVoice(id);
+    this.previewVoice.emit(id);
+  }
+
+  setIntelligenceMode(mode: 'local' | 'grok') {
+    this.llmService.setIntelligenceMode(mode);
+    if (mode === 'grok') {
+      this.ttsService.preferGrokVoice();
+    } else if (this.ttsService.selectedVoiceId() === 'grok') {
+      this.ttsService.setVoice('kokoro');
+    }
+  }
+
+  async signInWithGrok() {
+    if (this.xai.loginPending()) return;
+    this.xaiBusy = true;
+    try {
+      const login = this.xai.loginWithGrok();
+      this.xaiBusy = false;
+      await login;
+      if (this.xai.signedIn()) {
+        this.setIntelligenceMode('grok');
+        await this.ttsService.refreshGrokVoices();
+      }
+    } catch {
+      // surfaced via xaiError
+    } finally {
+      this.xaiBusy = false;
+    }
+  }
+
+  async signInWithApiKey() {
+    this.xaiBusy = true;
+    try {
+      await this.xai.loginWithApiKey(this.apiKeyDraft);
+      this.apiKeyDraft = '';
+      this.setIntelligenceMode('grok');
+      await this.ttsService.refreshGrokVoices();
+    } catch (err) {
+      this.xai.error.set(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.xaiBusy = false;
+    }
+  }
+
+  async importGrokCli() {
+    this.xaiBusy = true;
+    try {
+      const ok = await this.xai.importGrokCliAuth();
+      if (ok) {
+        this.setIntelligenceMode('grok');
+        await this.ttsService.refreshGrokVoices();
+      } else {
+        this.xai.error.set('No Grok CLI login was found on this computer.');
+      }
+    } finally {
+      this.xaiBusy = false;
+    }
+  }
+
+  signOutGrok() {
+    this.xai.logout();
+    this.setIntelligenceMode('local');
+  }
+
+  cancelGrokLogin() {
+    this.xaiBusy = false;
+    this.xai.cancelLogin();
+  }
+
+  openGrokVerification() {
+    void this.xai.openVerificationPage();
   }
 
   async startRecording() {

@@ -1,11 +1,8 @@
-//! Minimal MCP (Model Context Protocol) server that lets other local agents
-//! (Claude Desktop, GitHub Copilot, etc.) call Ava to speak text aloud.
+//! MCP (Model Context Protocol) server so other local agents — Grok Bot,
+//! Claude Desktop, GitHub Copilot, Cursor — can borrow Ava's voice.
 //!
-//! TTS itself runs in the Angular webview (Kokoro / system speech). This module
-//! only hosts a tiny localhost HTTP server speaking the MCP "Streamable HTTP"
-//! transport. When a `speak` tool call arrives it forwards the text to the
-//! webview through a Tauri event and waits for the front-end to acknowledge that
-//! playback finished. No audio is processed in Rust.
+//! TTS runs in the Angular webview. This module hosts a localhost Streamable
+//! HTTP endpoint (POST JSON-RPC, GET SSE/info, OPTIONS CORS).
 
 use std::{
   collections::HashMap,
@@ -22,15 +19,28 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tiny_http::{Header, Method, Response, Server};
 
-/// Loopback-only port chosen to avoid clashing with common dev servers. 7456 is
-/// not registered to any well-known service.
+/// Loopback-only port chosen to avoid clashing with common dev servers.
 pub const MCP_PORT: u16 = 7456;
 
-/// How long a `speak` call waits for the webview to finish playback.
 const SPEAK_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Shared bridge between the HTTP server and the webview front-end. Each pending
-/// speak request parks on a one-shot channel until the UI reports completion.
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
+  "2024-11-05",
+  "2025-03-26",
+  "2025-06-18",
+  "2025-11-25",
+  "2026-06-18",
+  "2026-07-28",
+];
+
+const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
+
+const SERVER_INSTRUCTIONS: &str = "\
+Ava is a local voice companion. Call list_voices to see speakers, speak to \
+say text aloud on this machine, stop_speaking to interrupt, and get_status \
+to check that Ava is open. Prefer speak for any request to talk, announce, \
+or read something out loud.";
+
 pub struct McpBridge {
   next_id: AtomicU64,
   pending: Mutex<HashMap<u64, Sender<bool>>>,
@@ -44,7 +54,6 @@ impl McpBridge {
     }
   }
 
-  /// Called by the `mcp_tts_complete` command from the webview.
   pub fn complete(&self, request_id: u64, ok: bool) {
     if let Some(tx) = self.pending.lock().unwrap().remove(&request_id) {
       let _ = tx.send(ok);
@@ -59,7 +68,6 @@ struct SpeakArgs {
   voice: Option<String>,
 }
 
-/// Starts the MCP HTTP server on a background thread. Desktop only.
 pub fn start(app: AppHandle) {
   app.manage(McpBridge::new());
 
@@ -75,34 +83,66 @@ pub fn start(app: AppHandle) {
     log::info!("Ava MCP server listening on http://{addr}");
 
     for mut request in server.incoming_requests() {
-      if request.method() != &Method::Post {
-        let _ = request.respond(Response::from_string("MCP endpoint expects POST").with_status_code(405));
-        continue;
-      }
+      let method = request.method().clone();
+      let accept = header_value(&request, "Accept");
+      let wants_sse = accept.to_ascii_lowercase().contains("text/event-stream");
 
-      let mut body = String::new();
-      if request.as_reader().read_to_string(&mut body).is_err() {
-        let _ = request.respond(Response::from_string("bad request").with_status_code(400));
-        continue;
-      }
-
-      let parsed: Value = match serde_json::from_str(&body) {
-        Ok(value) => value,
-        Err(_) => {
-          let _ = request.respond(json_response(rpc_error(Value::Null, -32700, "Parse error")));
-          continue;
+      match method {
+        Method::Options => {
+          let _ = request.respond(with_cors(Response::from_string("").with_status_code(204)));
         }
-      };
+        Method::Get => {
+          if wants_sse {
+            let _ = request.respond(with_cors(sse_keepalive()));
+          } else {
+            let _ = request.respond(with_cors(json_response(server_manifest())));
+          }
+        }
+        Method::Delete => {
+          let _ = request.respond(with_cors(Response::from_string("").with_status_code(200)));
+        }
+        Method::Post => {
+          let mut body = String::new();
+          if request.as_reader().read_to_string(&mut body).is_err() {
+            let _ = request.respond(with_cors(
+              Response::from_string("bad request").with_status_code(400),
+            ));
+            continue;
+          }
 
-      // Notifications (no id) get an empty 202 ack.
-      let id = parsed.get("id").cloned();
-      if id.is_none() {
-        let _ = request.respond(Response::from_string("").with_status_code(202));
-        continue;
+          let parsed: Value = match serde_json::from_str(&body) {
+            Ok(value) => value,
+            Err(_) => {
+              let _ = request.respond(with_cors(json_response(rpc_error(
+                Value::Null,
+                -32700,
+                "Parse error",
+              ))));
+              continue;
+            }
+          };
+
+          let id = parsed.get("id").cloned();
+          if id.is_none() {
+            let _ = request.respond(with_cors(Response::from_string("").with_status_code(202)));
+            continue;
+          }
+
+          let is_initialize = parsed.get("method").and_then(Value::as_str) == Some("initialize");
+          let response = handle_rpc(&app, &parsed, id.unwrap());
+          let mut http = with_cors(json_response(response));
+          if is_initialize {
+            http = http.with_header(header("Mcp-Session-Id", "ava-local"));
+            http = http.with_header(header("MCP-Protocol-Version", DEFAULT_PROTOCOL_VERSION));
+          }
+          let _ = request.respond(http);
+        }
+        _ => {
+          let _ = request.respond(with_cors(
+            Response::from_string("Method not allowed").with_status_code(405),
+          ));
+        }
       }
-
-      let response = handle_rpc(&app, &parsed, id.unwrap());
-      let _ = request.respond(json_response(response));
     }
   });
 }
@@ -110,16 +150,38 @@ pub fn start(app: AppHandle) {
 fn handle_rpc(app: &AppHandle, req: &Value, id: Value) -> Value {
   let method = req.get("method").and_then(Value::as_str).unwrap_or("");
   match method {
-    "initialize" => rpc_result(
-      id,
-      json!({
-        "protocolVersion": "2024-11-05",
-        "capabilities": { "tools": {} },
-        "serverInfo": { "name": "ava-tts", "version": env!("CARGO_PKG_VERSION") }
-      }),
-    ),
+    "initialize" => {
+      let requested = req
+        .pointer("/params/protocolVersion")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_PROTOCOL_VERSION);
+      let protocol_version = if SUPPORTED_PROTOCOL_VERSIONS.contains(&requested) {
+        requested
+      } else {
+        DEFAULT_PROTOCOL_VERSION
+      };
+      rpc_result(
+        id,
+        json!({
+          "protocolVersion": protocol_version,
+          "capabilities": {
+            "tools": { "listChanged": false },
+            "resources": {},
+            "prompts": {}
+          },
+          "serverInfo": {
+            "name": "ava-voice",
+            "title": "Ava Voice",
+            "version": env!("CARGO_PKG_VERSION")
+          },
+          "instructions": SERVER_INSTRUCTIONS
+        }),
+      )
+    }
     "tools/list" => rpc_result(id, json!({ "tools": tool_definitions() })),
     "tools/call" => handle_tool_call(app, req, id),
+    "resources/list" => rpc_result(id, json!({ "resources": [] })),
+    "prompts/list" => rpc_result(id, json!({ "prompts": [] })),
     "ping" => rpc_result(id, json!({})),
     _ => rpc_error(id, -32601, "Method not found"),
   }
@@ -145,14 +207,23 @@ fn handle_tool_call(app: &AppHandle, req: &Value, id: Value) -> Value {
       }
     }
     "list_voices" => {
-      let voices = voice_catalog();
-      tool_text(id, &serde_json::to_string_pretty(&voices).unwrap_or_default())
+      tool_text(id, &serde_json::to_string_pretty(&voice_catalog()).unwrap_or_default())
+    }
+    "stop_speaking" => {
+      let _ = app.emit("mcp-tts-stop", json!({}));
+      tool_text(id, "Ava stopped speaking.")
+    }
+    "get_status" => {
+      tool_text(
+        id,
+        "Ava is open and ready. Tools: speak, list_voices, stop_speaking, get_status. \
+Call list_voices to see speaker ids, then speak with optional voice.",
+      )
     }
     _ => rpc_error(id, -32602, "Unknown tool"),
   }
 }
 
-/// Forwards text to the webview and blocks until playback finishes or times out.
 fn speak(app: &AppHandle, text: &str, voice: Option<&str>) -> Result<(), String> {
   let bridge = app.state::<McpBridge>();
   let request_id = bridge.next_id.fetch_add(1, Ordering::SeqCst);
@@ -180,19 +251,29 @@ fn tool_definitions() -> Value {
   json!([
     {
       "name": "speak",
-      "description": "Speak text aloud through Ava's on-device voice. Use this to give an agent a natural spoken voice.",
+      "description": "Speak text aloud through Ava on this computer. Use whenever the user wants something said, announced, read, or spoken. Returns after playback finishes.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "text": { "type": "string", "description": "The text Ava should say." },
-          "voice": { "type": "string", "description": "Optional Kokoro voice id (see list_voices)." }
+          "text": { "type": "string", "description": "The words Ava should say." },
+          "voice": { "type": "string", "description": "Optional speaker id from list_voices, e.g. carina, eve, af_bella." }
         },
         "required": ["text"]
       }
     },
     {
       "name": "list_voices",
-      "description": "List the Kokoro voices Ava can speak with.",
+      "description": "List Ava's available speakers (Grok cloud voices and on-device Kokoro voices) with ids to pass to speak.",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "stop_speaking",
+      "description": "Interrupt Ava if she is currently talking.",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "get_status",
+      "description": "Check that Ava is running and which voice tools are available.",
       "inputSchema": { "type": "object", "properties": {} }
     }
   ])
@@ -200,20 +281,74 @@ fn tool_definitions() -> Value {
 
 fn voice_catalog() -> Value {
   json!([
-    { "id": "af_bella", "name": "Bella", "accent": "American · Female" },
-    { "id": "af_nicole", "name": "Nicole", "accent": "American · Female" },
-    { "id": "am_adam", "name": "Adam", "accent": "American · Male" },
-    { "id": "am_puck", "name": "Puck", "accent": "American · Male" },
-    { "id": "am_eric", "name": "Eric", "accent": "American · Male" },
-    { "id": "bf_isabella", "name": "Isabella", "accent": "British · Female" },
-    { "id": "bm_george", "name": "George", "accent": "British · Male" }
+    { "id": "carina", "name": "Carina", "family": "grok", "note": "Default Grok voice when signed in" },
+    { "id": "eve", "name": "Eve", "family": "grok" },
+    { "id": "ara", "name": "Ara", "family": "grok" },
+    { "id": "luna", "name": "Luna", "family": "grok" },
+    { "id": "leo", "name": "Leo", "family": "grok" },
+    { "id": "rex", "name": "Rex", "family": "grok" },
+    { "id": "sal", "name": "Sal", "family": "grok" },
+    { "id": "af_bella", "name": "Bella", "family": "kokoro", "accent": "American · Female" },
+    { "id": "af_nicole", "name": "Nicole", "family": "kokoro", "accent": "American · Female" },
+    { "id": "am_adam", "name": "Adam", "family": "kokoro", "accent": "American · Male" },
+    { "id": "am_puck", "name": "Puck", "family": "kokoro", "accent": "American · Male" },
+    { "id": "am_eric", "name": "Eric", "family": "kokoro", "accent": "American · Male" },
+    { "id": "bf_isabella", "name": "Isabella", "family": "kokoro", "accent": "British · Female" },
+    { "id": "bm_george", "name": "George", "family": "kokoro", "accent": "British · Male" }
   ])
+}
+
+fn server_manifest() -> Value {
+  json!({
+    "name": "ava-voice",
+    "title": "Ava Voice",
+    "transport": "streamable-http",
+    "url": format!("http://127.0.0.1:{MCP_PORT}"),
+    "instructions": SERVER_INSTRUCTIONS,
+    "tools": tool_definitions()
+  })
+}
+
+fn header_value(request: &tiny_http::Request, name: &str) -> String {
+  let needle = name.to_ascii_lowercase();
+  request
+    .headers()
+    .iter()
+    .find(|h| format!("{}", h.field).eq_ignore_ascii_case(&needle))
+    .map(|h| h.value.as_str().to_string())
+    .unwrap_or_default()
+}
+
+fn header(name: &str, value: &str) -> Header {
+  Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("valid header")
+}
+
+fn with_cors<R: std::io::Read>(response: Response<R>) -> Response<R> {
+  response
+    .with_header(header("Access-Control-Allow-Origin", "*"))
+    .with_header(header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, OPTIONS, DELETE",
+    ))
+    .with_header(header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID",
+    ))
+    .with_header(header(
+      "Access-Control-Expose-Headers",
+      "Mcp-Session-Id, MCP-Protocol-Version",
+    ))
 }
 
 fn json_response(value: Value) -> Response<std::io::Cursor<Vec<u8>>> {
   let body = value.to_string();
-  let header = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
-  Response::from_string(body).with_header(header)
+  Response::from_string(body).with_header(header("Content-Type", "application/json"))
+}
+
+fn sse_keepalive() -> Response<std::io::Cursor<Vec<u8>>> {
+  Response::from_string(": ava-voice ready\n\n")
+    .with_header(header("Content-Type", "text/event-stream"))
+    .with_header(header("Cache-Control", "no-cache"))
 }
 
 fn rpc_result(id: Value, result: Value) -> Value {

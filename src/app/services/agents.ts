@@ -1,7 +1,7 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
 import { detectDeviceCapability, DeviceTier } from './device-capability';
-import { ChatTurn, LlmModelOption } from './llm';
+import { ChatTurn, LlmModelOption, LlmService } from './llm';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 
@@ -86,6 +86,7 @@ const AGENT_SYSTEM_PROMPT =
 @Injectable({ providedIn: 'root' })
 export class AgentsService {
   private readonly STORAGE_KEY = 'ava-agent-model';
+  private readonly llm = inject(LlmService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
@@ -207,6 +208,18 @@ export class AgentsService {
   }
 
   async ensureLoaded(): Promise<any> {
+    if (this.llm.isCloudExclusive()) {
+      this.isReady.set(true);
+      this.loadInfo.set('Grok cloud');
+      this.activeModel.set({
+        id: this.llm.selectedModel().id,
+        name: this.llm.selectedModel().name,
+        size: 'Cloud',
+        tier: 'high',
+        provider: 'grok',
+      });
+      return null;
+    }
     if (this.generator) return this.generator;
     if (this.loadPromise) return this.loadPromise;
 
@@ -317,13 +330,18 @@ export class AgentsService {
 
   /** Runs a single agent generation. Exposed for advanced/manual use. */
   async generate(prompt: string, history: ChatTurn[] = []): Promise<string> {
-    const generator = await this.ensureLoaded();
-
     const messages: ChatTurn[] = [
       { role: 'system', content: AGENT_SYSTEM_PROMPT },
       ...history,
       { role: 'user', content: prompt },
     ];
+
+    if (this.llm.isCloudExclusive()) {
+      const result = await this.llm.generateMessages(messages, { maxNewTokens: 1024 });
+      return result.text.trim();
+    }
+
+    const generator = await this.ensureLoaded();
 
     const options = {
       max_new_tokens: 1024,
@@ -400,8 +418,6 @@ export class AgentsService {
     maxRounds = 4,
     baseInstructions: string = AGENT_SYSTEM_PROMPT,
   ): Promise<string> {
-    const generator = await this.ensureLoaded();
-
     const toolList = tools
       .map(t => `- ${t.name}: ${t.description ?? 'no description'}\n  input schema: ${JSON.stringify(t.inputSchema ?? {})}`)
       .join('\n');
@@ -423,13 +439,14 @@ export class AgentsService {
 
     let lastText = '';
     for (let round = 0; round < maxRounds; round++) {
-      const output: any = await generator(messages, {
-        max_new_tokens: 1024,
-        do_sample: true,
-        temperature: 0.6,
-        top_p: 0.95,
-      });
-      const text = this.extractText(output);
+      const text = this.llm.isCloudExclusive()
+        ? (await this.llm.generateMessages(messages, { maxNewTokens: 1024 })).text
+        : this.extractText(await (await this.ensureLoaded())(messages, {
+            max_new_tokens: 1024,
+            do_sample: true,
+            temperature: 0.6,
+            top_p: 0.95,
+          }));
       lastText = text;
 
       const call = this.parseToolCall(text);

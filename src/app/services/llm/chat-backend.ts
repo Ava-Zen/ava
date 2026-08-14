@@ -33,6 +33,18 @@ export interface LlmModelOption {
   acceleratorDtype?: string;
   /** GGUF build for the native llama.cpp engine (Tauri builds only). */
   gguf?: GgufSource;
+  /** Where this option runs. Local catalogue entries omit this. */
+  provider?: 'local' | 'grok';
+}
+
+export interface GeneratedImage {
+  dataUrl: string;
+  prompt?: string;
+}
+
+export interface ChatResult {
+  text: string;
+  images?: GeneratedImage[];
 }
 
 /** Sampling/generation options, backend-agnostic. */
@@ -41,6 +53,8 @@ export interface ChatGenerateOptions {
   temperature: number;
   topP: number;
   doSample: boolean;
+  /** Cloud model id when the backend talks to a remote API. */
+  modelId?: string;
   /** Streaming hook; backends that support it deliver incremental text. */
   onToken?: (chunk: string) => void;
 }
@@ -67,17 +81,18 @@ export interface ChatBackendLoadOptions {
 }
 
 /**
- * A chat inference engine. Two implementations exist:
+ * A chat inference engine. Implementations:
  *
  * - `TransformersChatBackend` — transformers.js + ONNX Runtime Web inside the
  *   WebView (works everywhere, including plain browsers).
  * - `NativeLlamaBackend` — llama.cpp hosted in the Tauri (Rust) process,
  *   using GGUF models stored on disk (desktop + mobile builds).
+ * - `GrokChatBackend` — xAI Responses API after a SuperGrok / API-key login.
  *
- * Use `resolveChatBackend()` to pick the best available engine.
+ * Use `resolveChatBackend()` to pick the best available local engine.
  */
 export interface ChatBackend {
-  readonly kind: 'transformers-js' | 'native-llama';
+  readonly kind: 'transformers-js' | 'native-llama' | 'grok';
 
   /**
    * Loads the preferred model, falling back as needed. Throws when nothing
@@ -86,7 +101,7 @@ export interface ChatBackend {
   load(preferred: LlmModelOption, options: ChatBackendLoadOptions): Promise<LoadedBackendModel>;
 
   /** Generates a completion for the given conversation. Requires `load()`. */
-  generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<string>;
+  generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult>;
 
   /** True once a model is loaded and ready to generate. */
   isLoaded(): boolean;

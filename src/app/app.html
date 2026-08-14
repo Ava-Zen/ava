@@ -72,7 +72,7 @@
             <small>Ready to listen</small>
           } @else {
             <span>Ready when you are</span>
-            <small>Local speech and voice</small>
+            <small>{{ cloudExclusive() ? 'Grok cloud speech and voice' : 'Local speech and voice' }}</small>
           }
         </div>
 
@@ -118,7 +118,12 @@
               >
                 <div class="message-bubble">
                   <div class="message-meta">
-                    <span class="message-role">{{ msg.role === 'ava' ? 'Ava' : 'You' }}</span>
+                    <span class="message-role">
+                      {{ msg.role === 'ava' ? 'Ava' : 'You' }}
+                      @if (msg.via === 'mcp') {
+                        <em class="message-via">via MCP</em>
+                      }
+                    </span>
                     <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
                   </div>
                   <button
@@ -135,6 +140,13 @@
                   </button>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                    @if (msg.images?.length) {
+                      <div class="message-images">
+                        @for (image of msg.images; track image.dataUrl) {
+                          <img [src]="image.dataUrl" [alt]="image.prompt || 'Generated image'" />
+                        }
+                      </div>
+                    }
                     @if (msg.debug) {
                       <small class="message-debug">
                         {{ msg.debug.model }} · {{ formatGenDuration(msg.debug.durationMs) }}
@@ -432,7 +444,7 @@
                   (click)="quickSelectModel(model.id)"
                 >
                   <strong>{{ model.name }}</strong>
-                  <span>{{ model.size }}{{ model.id === selectedConversationModelId() ? ' · selected' : '' }}</span>
+                  <span>{{ model.provider === 'grok' ? 'Grok cloud' : model.size }}{{ model.id === selectedConversationModelId() ? ' · selected' : '' }}</span>
                 </button>
               }
             </div>

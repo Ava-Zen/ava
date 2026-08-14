@@ -43,6 +43,15 @@ fn suggested_user_name() -> Option<String> {
 }
 
 #[tauri::command]
+fn xai_read_grok_cli_auth() -> Option<String> {
+  let home = env::var("USERPROFILE")
+    .or_else(|_| env::var("HOME"))
+    .ok()?;
+  let path = std::path::Path::new(&home).join(".grok").join("auth.json");
+  fs::read_to_string(path).ok().filter(|raw| !raw.trim().is_empty())
+}
+
+#[tauri::command]
 fn reset_app_cache(app: tauri::AppHandle) -> Result<(), String> {
   let mut targets = Vec::new();
 
@@ -143,6 +152,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       suggested_user_name,
+      xai_read_grok_cli_auth,
       reset_app_cache,
       mcp_tts_complete,
       mcp_server_info,

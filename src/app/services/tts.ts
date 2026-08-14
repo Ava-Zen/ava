@@ -1,11 +1,14 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { XaiAuthService } from './xai/xai-auth';
+import { GROK_FALLBACK_VOICES, GrokVoiceInfo, XaiClient } from './xai/xai-client';
 
-export type TtsEngine = 'kokoro' | 'system';
+export type TtsEngine = 'kokoro' | 'system' | 'grok';
 
 export interface TtsVoiceOption {
   id: TtsEngine;
   name: string;
   description: string;
+  requiresGrok?: boolean;
 }
 
 /** A specific Kokoro speaker. */
@@ -18,16 +21,26 @@ export interface KokoroVoiceOption {
 interface TtsConfig {
   voice: TtsEngine;
   kokoroVoice: string;
+  grokVoice: string;
 }
 
 const DEFAULT_KOKORO_VOICE = 'af_bella';
+const DEFAULT_GROK_VOICE = 'carina';
 
 @Injectable({ providedIn: 'root' })
 export class TtsService {
   private readonly STORAGE_KEY = 'ava-tts-config';
   private readonly kokoroPreviewBasePath = '/audio/kokoro';
+  private readonly xai = inject(XaiAuthService);
+  private readonly xaiClient = new XaiClient(this.xai);
 
   readonly voices: TtsVoiceOption[] = [
+    {
+      id: 'grok',
+      name: 'Grok Voice',
+      description: 'Cloud voices from xAI. Requires a Grok login.',
+      requiresGrok: true,
+    },
     {
       id: 'kokoro',
       name: 'Kokoro 82M',
@@ -52,18 +65,28 @@ export class TtsService {
   ];
 
   private readonly config = signal<TtsConfig>(this.load());
+  readonly grokVoiceCatalog = signal<GrokVoiceInfo[]>(GROK_FALLBACK_VOICES);
 
-  readonly selectedVoiceId = computed(() => this.config().voice);
+  readonly selectedVoiceId = computed(() => {
+    const voice = this.config().voice;
+    if (voice === 'grok' && !this.xai.signedIn()) return 'kokoro';
+    return voice;
+  });
   readonly selectedVoice = computed(
-    () => this.voices.find(v => v.id === this.config().voice) ?? this.voices[0]
+    () => this.voices.find(v => v.id === this.selectedVoiceId()) ?? this.voices.find(v => v.id === 'kokoro')!
   );
 
   readonly selectedKokoroVoiceId = computed(() => this.config().kokoroVoice);
   readonly selectedKokoroVoice = computed(
     () => this.kokoroVoices.find(v => v.id === this.config().kokoroVoice) ?? this.kokoroVoices[0]
   );
+  readonly selectedGrokVoiceId = computed(() => this.config().grokVoice);
+  readonly selectedGrokVoice = computed(
+    () => this.grokVoiceCatalog().find(v => v.id === this.config().grokVoice) ?? this.grokVoiceCatalog()[0]
+  );
 
   setVoice(id: TtsEngine) {
+    if (id === 'grok' && !this.xai.signedIn()) return;
     this.config.update(c => ({ ...c, voice: id }));
     this.save();
   }
@@ -73,6 +96,30 @@ export class TtsService {
     this.save();
   }
 
+  setGrokVoice(id: string) {
+    this.config.update(c => ({ ...c, grokVoice: id, voice: 'grok' }));
+    this.save();
+  }
+
+  preferGrokVoice(): void {
+    if (!this.xai.signedIn()) return;
+    this.setVoice('grok');
+    void this.refreshGrokVoices();
+  }
+
+  async refreshGrokVoices(): Promise<void> {
+    if (!this.xai.signedIn()) return;
+    try {
+      this.grokVoiceCatalog.set(await this.xaiClient.listVoices());
+    } catch {
+      this.grokVoiceCatalog.set(GROK_FALLBACK_VOICES);
+    }
+  }
+
+  async synthesizeGrok(text: string): Promise<Blob> {
+    return this.xaiClient.synthesizeSpeech(text, this.selectedGrokVoiceId());
+  }
+
   getKokoroPreviewAudioUrl(id: string): string {
     return this.kokoroVoices.some(v => v.id === id)
       ? `${this.kokoroPreviewBasePath}/${id}.wav`
@@ -80,7 +127,11 @@ export class TtsService {
   }
 
   private load(): TtsConfig {
-    const fallback: TtsConfig = { voice: 'kokoro', kokoroVoice: DEFAULT_KOKORO_VOICE };
+    const fallback: TtsConfig = {
+      voice: 'kokoro',
+      kokoroVoice: DEFAULT_KOKORO_VOICE,
+      grokVoice: DEFAULT_GROK_VOICE,
+    };
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY);
       if (!raw) return fallback;
@@ -90,6 +141,7 @@ export class TtsService {
         kokoroVoice: this.isValidKokoroVoice(parsed.kokoroVoice)
           ? parsed.kokoroVoice!
           : DEFAULT_KOKORO_VOICE,
+        grokVoice: this.normalizeGrokVoice(parsed.grokVoice),
       };
     } catch {
       return fallback;
@@ -105,10 +157,17 @@ export class TtsService {
   }
 
   private isValidVoice(v: unknown): v is TtsEngine {
-    return v === 'kokoro' || v === 'system';
+    return v === 'kokoro' || v === 'system' || v === 'grok';
   }
 
   private isValidKokoroVoice(v: unknown): v is string {
     return typeof v === 'string' && this.kokoroVoices.some(k => k.id === v);
+  }
+
+  private normalizeGrokVoice(v: unknown): string {
+    if (typeof v !== 'string' || !v.trim() || v.trim().toLowerCase() === 'eve') {
+      return DEFAULT_GROK_VOICE;
+    }
+    return v.trim();
   }
 }

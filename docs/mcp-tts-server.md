@@ -13,16 +13,18 @@ own text-to-speech.
   rarely used, so it stays out of the way of common dev servers).
 - TTS itself is produced by Ava's on-device Kokoro voice (with system speech as a
   fallback) and played on the machine running Ava.
-- The transport is MCP **Streamable HTTP** (JSON-RPC over `POST`).
+- The transport is MCP **Streamable HTTP** (`POST` JSON-RPC, `GET` for discovery/SSE, `OPTIONS` for CORS).
 
 The endpoint and status are also shown in **Settings → Integrations → MCP voice server**.
 
 ## Tools
 
-| Tool          | Arguments                                   | Description                                   |
-| ------------- | ------------------------------------------- | --------------------------------------------- |
-| `speak`       | `text` (string, required), `voice` (string) | Speaks the text aloud through Ava's voice.    |
-| `list_voices` | _none_                                      | Lists the Kokoro voices Ava can speak with.   |
+| Tool            | Arguments                                   | Description                                      |
+| --------------- | ------------------------------------------- | ------------------------------------------------ |
+| `speak`         | `text` (string, required), `voice` (string) | Speaks the text aloud through Ava's voice.       |
+| `list_voices`   | _none_                                      | Lists Grok and Kokoro speakers Ava can use.      |
+| `stop_speaking` | _none_                                      | Interrupts playback.                             |
+| `get_status`    | _none_                                      | Confirms Ava is open and which tools exist.      |
 
 `speak` returns once playback finishes (up to a 2-minute timeout). The optional `voice`
 id can be any value returned by `list_voices` (e.g. `af_bella`, `bm_george`).

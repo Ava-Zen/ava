@@ -665,6 +665,13 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
+.message-via {
+  margin-left: 8px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #9fe0d5;
+}
 .message-text {
   font-size: 1.18rem;
   line-height: 1.5;
@@ -713,6 +720,18 @@
 }
 .message-text.markdown strong {
   font-weight: 600;
+}
+.message-images {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+.message-images img {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: block;
 }
 .audio-download {
   margin-top: 12px;

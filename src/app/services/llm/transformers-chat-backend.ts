@@ -5,6 +5,7 @@ import {
   ChatBackend,
   ChatBackendLoadOptions,
   ChatGenerateOptions,
+  ChatResult,
   ChatTurn,
   LlmModelOption,
   LoadedBackendModel,
@@ -67,7 +68,7 @@ export class TransformersChatBackend implements ChatBackend {
     }
   }
 
-  async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<string> {
+  async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult> {
     if (!this.generator) throw new Error('Chat model is not loaded');
 
     const genOptions = {
@@ -88,7 +89,7 @@ export class TransformersChatBackend implements ChatBackend {
       output = await this.generator(promptPrefix, genOptions);
     }
 
-    return this.extractText(output, promptPrefix);
+    return { text: this.extractText(output, promptPrefix) };
   }
 
   isLoaded(): boolean {

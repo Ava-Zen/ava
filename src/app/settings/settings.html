@@ -15,6 +15,76 @@
   <section class="section">
     <div class="section-heading">
       <div>
+        <p class="overline">xAI</p>
+        <h3>Grok</h3>
+      </div>
+    </div>
+    <p class="hint">
+      Sign in with SuperGrok or X Premium+ to run Ava on cloud Grok models, Grok Voice, and Imagine.
+      Local models stay available if you want them.
+    </p>
+
+    @if (xaiDevice(); as device) {
+      <div class="device-code-card">
+        <span>Approve this code in your browser</span>
+        <strong>{{ device.userCode }}</strong>
+        <small>{{ device.verificationUri }}</small>
+        <div class="auth-row">
+          <button class="save-btn" type="button" (click)="openGrokVerification()">Open xAI sign-in</button>
+          <button class="ghost-btn" type="button" (click)="cancelGrokLogin()">Cancel</button>
+        </div>
+      </div>
+    } @else if (xaiPending()) {
+      <div class="device-code-card">
+        <span>Contacting xAI…</span>
+        <strong>Waiting for Grok</strong>
+        <div class="auth-row">
+          <button class="ghost-btn" type="button" (click)="cancelGrokLogin()">Cancel</button>
+        </div>
+      </div>
+    } @else if (xaiSignedIn()) {
+      <div class="grok-status">
+        <div>
+          <strong>{{ xaiAccount() || 'Grok account' }}</strong>
+          <small>{{ xaiMethod() === 'api-key' ? 'API key' : 'Subscription login' }}</small>
+        </div>
+        <button class="ghost-btn" type="button" (click)="signOutGrok()">Sign out</button>
+      </div>
+      @if (xaiNeedsReauth()) {
+        <p class="hint">Grok needs a fresh approval that includes API access. Sign in again and allow it in the browser.</p>
+      }
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="signInWithGrok()" [disabled]="xaiBusy">
+          {{ xaiBusy ? 'Starting…' : xaiNeedsReauth() ? 'Update Grok login' : 'Sign in again' }}
+        </button>
+      </div>
+      <div class="segmented intelligence-toggle" aria-label="Intelligence mode">
+        <button type="button" [class.active]="intelligenceMode() === 'local'" (click)="setIntelligenceMode('local')">Local first</button>
+        <button type="button" [class.active]="intelligenceMode() === 'grok'" (click)="setIntelligenceMode('grok')">Grok cloud</button>
+      </div>
+    } @else {
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="signInWithGrok()" [disabled]="xaiBusy">
+          {{ xaiBusy ? 'Starting…' : 'Continue with Grok' }}
+        </button>
+        @if (grokCliAvailable()) {
+          <button class="ghost-btn" type="button" (click)="importGrokCli()" [disabled]="xaiBusy">Use Grok CLI login</button>
+        }
+      </div>
+      <label>
+        <span>Or paste an xAI API key</span>
+        <input type="password" [(ngModel)]="apiKeyDraft" placeholder="xai-…" />
+      </label>
+      <button class="ghost-btn" type="button" (click)="signInWithApiKey()" [disabled]="!apiKeyDraft.trim() || xaiBusy">Use API key</button>
+    }
+    @if (xaiError()) {
+      <p class="mcp-error">{{ xaiError() }}</p>
+    }
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
         <p class="overline">Memory spaces</p>
         <h3>Gardens</h3>
       </div>
@@ -109,7 +179,13 @@
         <h3>Models</h3>
       </div>
     </div>
-    <p class="hint">Pick separate local models for quick conversation replies and background agent tasks. Experimental Heretic models are less-filtered and may be less stable.</p>
+    <p class="hint">
+      @if (cloudExclusive()) {
+        Conversation and background agents both use your Grok model. Switch to Local first to download on-device models again.
+      } @else {
+        Pick separate local models for quick conversation replies and background agent tasks. Experimental Heretic models are less-filtered and may be less stable.
+      }
+    </p>
 
     <div class="model-groups">
       <div>
@@ -124,13 +200,14 @@
               <span class="voice-radio" aria-hidden="true"></span>
               <span>
                 <strong>{{ model.name }}</strong>
-                <small>{{ model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : 'Stable' }}</small>
+                <small>{{ model.provider === 'grok' ? 'Grok cloud' : model.size }} · {{ model.id.includes('heretic') ? 'Experimental' : model.provider === 'grok' ? 'Subscription' : 'Stable' }}</small>
               </span>
             </button>
           }
         </div>
       </div>
 
+      @if (!cloudExclusive()) {
       <div>
         <p class="speaker-label">Background Agent</p>
         <div class="model-list">
@@ -149,9 +226,10 @@
           }
         </div>
       </div>
+      }
     </div>
 
-    @if (modelStorageAvailable()) {
+    @if (modelStorageAvailable() && !cloudExclusive()) {
       <div class="model-storage">
         <div class="storage-heading">
           <p class="speaker-label">Model storage</p>
@@ -184,21 +262,45 @@
         <h3>Speech model</h3>
       </div>
     </div>
-    <p class="hint">Choose how Ava speaks. Every voice runs fully on this device.</p>
+    <p class="hint">
+      @if (cloudExclusive()) {
+        Grok Voice is the default in cloud mode. Kokoro and the system voice stay available offline.
+      } @else {
+        Choose how Ava speaks. Kokoro and the system voice run on this device.
+      }
+    </p>
 
     <div class="voice-list">
       @for (voice of voices; track voice.id) {
+        @if (voice.id !== 'grok' || xaiSignedIn()) {
         <article class="voice-item" [class.active]="voice.id === selectedVoiceId()">
           <button class="voice-info" (click)="selectVoice(voice.id)">
             <span class="voice-radio" aria-hidden="true"></span>
             <span>
               <strong>
                 {{ voice.name }}
-                <em class="tag on-device">On-device</em>
+                <em class="tag on-device">{{ voice.id === 'grok' ? 'Cloud' : 'On-device' }}</em>
               </strong>
               <small>{{ voice.description }}</small>
             </span>
           </button>
+
+          @if (voice.id === 'grok' && selectedVoiceId() === 'grok') {
+            <div class="speaker-picker">
+              <span class="speaker-label">Speaker</span>
+              <div class="speaker-chips">
+                @for (speaker of grokVoices(); track speaker.id) {
+                  <button
+                    class="speaker-chip"
+                    [class.active]="speaker.id === selectedGrokVoiceId()"
+                    (click)="selectGrokVoice(speaker.id)"
+                    [title]="speaker.description || speaker.name">
+                    {{ speaker.name }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
 
           @if (voice.id === 'kokoro' && selectedVoiceId() === 'kokoro') {
             <div class="speaker-picker">
@@ -218,6 +320,7 @@
           }
 
         </article>
+        }
       }
     </div>
   </section>
@@ -409,13 +512,13 @@
     </div>
     <div class="setting-item">
       <span>Storage</span>
-      <strong>Local first</strong>
-      <small>Gardens in this device</small>
+      <strong>{{ cloudExclusive() ? 'Grok cloud' : 'Local first' }}</strong>
+      <small>{{ cloudExclusive() ? 'Conversation and voice via xAI' : 'Gardens in this device' }}</small>
     </div>
     <div class="setting-item">
       <span>Voice runtime</span>
       <strong>{{ selectedVoice().name }}</strong>
-      <small>{{ selectedVoice().id === 'kokoro' ? selectedKokoroVoice().name + ' · ' + voiceBackendInfo : voiceBackendInfo }}</small>
+      <small>{{ selectedVoice().id === 'kokoro' ? selectedKokoroVoice().name + ' · ' + voiceBackendInfo : selectedVoice().id === 'grok' ? selectedGrokVoiceId() + ' · Grok Voice' : voiceBackendInfo }}</small>
     </div>
   </section>
 
@@ -479,6 +582,7 @@
         <span>Conversation model</span>
         <strong>{{ conversationRuntimeLabel() }}</strong>
         <small>Configured: {{ selectedConversationModel().name }}</small>
+        @if (!cloudExclusive()) {
         <button
           class="fallback-btn"
           type="button"
@@ -487,11 +591,13 @@
         >
           Use CPU fallback
         </button>
+        }
       </div>
       <div class="diagnostic-item">
         <span>Agent model</span>
-        <strong>{{ agentRuntimeLabel() }}</strong>
-        <small>Configured: {{ selectedAgentModel().name }}</small>
+        <strong>{{ cloudExclusive() ? conversationRuntimeLabel() : agentRuntimeLabel() }}</strong>
+        <small>Configured: {{ cloudExclusive() ? selectedConversationModel().name : selectedAgentModel().name }}</small>
+        @if (!cloudExclusive()) {
         <button
           class="fallback-btn"
           type="button"
@@ -500,6 +606,7 @@
         >
           Use CPU fallback
         </button>
+        }
       </div>
       <div class="diagnostic-item">
         <span>Speech model</span>

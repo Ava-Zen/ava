@@ -7,6 +7,7 @@ export interface AvaProfile {
   primaryUse?: string;
   preferredInput?: 'voice' | 'text' | 'both';
   modelDownloadConsent: boolean;
+  intelligenceMode?: 'local' | 'grok';
   completedAt: string;
 }
 
@@ -75,7 +76,8 @@ export class OnboardingService {
       const raw = localStorage.getItem(this.PROFILE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as AvaProfile;
-      if (!parsed?.name || !parsed.modelDownloadConsent) return null;
+      if (!parsed?.name) return null;
+      if (parsed.intelligenceMode !== 'grok' && !parsed.modelDownloadConsent) return null;
       return parsed;
     } catch {
       return null;

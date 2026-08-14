@@ -16,21 +16,21 @@
           <p class="overline">First run</p>
           <h1 id="onboarding-title">Set up Ava on this device.</h1>
           <p class="lead">
-            Ava is a local voice companion. She can listen, answer questions, summarize files,
-            generate spoken audio, and run longer background tasks while keeping your gardens on this device.
+            Ava is a voice companion. She can stay fully local on this device, or you can sign in
+            with a Grok subscription and use cloud Grok models, Grok Voice, and Imagine.
           </p>
           <div class="capability-grid" aria-label="Ava capabilities">
             <div>
               <strong>Voice</strong>
-              <span>Speak naturally, pause replies, and switch voices.</span>
+              <span>Speak naturally with an on-device voice or Grok Voice.</span>
             </div>
             <div>
-              <strong>Text and files</strong>
-              <span>Type prompts, attach text files, and ask for summaries or drafts.</span>
+              <strong>Intelligence</strong>
+              <span>Local models, or Grok in the cloud if you prefer no downloads.</span>
             </div>
             <div>
-              <strong>Agents</strong>
-              <span>Ask for deeper work when a quick answer is not enough.</span>
+              <strong>Imagine</strong>
+              <span>Ask Grok to draw something and Ava will show the image.</span>
             </div>
           </div>
         </section>
@@ -102,12 +102,42 @@
           </div>
 
           <p class="fine-print">
-            Cloud AI is planned for Ava later. Right now, conversation, speech, and voice run locally on this device.
+            You can stay fully local, or sign in with SuperGrok or X Premium+ on the next screen.
           </p>
         </section>
       }
 
       @if (step() === 3) {
+        <section class="onboarding-step">
+          <p class="overline">Intelligence</p>
+          <h1 id="onboarding-title">How should Ava think?</h1>
+          <p class="lead">
+            Local keeps everything on this device. Grok uses your subscription in the cloud and skips the large model downloads.
+          </p>
+          <div class="option-list intelligence-options">
+            <button
+              type="button"
+              class="option-item"
+              [class.active]="intelligence() === 'local'"
+              (click)="setIntelligence('local')"
+            >
+              <strong>Local first</strong>
+              <span>Download models and run conversation, speech, and voice on this device.</span>
+            </button>
+            <button
+              type="button"
+              class="option-item"
+              [class.active]="intelligence() === 'grok'"
+              (click)="setIntelligence('grok')"
+            >
+              <strong>Grok cloud</strong>
+              <span>Sign in with SuperGrok or X Premium+ for Grok, Grok Voice, and Imagine.</span>
+            </button>
+          </div>
+        </section>
+      }
+
+      @if (step() === 4 && intelligence() === 'local') {
         <section class="onboarding-step">
           <p class="overline">Local intelligence</p>
           <h1 id="onboarding-title">Ava needs model files to think.</h1>
@@ -127,7 +157,60 @@
         </section>
       }
 
-      @if (step() === 4) {
+      @if (step() === 4 && intelligence() === 'grok') {
+        <section class="onboarding-step">
+          <p class="overline">Grok</p>
+          <h1 id="onboarding-title">Sign in with Grok.</h1>
+          <p class="lead">
+            Use your SuperGrok or X Premium+ subscription. Ava will open xAI in your browser
+            and wait for you to approve access. An API key from console.x.ai also works.
+          </p>
+
+          @if (xaiDevice(); as device) {
+            <div class="device-code-card">
+              <span>Enter this code if asked</span>
+              <strong>{{ device.userCode }}</strong>
+              <span>{{ device.verificationUri }}</span>
+              <button type="button" class="secondary-btn" (click)="openGrokVerification()">Open xAI sign-in</button>
+              <button type="button" class="ghost-link" (click)="cancelGrokLogin()">Cancel</button>
+            </div>
+          } @else if (xaiPending()) {
+            <div class="device-code-card">
+              <span>Contacting xAI…</span>
+              <strong>Waiting for Grok</strong>
+              <button type="button" class="ghost-link" (click)="cancelGrokLogin()">Cancel</button>
+            </div>
+          } @else if (xaiSignedIn()) {
+            <div class="download-panel grok-ready">
+              <strong>Connected</strong>
+              <span>Ava will use Grok for conversation, voice, and images. You can switch back to local later in Settings.</span>
+            </div>
+          } @else {
+            <div class="auth-actions">
+              <button type="button" class="continue-btn inline-btn" (click)="signInWithGrok()" [disabled]="xaiBusy()">
+                {{ xaiBusy() ? 'Starting…' : 'Continue with Grok' }}
+              </button>
+              @if (grokCliAvailable()) {
+                <button type="button" class="secondary-btn" (click)="importGrokCli()" [disabled]="xaiBusy()">
+                  Use Grok CLI login
+                </button>
+              }
+            </div>
+            <label class="field">
+              <span>Or paste an xAI API key</span>
+              <input type="password" [value]="apiKeyDraft()" (input)="onApiKeyInput($event)" placeholder="xai-…" />
+            </label>
+            <button type="button" class="secondary-btn" (click)="signInWithApiKey()" [disabled]="!apiKeyDraft().trim() || xaiBusy()">
+              Use API key
+            </button>
+          }
+          @if (xaiError()) {
+            <p class="fine-print grok-error">{{ xaiError() }}</p>
+          }
+        </section>
+      }
+
+      @if (step() === 5) {
         <section class="onboarding-step">
           <p class="overline">How you will use Ava</p>
           <h1 id="onboarding-title">Choose a starting feel.</h1>

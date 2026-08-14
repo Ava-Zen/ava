@@ -24,11 +24,20 @@ export async function mcpFetch(input: string, init?: RequestInit): Promise<Respo
 /** Open a URL in the user's default system browser. */
 export async function openExternal(url: string): Promise<void> {
   if (isTauri()) {
-    const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(url);
-    return;
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(url);
+      return;
+    } catch {
+      // Fall through to window.open if the opener plugin is unavailable.
+    }
   }
-  window.open(url, '_blank', 'noopener,noreferrer');
+  const opened = typeof window !== 'undefined'
+    ? window.open(url, '_blank', 'noopener,noreferrer')
+    : null;
+  if (!opened) {
+    throw new Error('Could not open the browser.');
+  }
 }
 
 /**

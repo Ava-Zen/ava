@@ -361,6 +361,72 @@ input:focus {
   opacity: 0.5;
 }
 
+.grok-status,
+.auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.grok-status {
+  justify-content: space-between;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(85, 199, 184, 0.12);
+  border: 1px solid rgba(85, 199, 184, 0.26);
+}
+
+.grok-status strong,
+.device-code-card strong {
+  display: block;
+}
+
+.device-code-card {
+  padding: 16px;
+  border-radius: 18px;
+  display: grid;
+  gap: 10px;
+  background: rgba(85, 199, 184, 0.12);
+  border: 1px solid rgba(85, 199, 184, 0.26);
+  margin-bottom: 14px;
+}
+
+.device-code-card strong {
+  font-size: 1.8rem;
+  letter-spacing: 0.12em;
+}
+
+.intelligence-toggle {
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 18px;
+  display: flex;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-bottom: 8px;
+}
+
+.intelligence-toggle button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 0 16px;
+  color: #f6f8fb;
+  background: transparent;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.intelligence-toggle button.active {
+  color: #06110f;
+  background: linear-gradient(135deg, #55c7b8, #bdd7a6);
+}
+
 /* Voice / TTS picker */
 .voice-list {
   display: grid;

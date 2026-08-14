@@ -231,6 +231,49 @@ span,
   grid-template-columns: repeat(3, 1fr);
 }
 
+.intelligence-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inline-btn {
+  min-width: 0;
+}
+
+.device-code-card,
+.grok-ready {
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(85, 199, 184, 0.32);
+  border-radius: 18px;
+  background: rgba(85, 199, 184, 0.12);
+}
+
+.device-code-card strong {
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  letter-spacing: 0.12em;
+}
+
+.ghost-link {
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  color: #9fcfc6;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.grok-error {
+  color: #ffb4c0;
+}
+
 .option-item {
   min-height: 142px;
   padding: 16px;
@@ -318,6 +361,7 @@ button:not(:disabled):hover {
 
   .capability-grid,
   .option-list,
+  .intelligence-options,
   .device-readiness,
   .device-grid {
     grid-template-columns: 1fr;

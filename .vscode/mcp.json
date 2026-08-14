@@ -3,7 +3,15 @@
   "servers": {
     "angular-cli": {
       "command": "npx",
-      "args": ["-y", "@angular/cli", "mcp"]
+      "args": [
+        "-y",
+        "@angular/cli",
+        "mcp"
+      ]
+    },
+    "ava": {
+      "type": "http",
+      "url": "http://127.0.0.1:7456"
     }
   }
 }

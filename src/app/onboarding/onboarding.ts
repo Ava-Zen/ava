@@ -1,6 +1,9 @@
 import { Component, ElementRef, EventEmitter, Output, ViewChild, computed, inject, signal } from '@angular/core';
 import { OnboardingService } from '../services/onboarding';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
+import { XaiAuthService } from '../services/xai/xai-auth';
+import { LlmService } from '../services/llm';
+import { TtsService } from '../services/tts';
 
 interface OnboardingOption {
   id: string;
@@ -17,6 +20,9 @@ interface OnboardingOption {
 export class Onboarding {
   private readonly onboarding = inject(OnboardingService);
   private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
+  private readonly xai = inject(XaiAuthService);
+  private readonly llm = inject(LlmService);
+  private readonly tts = inject(TtsService);
   private nameInputElement?: ElementRef<HTMLInputElement>;
 
   @Output() completed = new EventEmitter<void>();
@@ -29,15 +35,24 @@ export class Onboarding {
   protected readonly primaryUse = signal('Everyday companion');
   protected readonly preferredInput = signal<'voice' | 'text' | 'both'>('both');
   protected readonly downloadConsent = signal(false);
+  protected readonly intelligence = signal<'local' | 'grok'>('local');
+  protected readonly apiKeyDraft = signal('');
+  protected readonly xaiBusy = signal(false);
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
   protected readonly hardwareReadinessLabel = this.hardwareDiagnostics.readinessLabel;
   protected readonly hardwareReadinessDetails = this.hardwareDiagnostics.readinessDetails;
+  protected readonly xaiSignedIn = this.xai.signedIn;
+  protected readonly xaiError = this.xai.error;
+  protected readonly xaiPending = this.xai.loginPending;
+  protected readonly xaiDevice = this.xai.deviceLogin;
+  protected readonly grokCliAvailable = this.xai.grokCliAvailable;
 
-  protected readonly totalSteps = 5;
+  protected readonly totalSteps = 6;
   protected readonly progress = computed(() => `${((this.step() + 1) / this.totalSteps) * 100}%`);
   protected readonly canContinue = computed(() => {
     if (this.step() === 1) return this.name().trim().length > 0;
-    if (this.step() === 3) return this.downloadConsent();
+    if (this.step() === 4 && this.intelligence() === 'local') return this.downloadConsent();
+    if (this.step() === 4 && this.intelligence() === 'grok') return this.xai.signedIn();
     return true;
   });
 
@@ -94,6 +109,60 @@ export class Onboarding {
     this.downloadConsent.set(!!input?.checked);
   }
 
+  protected setIntelligence(value: 'local' | 'grok'): void {
+    this.intelligence.set(value);
+  }
+
+  protected onApiKeyInput(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    this.apiKeyDraft.set(input?.value ?? '');
+  }
+
+  protected async signInWithGrok(): Promise<void> {
+    if (this.xai.loginPending()) return;
+    this.xaiBusy.set(true);
+    try {
+      const login = this.xai.loginWithGrok();
+      this.xaiBusy.set(false);
+      await login;
+    } catch {
+      // error signal is set by the auth service
+    } finally {
+      this.xaiBusy.set(false);
+    }
+  }
+
+  protected async signInWithApiKey(): Promise<void> {
+    this.xaiBusy.set(true);
+    try {
+      await this.xai.loginWithApiKey(this.apiKeyDraft());
+      this.apiKeyDraft.set('');
+    } catch (err) {
+      this.xai.error.set(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.xaiBusy.set(false);
+    }
+  }
+
+  protected async importGrokCli(): Promise<void> {
+    this.xaiBusy.set(true);
+    try {
+      const ok = await this.xai.importGrokCliAuth();
+      if (!ok) this.xai.error.set('No Grok CLI login was found on this computer.');
+    } finally {
+      this.xaiBusy.set(false);
+    }
+  }
+
+  protected cancelGrokLogin(): void {
+    this.xaiBusy.set(false);
+    this.xai.cancelLogin();
+  }
+
+  protected openGrokVerification(): void {
+    void this.xai.openVerificationPage();
+  }
+
   protected formatMemory(memoryGb: number | undefined): string {
     return memoryGb ? `${memoryGb} GB reported` : 'Not reported';
   }
@@ -105,12 +174,20 @@ export class Onboarding {
       return;
     }
 
+    if (this.intelligence() === 'grok' && this.xai.signedIn()) {
+      this.llm.setIntelligenceMode('grok');
+      this.tts.preferGrokVoice();
+    } else {
+      this.llm.setIntelligenceMode('local');
+    }
+
     this.onboarding.complete({
       name: this.name(),
       pronunciation: this.pronunciation(),
       primaryUse: this.primaryUse(),
       preferredInput: this.preferredInput(),
-      modelDownloadConsent: this.downloadConsent(),
+      modelDownloadConsent: this.intelligence() === 'local' ? this.downloadConsent() : true,
+      intelligenceMode: this.intelligence(),
     });
     this.completed.emit();
   }

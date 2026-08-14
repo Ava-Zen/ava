@@ -1,7 +1,8 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { detectDeviceCapability, DeviceTier } from './device-capability';
 import {
   ChatBackend,
+  ChatResult,
   ChatTurn,
   LlmModelOption,
   resolveChatBackend,
@@ -12,9 +13,12 @@ import {
   NATIVE_DEFAULT_MODELS,
   NATIVE_FALLBACK_MODEL,
 } from './llm/native-llama-backend';
+import { GrokChatBackend, GROK_CHAT_MODELS, GROK_DEFAULT_MODEL, GROK_SYSTEM_PROMPT } from './llm/grok-chat-backend';
+import { XaiAuthService } from './xai/xai-auth';
 
 // Re-exported for existing consumers (AgentsService, components, specs).
-export type { ChatTurn, LlmModelOption } from './llm/chat-backend';
+export type { ChatResult, ChatTurn, GeneratedImage, LlmModelOption } from './llm/chat-backend';
+export type IntelligenceMode = 'local' | 'grok';
 
 /**
  * Catalogue of models used for *instant* spoken replies.
@@ -95,6 +99,8 @@ const SYSTEM_PROMPT =
   'sentences — unless the user explicitly asks for detail. Never use markdown, ' +
   'lists or emojis, because your reply will be spoken aloud.';
 
+const INTELLIGENCE_KEY = 'ava-intelligence-mode';
+
 /** Conversation options for the in-WebView (transformers.js) engine. */
 const WEB_CHAT_MODELS: LlmModelOption[] = [
   QWEN_0_6B,
@@ -109,17 +115,23 @@ const WEB_CHAT_MODELS: LlmModelOption[] = [
 export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
   private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
+  private readonly xai = inject(XaiAuthService);
 
   /** True when the Tauri host provides the native llama.cpp engine. */
   private readonly nativeEngine = signal(false);
+  readonly intelligenceMode = signal<IntelligenceMode>(this.loadIntelligenceMode());
+  readonly isCloudExclusive = computed(
+    () => this.intelligenceMode() === 'grok' && this.xai.signedIn()
+  );
 
   /**
-   * Available conversation options for the active engine: GGUF builds when the
-   * native engine is present, ONNX builds for the in-WebView engine.
+   * Available conversation options for the active engine: Grok models when the
+   * user chose cloud, otherwise GGUF (native) or ONNX (WebView).
    */
-  readonly models = computed<LlmModelOption[]>(() =>
-    this.nativeEngine() ? NATIVE_CHAT_MODELS : WEB_CHAT_MODELS
-  );
+  readonly models = computed<LlmModelOption[]>(() => {
+    if (this.isCloudExclusive()) return GROK_CHAT_MODELS;
+    return this.nativeEngine() ? NATIVE_CHAT_MODELS : WEB_CHAT_MODELS;
+  });
 
   /** The chosen model id (auto-selected by hardware, user-overridable). */
   private readonly modelId = signal<string>(this.loadStoredModel());
@@ -142,6 +154,9 @@ export class LlmService {
   private loadedDevice: string | null = null;
 
   constructor() {
+    if (this.intelligenceMode() === 'grok' && !this.xai.signedIn()) {
+      this.intelligenceMode.set('local');
+    }
     // Probe the host early so Settings shows the right catalogue before the
     // first generation. Cheap: one IPC call, no model download.
     void NativeLlamaBackend.detect().then(backend => {
@@ -149,8 +164,40 @@ export class LlmService {
     });
   }
 
+  setIntelligenceMode(mode: IntelligenceMode): void {
+    if (mode === 'grok' && !this.xai.signedIn()) return;
+    this.intelligenceMode.set(mode);
+    try {
+      localStorage.setItem(INTELLIGENCE_KEY, mode);
+    } catch {
+      // ignore
+    }
+    if (mode === 'grok') {
+      this.modelId.set(GROK_DEFAULT_MODEL.id);
+      try {
+        localStorage.setItem(this.STORAGE_KEY, GROK_DEFAULT_MODEL.id);
+      } catch {
+        // ignore
+      }
+    } else if (GROK_CHAT_MODELS.some(m => m.id === this.modelId())) {
+      try {
+        localStorage.removeItem(this.STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      this.modelId.set(this.nativeEngine() ? NATIVE_DEFAULT_MODELS.medium.id : DEFAULT_MODELS.medium.id);
+    }
+    this.resetBackend();
+  }
+
   /** Picks the best default model for this device unless the user has overridden it. */
   async autoSelectModel(): Promise<void> {
+    if (this.isCloudExclusive()) {
+      if (!this.models().some(m => m.id === this.modelId())) {
+        this.modelId.set(GROK_DEFAULT_MODEL.id);
+      }
+      return;
+    }
     if (this.hasUserOverride()) return;
     const { tier } = await detectDeviceCapability();
     const defaults = this.nativeEngine() ? NATIVE_DEFAULT_MODELS : DEFAULT_MODELS;
@@ -167,7 +214,10 @@ export class LlmService {
     } catch {
       // ignore persistence errors
     }
-    // Force a reload on next generate.
+    this.resetBackend();
+  }
+
+  private resetBackend(): void {
     this.backend?.dispose();
     this.backend = null;
     this.loadPromise = null;
@@ -207,10 +257,12 @@ export class LlmService {
     this.isLoading.set(true);
     this.isReady.set(false);
     this.activeModel.set(null);
-    this.downloadStatus.set('Preparing model download…');
+    this.downloadStatus.set(this.isCloudExclusive() ? 'Connecting to Grok…' : 'Preparing model download…');
 
     try {
-      const backend = await resolveChatBackend();
+      const backend = this.isCloudExclusive()
+        ? new GrokChatBackend(this.xai)
+        : await resolveChatBackend();
       this.nativeEngine.set(backend.kind === 'native-llama');
       await this.autoSelectModel();
       const preferredModel = this.selectedModel();
@@ -246,8 +298,11 @@ export class LlmService {
    * Generates a spoken-style reply for the given user text and prior history.
    * History should be the recent conversation turns (excluding the system prompt).
    */
-  async generate(userText: string, history: ChatTurn[] = []): Promise<string> {
-    this.thinkingTrace.set(['Preparing context', 'Building local prompt']);
+  async generate(userText: string, history: ChatTurn[] = []): Promise<ChatResult> {
+    this.thinkingTrace.set([
+      'Preparing context',
+      this.isCloudExclusive() ? 'Talking to Grok' : 'Building local prompt',
+    ]);
 
     try {
       const backend = await this.ensureLoaded();
@@ -259,24 +314,26 @@ export class LlmService {
       const isWebQwen =
         backend.kind === 'transformers-js' &&
         /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
+      const system = backend.kind === 'grok' ? GROK_SYSTEM_PROMPT : SYSTEM_PROMPT;
       const messages: ChatTurn[] = [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: system },
         ...history,
         { role: 'user', content: isWebQwen ? `${userText} /no_think` : userText },
       ];
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply']);
       const raw = await backend.generate(messages, {
-        maxNewTokens: 192,
+        maxNewTokens: backend.kind === 'grok' ? 320 : 192,
         doSample: true,
         temperature: 0.7,
         topP: 0.9,
+        modelId: this.selectedModel().id,
       });
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
-      const reply = this.sanitizeModelOutput(raw);
+      const reply = this.sanitizeModelOutput(raw.text);
       this.thinkingTrace.set([]);
-      return reply;
+      return { text: reply, images: raw.images };
     } catch (e) {
       if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
         console.warn('[LLM] Accelerator generation failed; CPU fallback is available in Settings', e);
@@ -285,6 +342,21 @@ export class LlmService {
       this.thinkingTrace.set([]);
       throw e;
     }
+  }
+
+  /** Agent / tool loops that already built a full message list. */
+  async generateMessages(
+    messages: ChatTurn[],
+    options?: { maxNewTokens?: number; temperature?: number; topP?: number },
+  ): Promise<ChatResult> {
+    const backend = await this.ensureLoaded();
+    return backend.generate(messages, {
+      maxNewTokens: options?.maxNewTokens ?? 1024,
+      doSample: true,
+      temperature: options?.temperature ?? 0.6,
+      topP: options?.topP ?? 0.95,
+      modelId: this.selectedModel().id,
+    });
   }
 
   private isRecoverableAcceleratorRuntimeError(error: unknown): boolean {
@@ -310,6 +382,14 @@ export class LlmService {
     }
     if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
       return "Ava's hardware acceleration hit a snag. Switch to CPU in Settings → Conversation model and try again.";
+    }
+    if (/sign in with grok|session expired|updated sign-in/i.test(message)) {
+      return message.includes('updated sign-in')
+        ? message
+        : 'Sign in with Grok in Settings to keep using cloud models.';
+    }
+    if (/cannot use the API|rate-limiting/i.test(message)) {
+      return message;
     }
     return null;
   }
@@ -344,11 +424,20 @@ export class LlmService {
       if (stored === 'onnx-community/gemma-3-1b-it-ONNX') return GEMMA_1B.id;
       if (stored === 'onnx-community/gemma-3-270m-it-ONNX') return QWEN_0_6B.id;
       if (stored === UNCENSORED_CHAT_MODEL.repoId) return UNCENSORED_CHAT_MODEL.id;
+      if (stored && GROK_CHAT_MODELS.some(m => m.id === stored)) return stored;
       if (stored && this.modelExists(stored)) return stored;
     } catch {
       // ignore
     }
     return GEMMA_1B.id;
+  }
+
+  private loadIntelligenceMode(): IntelligenceMode {
+    try {
+      return localStorage.getItem(INTELLIGENCE_KEY) === 'grok' ? 'grok' : 'local';
+    } catch {
+      return 'local';
+    }
   }
 
   private modelExists(id: string): boolean {

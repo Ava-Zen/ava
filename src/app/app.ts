@@ -9,11 +9,13 @@ import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
-import { LlmService, ChatTurn } from './services/llm';
+import { LlmService, ChatTurn, GeneratedImage } from './services/llm';
 import { AgentsService, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
+import { XaiClient } from './services/xai/xai-client';
+import { XaiAuthService } from './services/xai/xai-auth';
 
 interface Message {
   role: 'user' | 'ava';
@@ -29,6 +31,10 @@ interface Message {
   };
   /** Original user prompt, set on failed/empty replies so they can be retried. */
   retryFor?: string;
+  /** Imagine images returned by Grok. */
+  images?: GeneratedImage[];
+  /** Spoken line that arrived through the local MCP voice server. */
+  via?: 'mcp';
 }
 
 interface QuickPrompt {
@@ -117,6 +123,8 @@ export class App {
   private readonly mcp = inject(McpService);
   private readonly onboarding = inject(OnboardingService);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly xai = inject(XaiAuthService);
+  private readonly xaiClient = new XaiClient(this.xai);
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
@@ -130,7 +138,6 @@ export class App {
   protected showSettings = signal(false);
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
   protected readonly userName = this.onboarding.userName;
-  private preloadsStarted = false;
   private readonly MOONSHINE_BASE_MODEL = 'onnx-community/moonshine-base-ONNX';
   private readonly MOONSHINE_TINY_MODEL = 'onnx-community/moonshine-tiny-ONNX';
 
@@ -143,6 +150,7 @@ export class App {
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
   protected readonly voiceBackendInfo = computed(() => {
     if (this.tts.selectedVoiceId() === 'system') return 'System speechSynthesis';
+    if (this.tts.selectedVoiceId() === 'grok') return `Grok Voice · ${this.tts.selectedGrokVoice().name}`;
     return this.kokoroLoadInfo() || 'Kokoro selected; loads on first use';
   });
   protected readonly manualInputEnabled = signal(false);
@@ -151,6 +159,7 @@ export class App {
   protected readonly modelMenuOpen = signal(false);
   protected readonly conversationModels = this.llm.models;
   protected readonly selectedConversationModelId = computed(() => this.llm.selectedModel().id);
+  protected readonly cloudExclusive = this.llm.isCloudExclusive;
   protected readonly manualPrompt = signal('');
   protected readonly composerNotice = signal('');
   protected readonly isGeneratingAudioFile = signal(false);
@@ -175,9 +184,12 @@ export class App {
     if (this.hasActiveAgents()) return 'Agent working';
     if (this.status() === 'speaking') return 'Speaking';
     if (this.status() === 'listening') return 'Listening';
-    return 'Local first';
+    return this.llm.isCloudExclusive() ? 'Grok cloud' : 'Local first';
   });
-  protected readonly activityBadgeBusy = computed(() => this.activityBadgeLabel() !== 'Local first');
+  protected readonly activityBadgeBusy = computed(() => {
+    const label = this.activityBadgeLabel();
+    return label !== 'Local first' && label !== 'Grok cloud';
+  });
   /** True while any local model is downloading or loading into memory. */
   protected readonly activityBadgeSpinning = computed(() =>
     this.isModelLoading() ||
@@ -206,16 +218,8 @@ export class App {
   constructor() {
     this.synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
     this.configureTransformersRuntime();
-    this.preloadModel().catch(() => {});
-    this.preloadKokoro().catch(() => {});
-    this.preloadLlm().catch(() => {});
     this.mcp.connectAll().catch(() => {});
     this.loadMessagesFromStorage();
-
-    effect(() => {
-      if (!this.onboarding.completed() || this.preloadsStarted) return;
-      void this.preloadRequiredModels();
-    });
 
     // Auto-scroll chat when new messages arrive
     effect(() => {
@@ -238,7 +242,8 @@ export class App {
         const { id, text, voice } = event.payload;
         let ok = false;
         try {
-          if (voice) this.tts.setKokoroVoice(voice);
+          this.applyMcpVoice(voice);
+          this.recordMcpSpeech(text);
           await this.speak(text);
           ok = true;
         } catch (e) {
@@ -250,9 +255,40 @@ export class App {
           // backend not reachable (e.g. browser-only) — ignore
         }
       });
+      await listen('mcp-tts-stop', () => {
+        this.stopSpeaking();
+      });
     } catch {
       // Tauri not available (plain browser) — MCP bridge stays inert.
     }
+  }
+
+  private recordMcpSpeech(text: string) {
+    const spoken = text.trim();
+    const gardenId = this.currentGarden()?.id;
+    if (!spoken || !gardenId) return;
+
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    currentMsgs.push({
+      role: 'ava',
+      text: spoken,
+      timestamp: new Date(),
+      via: 'mcp',
+    });
+    this.setGardenMessages(gardenId, currentMsgs);
+    this.scrollToBottom();
+  }
+
+  private applyMcpVoice(voice?: string) {
+    if (!voice) return;
+    const id = voice.trim();
+    if (!id) return;
+    const grokIds = this.tts.grokVoiceCatalog().map(v => v.id.toLowerCase());
+    if (grokIds.includes(id.toLowerCase()) || (this.xai.signedIn() && !id.includes('_'))) {
+      if (this.xai.signedIn()) this.tts.setGrokVoice(id);
+      return;
+    }
+    this.tts.setKokoroVoice(id);
   }
 
   protected selectGarden(id: string) {
@@ -317,8 +353,6 @@ export class App {
     this.modelMenuOpen.set(false);
     if (id === this.selectedConversationModelId()) return;
     this.llm.setModel(id);
-    // Warm the new model in the background so the next reply is fast.
-    void this.llm.ensureLoaded().catch(() => {});
   }
 
   protected closeSettings() {
@@ -335,7 +369,9 @@ export class App {
     this.disableVoiceChannel();
     this.stopAudioPreview();
     this.stopCurrentAudio();
-    this.preloadsStarted = false;
+    this.xai.cancelLogin();
+    this.xai.logout();
+    this.llm.setIntelligenceMode('local');
 
     await this.clearBrowserDatabases();
     await this.clearBrowserCaches();
@@ -346,7 +382,19 @@ export class App {
       console.warn('Native cache reset failed', e);
     }
 
+    const persistKeys = [
+      'ava-xai-auth',
+      'ava-intelligence-mode',
+      'ava-llm-model',
+      'ava-llm-uncensored',
+      'ava-tts-config',
+      'ava-agent-model',
+      'ava-onboarding-complete',
+      'ava-user-profile',
+      'ava-messages-by-garden',
+    ];
     try {
+      for (const key of persistKeys) localStorage.removeItem(key);
       localStorage.clear();
       sessionStorage.clear();
     } catch {
@@ -726,35 +774,6 @@ export class App {
     }
   }
 
-  /**
-   * Warms up the models Ava needs after the user has consented during
-   * onboarding. Loads are intentionally sequential to avoid memory spikes while
-   * large ONNX sessions are being created. Background agent models stay lazy
-   * because they are only needed for explicit agent tasks.
-   */
-  private async preloadRequiredModels() {
-    if (this.preloadsStarted || typeof window === 'undefined') return;
-    this.preloadsStarted = true;
-
-    await this.preloadLlm();
-    await this.preloadModel();
-    await this.preloadKokoro();
-  }
-
-  /**
-   * Warms up the Gemma instant-reply model in the background so the first
-   * spoken answer is fast.
-   */
-  private async preloadLlm() {
-    if (typeof window === 'undefined') return;
-    try {
-      await this.llm.autoSelectModel();
-      await this.llm.ensureLoaded();
-    } catch (e) {
-      console.warn('Gemma preload failed; will retry on first use', e);
-    }
-  }
-
   protected readonly isLoadingModel = computed(() => this.isModelLoading());
   protected readonly speechModelName = signal<string>('Moonshine Base');
   protected modelLoadInfo = signal<string>('');  // e.g. "webgpu/q4" or "wasm/q8"
@@ -971,7 +990,15 @@ export class App {
     }
   }
 
+  private usesGrokSpeech(): boolean {
+    return this.llm.isCloudExclusive() && this.xai.signedIn();
+  }
+
   private async transcribeWithRecovery(audio: Float32Array, transcriber = this.transcriber): Promise<any> {
+    if (this.usesGrokSpeech()) {
+      const text = await this.xaiClient.transcribe(audio, this.SAMPLE_RATE);
+      return { text };
+    }
     try {
       return await transcriber(audio);
     } catch (e) {
@@ -1028,7 +1055,12 @@ export class App {
       this.processor.connect(gain);
       gain.connect(this.audioContext.destination);
 
-      await this.ensureTranscriberLoaded();
+      if (!this.usesGrokSpeech()) {
+        await this.ensureTranscriberLoaded();
+      } else {
+        this.speechModelName.set('Grok Voice');
+        this.modelLoadInfo.set('cloud');
+      }
 
       this.isListening.set(true);
       this.status.set('listening');
@@ -1182,6 +1214,7 @@ export class App {
 
   private async updateLiveTranscript() {
     try {
+      if (this.usesGrokSpeech()) return;
       if (this.isLiveTranscriptInProgress || this.isCommitInProgress) return;
       if (this.moonshineBuffer.length < this.MIN_SPEECH_SAMPLES) return;
 
@@ -1285,7 +1318,8 @@ export class App {
     this.isListening.set(false);
 
     // Attempt to commit any remaining speech
-    const willCommit = commitPending && wasListening && !!this.transcriber && this.speechSamples >= this.MIN_SPEECH_SAMPLES;
+    const canTranscribe = !!this.transcriber || this.usesGrokSpeech();
+    const willCommit = commitPending && wasListening && canTranscribe && this.speechSamples >= this.MIN_SPEECH_SAMPLES;
     if (willCommit) {
       // fire and forget
       this.commitCurrentUtterance().catch(() => {});
@@ -1471,9 +1505,15 @@ export class App {
   }
 
   /** Speaks a final reply, stores it, and returns to idle when speech finishes. */
-  private async respond(gardenId: string, response: string, debug?: Message['debug'], retryFor?: string) {
+  private async respond(
+    gardenId: string,
+    response: string,
+    debug?: Message['debug'],
+    retryFor?: string,
+    images?: GeneratedImage[],
+  ) {
     const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
-    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor };
+    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor, images };
     currentMsgs.push(avaMsg);
     this.setGardenMessages(gardenId, currentMsgs);
 
@@ -1496,13 +1536,20 @@ export class App {
     try {
       const history = this.buildChatHistory(gardenId);
       const startedAt = performance.now();
-      const reply = (await this.llm.generate(text, history)).trim();
+      const result = await this.llm.generate(text, history);
+      const reply = result.text.trim();
       const debug: Message['debug'] = {
-        model: this.llm.activeModel()?.name ?? 'local model',
+        model: this.llm.activeModel()?.name ?? (this.llm.isCloudExclusive() ? 'Grok' : 'local model'),
         durationMs: performance.now() - startedAt,
       };
-      if (reply) {
-        this.respond(gardenId, reply, debug);
+      if (reply || result.images?.length) {
+        this.respond(
+          gardenId,
+          reply || 'I made that for you.',
+          debug,
+          undefined,
+          result.images,
+        );
       } else {
         this.respond(gardenId, 'I am not sure how to answer that just yet.', debug, text);
       }
@@ -1591,6 +1638,11 @@ export class App {
     this.stopCurrentAudio();
     if (this.synth) this.synth.cancel();
 
+    if (this.tts.selectedVoiceId() === 'grok') {
+      const handled = await this.speakWithGrok(text, id);
+      if (handled || this.speechGen !== id) return;
+    }
+
     if (this.tts.selectedVoiceId() === 'kokoro') {
       const handled = await this.speakWithKokoro(text, id);
       if (handled || this.speechGen !== id) return;
@@ -1598,6 +1650,39 @@ export class App {
 
     if (this.speechGen !== id) return;
     await this.speakWithSystem(text, id);
+  }
+
+  private async speakWithGrok(text: string, id: number): Promise<boolean> {
+    const spoken = markdownToPlainText(text);
+    const chunks = splitIntoSpeechChunks(spoken);
+    if (chunks.length === 0) return true;
+
+    try {
+      let pending = this.tts.synthesizeGrok(chunks[0]);
+      for (let i = 0; i < chunks.length; i++) {
+        if (this.speechGen !== id) return true;
+        let blob: Blob;
+        try {
+          blob = await pending;
+        } catch (e) {
+          if (i === 0) return false;
+          console.warn('Grok TTS chunk failed', e);
+          break;
+        }
+        pending = i + 1 < chunks.length ? this.tts.synthesizeGrok(chunks[i + 1]) : Promise.resolve(new Blob());
+        if (this.speechGen !== id) return true;
+        const ok = await this.playChunk(blob, id);
+        if (!ok) {
+          if (this.speechGen !== id) return true;
+          if (i === 0) return false;
+          break;
+        }
+      }
+      return true;
+    } catch (e) {
+      console.warn('Grok TTS failed, falling back', e);
+      return false;
+    }
   }
 
   /**
@@ -1672,10 +1757,11 @@ export class App {
     try {
       this.updateAvaExportMessage(taskId, `Preparing ${sourceName} for audio export...`);
 
-      if (!this.kokoro) {
+      const useGrok = this.tts.selectedVoiceId() === 'grok' && this.xai.signedIn();
+      if (!useGrok && !this.kokoro) {
         await this.preloadKokoro().catch(() => {});
       }
-      if (!this.kokoro) {
+      if (!useGrok && !this.kokoro) {
         this.markAudioExportTask(taskId, 'failed');
         this.updateAvaExportMessage(taskId, `I could not load Ava's voice model for ${sourceName}.`);
         return;
@@ -1694,6 +1780,31 @@ export class App {
         ...tasks,
         [taskId]: { ...tasks[taskId], total: chunks.length }
       }));
+
+      if (useGrok) {
+        const parts: Blob[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          this.throwIfAudioExportAborted(controller.signal);
+          this.audioExportTasks.update(tasks => ({
+            ...tasks,
+            [taskId]: { ...tasks[taskId], current: i + 1 }
+          }));
+          this.updateAvaExportMessage(
+            taskId,
+            `Generating audio from ${sourceName} (${i + 1}/${chunks.length})...`
+          );
+          parts.push(await this.tts.synthesizeGrok(chunks[i]));
+        }
+        const filename = `${this.stripFileExtension(sourceName)}-ava.mp3`;
+        const download = this.createAudioDownload(new Blob(parts, { type: 'audio/mpeg' }), filename);
+        this.markAudioExportTask(taskId, 'complete');
+        this.updateAvaExportMessage(
+          taskId,
+          `I transcribed ${sourceName} into Ava audio. Use the button below to download ${filename}.`,
+          download.id
+        );
+        return;
+      }
 
       const voice = this.tts.selectedKokoroVoiceId();
       const audioChunks: Float32Array[] = [];
@@ -2037,6 +2148,11 @@ export class App {
 
   /** Plays a pre-generated sample for a Kokoro speaker when it is selected. */
   protected async previewVoice(voiceId: string) {
+    if (this.tts.selectedVoiceId() === 'grok' || this.tts.grokVoiceCatalog().some(v => v.id === voiceId)) {
+      const name = this.tts.grokVoiceCatalog().find(v => v.id === voiceId)?.name ?? 'Ava';
+      await this.speak(`Hi, I am ${name}.`);
+      return;
+    }
     const previewUrl = this.tts.getKokoroPreviewAudioUrl(voiceId);
     const resolvedUrl = new URL(previewUrl, window.location.href).toString();
 
