@@ -2,8 +2,13 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { pipeline } from '@huggingface/transformers';
 import { detectDeviceCapability, DeviceTier } from './device-capability';
 import { ChatTurn, LlmModelOption, LlmService } from './llm';
+import { CopilotAuthService, inferCopilotAgent } from './copilot/copilot-auth';
+import { CopilotRuntimeService } from './copilot/copilot-client';
+import { GardensService } from './gardens';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
+export type AgentRuntime = 'local' | 'copilot';
+export type AgentEngine = 'local' | 'copilot';
 
 /** A tool the agent may call while working on a task. */
 export interface AgentToolDef {
@@ -23,10 +28,19 @@ export interface AgentTask {
   /** Natural-language instruction the user gave for this agent. */
   prompt: string;
   status: AgentTaskStatus;
+  engine: AgentEngine;
   result?: string;
   error?: string;
+  progress?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface AgentRunOptions {
+  tools?: AgentToolDef[];
+  exec?: AgentToolExecutor;
+  engine?: AgentEngine;
+  agent?: string;
 }
 
 /**
@@ -83,10 +97,16 @@ const AGENT_SYSTEM_PROMPT =
   'thoroughly. Think step by step, then provide a clear, well-structured result. ' +
   'You may use detail and structure here since this output is read, not spoken.';
 
+const RUNTIME_KEY = 'ava-agent-runtime';
+const COPILOT_MODEL_KEY = 'ava-copilot-model';
+
 @Injectable({ providedIn: 'root' })
 export class AgentsService {
   private readonly STORAGE_KEY = 'ava-agent-model';
   private readonly llm = inject(LlmService);
+  private readonly copilotAuth = inject(CopilotAuthService);
+  private readonly copilot = inject(CopilotRuntimeService);
+  private readonly gardens = inject(GardensService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
@@ -96,9 +116,16 @@ export class AgentsService {
   ];
 
   private readonly modelId = signal<string>(this.loadStoredModel());
+  readonly runtime = signal<AgentRuntime>(this.loadRuntime());
+  readonly workspace = computed(() => this.gardens.currentGarden()?.workspace ?? '');
+  readonly allowWrites = computed(() => this.gardens.currentGarden()?.allowLocalTools === true);
+  readonly copilotModel = signal<string>(this.loadCopilotModel());
 
   readonly selectedModel = computed(
     () => this.models.find(m => m.id === this.modelId()) ?? this.models[0]
+  );
+  readonly usesCopilot = computed(
+    () => this.runtime() === 'copilot' && this.copilotAuth.signedIn()
   );
 
   readonly isLoading = signal(false);
@@ -127,6 +154,34 @@ export class AgentsService {
     if (this.hasUserOverride()) return;
     const { tier } = await detectDeviceCapability();
     this.modelId.set(QWEN_MODELS[tier].id);
+  }
+
+  setRuntime(runtime: AgentRuntime): void {
+    if (runtime === 'copilot' && !this.copilotAuth.signedIn()) return;
+    this.runtime.set(runtime);
+    try {
+      localStorage.setItem(RUNTIME_KEY, runtime);
+    } catch {
+      // ignore
+    }
+  }
+
+  setWorkspace(path: string): void {
+    this.gardens.setCurrentWorkspace(path);
+  }
+
+  setAllowWrites(allow: boolean): void {
+    this.gardens.setCurrentAllowLocalTools(allow);
+  }
+
+  setCopilotModel(id: string): void {
+    const model = id.trim() || 'auto';
+    this.copilotModel.set(model);
+    try {
+      localStorage.setItem(COPILOT_MODEL_KEY, model);
+    } catch {
+      // ignore
+    }
   }
 
   setModel(id: string): void {
@@ -168,17 +223,23 @@ export class AgentsService {
    * Optionally provide `tools` plus an `exec` callback so the agent can call
    * MCP tools while working on the task.
    */
-  runTask(prompt: string, tools?: AgentToolDef[], exec?: AgentToolExecutor): string {
+  runTask(prompt: string, toolsOrOptions?: AgentToolDef[] | AgentRunOptions, exec?: AgentToolExecutor): string {
+    const options = normalizeRunOptions(toolsOrOptions, exec);
+    const engine = options.engine ?? (this.usesCopilot() ? 'copilot' : 'local');
     const task: AgentTask = {
       id: this.generateId(),
       prompt,
       status: 'queued',
+      engine,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     this.tasks.update(list => [...list, task]);
-    if (tools && tools.length && exec) {
-      this.toolContext.set(task.id, { tools, exec });
+    if (engine === 'local' && options.tools?.length && options.exec) {
+      this.toolContext.set(task.id, { tools: options.tools, exec: options.exec });
+    }
+    if (options.agent) {
+      this.agentByTask.set(task.id, options.agent);
     }
 
     // Chain onto the queue so tasks execute one at a time.
@@ -186,28 +247,65 @@ export class AgentsService {
     return task.id;
   }
 
+  private readonly agentByTask = new Map<string, string>();
+
   private async execute(taskId: string): Promise<void> {
     this.patchTask(taskId, { status: 'running' });
     try {
       const task = this.tasks().find(t => t.id === taskId);
       if (!task) return;
-      const ctx = this.toolContext.get(taskId);
-      const result = ctx
-        ? await this.generateWithTools(task.prompt, ctx.tools, ctx.exec)
-        : await this.generate(task.prompt);
-      this.patchTask(taskId, { status: 'done', result });
+      const result = task.engine === 'copilot'
+        ? await this.generateWithCopilot(task.prompt, this.agentByTask.get(taskId), taskId)
+        : await this.generateLocal(task);
+      this.patchTask(taskId, { status: 'done', result, progress: undefined });
     } catch (err: any) {
-      console.error('[Qwen agent] task failed', err);
+      console.error('[agent] task failed', err);
       this.patchTask(taskId, {
         status: 'error',
         error: this.friendlyError(err) ?? err?.message ?? 'Agent task failed.',
+        progress: undefined,
       });
     } finally {
       this.toolContext.delete(taskId);
+      this.agentByTask.delete(taskId);
     }
   }
 
+  private async generateLocal(task: AgentTask): Promise<string> {
+    const ctx = this.toolContext.get(task.id);
+    return ctx
+      ? await this.generateWithTools(task.prompt, ctx.tools, ctx.exec)
+      : await this.generate(task.prompt);
+  }
+
+  private async generateWithCopilot(prompt: string, agent: string | undefined, taskId: string): Promise<string> {
+    this.patchTask(taskId, { progress: 'Starting GitHub Copilot…' });
+    return this.copilot.runTask({
+      prompt,
+      agent: agent ?? inferCopilotAgent(prompt),
+      model: this.copilotModel(),
+      workspace: this.workspace(),
+      allowWrites: this.allowWrites(),
+      allowLocalTools: this.allowWrites(),
+      onEvent: event => {
+        if (event.text) this.patchTask(taskId, { progress: event.text });
+      },
+    });
+  }
+
   async ensureLoaded(): Promise<any> {
+    if (this.usesCopilot()) {
+      this.isReady.set(true);
+      this.loadInfo.set('GitHub Copilot');
+      this.activeModel.set({
+        id: 'github-copilot',
+        name: 'GitHub Copilot',
+        size: 'Cloud',
+        tier: 'high',
+        provider: 'copilot',
+      });
+      return null;
+    }
     if (this.llm.isCloudExclusive()) {
       this.isReady.set(true);
       this.loadInfo.set('Grok cloud');
@@ -336,6 +434,10 @@ export class AgentsService {
       { role: 'user', content: prompt },
     ];
 
+    if (this.usesCopilot()) {
+      return this.generateWithCopilot(prompt, inferCopilotAgent(prompt), 'adhoc');
+    }
+
     if (this.llm.isCloudExclusive()) {
       const result = await this.llm.generateMessages(messages, { maxNewTokens: 1024 });
       return result.text.trim();
@@ -401,6 +503,9 @@ export class AgentsService {
     }
     if (/WebGPU|WebNN|OrtRun|GPU|NPU|device lost/i.test(message)) {
       return 'The agent hit a hardware acceleration snag. Switch to CPU in Settings and try again.';
+    }
+    if (/sign in with github copilot|copilot is not available|could not start copilot|desktop app/i.test(message)) {
+      return message;
     }
     return null;
   }
@@ -599,7 +704,34 @@ export class AgentsService {
     }
   }
 
+  private loadRuntime(): AgentRuntime {
+    try {
+      return localStorage.getItem(RUNTIME_KEY) === 'copilot' ? 'copilot' : 'local';
+    } catch {
+      return 'local';
+    }
+  }
+
+  private loadCopilotModel(): string {
+    try {
+      return localStorage.getItem(COPILOT_MODEL_KEY) || 'auto';
+    } catch {
+      return 'auto';
+    }
+  }
+
   private generateId(): string {
     return `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
+}
+
+function normalizeRunOptions(
+  toolsOrOptions?: AgentToolDef[] | AgentRunOptions,
+  exec?: AgentToolExecutor,
+): AgentRunOptions {
+  if (!toolsOrOptions) return {};
+  if (Array.isArray(toolsOrOptions)) {
+    return { tools: toolsOrOptions, exec };
+  }
+  return toolsOrOptions;
 }

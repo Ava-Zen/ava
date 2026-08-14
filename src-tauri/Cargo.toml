@@ -6,7 +6,7 @@ authors = ["Ava-Zen"]
 license = "MIT OR Apache-2.0"
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.94.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,6 +29,11 @@ tauri-plugin-deep-link = "2"
 tiny_http = "0.12"
 llama-cpp-2 = { version = "0.1", optional = true }
 encoding_rs = { version = "0.8", optional = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+github-copilot-sdk = "1.0"
+tokio = { version = "1", features = ["macros", "time", "sync"] }
+rfd = "0.15"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

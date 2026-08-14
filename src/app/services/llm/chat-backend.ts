@@ -34,7 +34,7 @@ export interface LlmModelOption {
   /** GGUF build for the native llama.cpp engine (Tauri builds only). */
   gguf?: GgufSource;
   /** Where this option runs. Local catalogue entries omit this. */
-  provider?: 'local' | 'grok';
+  provider?: 'local' | 'grok' | 'copilot';
 }
 
 export interface GeneratedImage {

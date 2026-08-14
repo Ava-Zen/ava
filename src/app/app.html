@@ -99,6 +99,13 @@
               {{ activityBadgeLabel() }}
             </span>
           </div>
+          @if (copilotSignedIn()) {
+            <p class="chat-workspace">
+              {{ currentWorkspace() ? workspaceLabel() : 'No folder yet' }}
+              · local tools {{ allowLocalTools() ? 'on' : 'off' }}
+              · {{ currentGarden()?.name }}
+            </p>
+          }
 
           @if (isThinking() && llmThinkingTrace().length) {
             <div class="thinking-trace" aria-label="Ava thinking status">
@@ -122,6 +129,9 @@
                       {{ msg.role === 'ava' ? 'Ava' : 'You' }}
                       @if (msg.via === 'mcp') {
                         <em class="message-via">via MCP</em>
+                      }
+                      @if (msg.via === 'copilot') {
+                        <em class="message-via">via Copilot</em>
                       }
                     </span>
                     <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
@@ -359,6 +369,79 @@
 
       <div class="footer-center">
         <div class="composer-stack">
+          <div class="copilot-bar" #workspaceShell>
+            @if (copilotDevice(); as device) {
+              <div class="copilot-auth">
+                <span>Approve {{ device.userCode }} on GitHub</span>
+                <button type="button" (click)="openCopilotVerification()">Open</button>
+                <button type="button" (click)="cancelCopilotLogin()">Cancel</button>
+              </div>
+            } @else if (copilotPending()) {
+              <div class="copilot-auth">
+                <span>Contacting GitHub…</span>
+                <button type="button" (click)="cancelCopilotLogin()">Cancel</button>
+              </div>
+            } @else if (!copilotSignedIn()) {
+              <button type="button" class="copilot-connect" (click)="connectCopilotFromChat()">
+                Connect Copilot
+              </button>
+              <span class="copilot-hint">Needed for GitHub issues, PRs, and agents</span>
+            } @else {
+              <div class="workspace-picker">
+                <button
+                  type="button"
+                  class="workspace-current"
+                  [class.empty]="!currentWorkspace()"
+                  title="{{ currentWorkspace() || 'Choose a working folder for this garden' }}"
+                  (click)="toggleWorkspaceMenu($event)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 7h7l2 2h9v10H3V7Z"></path>
+                  </svg>
+                  <span>{{ workspaceLabel() }}</span>
+                </button>
+                @if (workspaceMenuOpen()) {
+                  <div class="workspace-menu" role="menu">
+                    <button type="button" (click)="pickWorkspaceFolder()">Choose folder…</button>
+                    <button type="button" (click)="startWorkspaceDraft()">Paste a path</button>
+                    @if (recentWorkspaces().length) {
+                      <p>Recent folders</p>
+                      @for (path of recentWorkspaces(); track path) {
+                        <button type="button" (click)="chooseRecentWorkspace(path)">
+                          <strong>{{ folderLabel(path) }}</strong>
+                          <small>{{ path }}</small>
+                        </button>
+                      }
+                    }
+                    @if (workspaceDraftOpen()) {
+                      <label>
+                        <span class="sr-only">Workspace path</span>
+                        <input
+                          [value]="workspaceDraft()"
+                          (input)="workspaceDraft.set($any($event.target).value)"
+                          (keydown.enter)="commitWorkspaceDraft()"
+                          placeholder="C:\src\my-project"
+                        />
+                      </label>
+                    }
+                  </div>
+                }
+              </div>
+              <button
+                type="button"
+                class="local-tools-toggle"
+                [class.on]="allowLocalTools()"
+                (click)="toggleLocalTools()"
+                [attr.aria-pressed]="allowLocalTools()"
+                title="Allow Copilot to edit files and run commands in this garden's folder"
+              >
+                Local tools {{ allowLocalTools() ? 'on' : 'off' }}
+              </button>
+            }
+            @if (copilotError()) {
+              <span class="copilot-error">{{ copilotError() }}</span>
+            }
+          </div>
           <div class="composer-row">
             @if (manualInputEnabled()) {
               <label class="manual-composer">

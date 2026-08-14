@@ -85,6 +85,111 @@
   <section class="section">
     <div class="section-heading">
       <div>
+        <p class="overline">GitHub</p>
+        <h3>Copilot</h3>
+      </div>
+    </div>
+    <p class="hint">
+      Sign in with a GitHub Copilot subscription so Ava can hand background work to Copilot agents.
+      Say “ask Copilot to…” or set Copilot as the default agent runtime below.
+      The consent screen may say “GitHub CLI” — that is expected.
+    </p>
+
+    @if (copilotDevice(); as device) {
+      <div class="device-code-card">
+        <span>Approve this code in your browser</span>
+        <strong>{{ device.userCode }}</strong>
+        <small>{{ device.verificationUri }}</small>
+        <div class="auth-row">
+          <button class="save-btn" type="button" (click)="openCopilotVerification()">Open GitHub sign-in</button>
+          <button class="ghost-btn" type="button" (click)="cancelCopilotLogin()">Cancel</button>
+        </div>
+      </div>
+    } @else if (copilotPending()) {
+      <div class="device-code-card">
+        <span>Contacting GitHub…</span>
+        <strong>Waiting for Copilot</strong>
+        <div class="auth-row">
+          <button class="ghost-btn" type="button" (click)="cancelCopilotLogin()">Cancel</button>
+        </div>
+      </div>
+    } @else if (copilotSignedIn()) {
+      <div class="grok-status">
+        <div>
+          <strong>{{ copilotAccount() || 'GitHub account' }}</strong>
+          <small>
+            @switch (copilotMethod()) {
+              @case ('pat') { Fine-grained PAT }
+              @case ('cli') { Copilot CLI / GitHub CLI }
+              @default { GitHub login }
+            }
+          </small>
+        </div>
+        <button class="ghost-btn" type="button" (click)="signOutCopilot()">Sign out</button>
+      </div>
+    } @else {
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="signInWithGithub()" [disabled]="copilotBusy">
+          {{ copilotBusy ? 'Starting…' : 'Continue with GitHub' }}
+        </button>
+        @if (ghCliAvailable()) {
+          <button class="ghost-btn" type="button" (click)="importGithubCli()" [disabled]="copilotBusy">Use GitHub CLI login</button>
+        }
+        <button class="ghost-btn" type="button" (click)="useCopilotCliLogin()">Use stored Copilot CLI login</button>
+      </div>
+      <label>
+        <span>Or paste a fine-grained GitHub PAT</span>
+        <input type="password" [(ngModel)]="patDraft" placeholder="github_pat_…" />
+      </label>
+      <button class="ghost-btn" type="button" (click)="signInWithGithubPat()" [disabled]="!patDraft.trim() || copilotBusy">Use PAT</button>
+    }
+    @if (copilotError()) {
+      <p class="mcp-error">{{ copilotError() }}</p>
+    }
+    @if (copilotHost(); as host) {
+      <p class="hint">{{ host.reason }}</p>
+    }
+
+    @if (copilotSignedIn()) {
+      <div class="segmented intelligence-toggle" aria-label="Background agent runtime">
+        <button type="button" [class.active]="agentRuntime() === 'local'" (click)="setAgentRuntime('local')">Local agent</button>
+        <button type="button" [class.active]="agentRuntime() === 'copilot'" (click)="setAgentRuntime('copilot')">Copilot</button>
+      </div>
+      <label>
+        <span>Workspace for {{ currentGarden()?.name || 'this garden' }}</span>
+        <input
+          [(ngModel)]="workspaceDraft"
+          placeholder="C:\src\my-project"
+          (keyup.enter)="saveCopilotWorkspace()"
+          (blur)="saveCopilotWorkspace()"
+        />
+      </label>
+      <label>
+        <span>Copilot model</span>
+        <input
+          [ngModel]="copilotModel()"
+          (ngModelChange)="setCopilotModel($event)"
+          placeholder="auto"
+        />
+      </label>
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          [checked]="copilotAllowWrites()"
+          (change)="setCopilotAllowWrites($any($event.target).checked)"
+        />
+        <span>Allow Copilot to edit files and run commands in this garden</span>
+      </label>
+      <p class="hint">
+        Each garden can have its own folder. You can also change the folder and local tools from the chat bar.
+        Off by default: Copilot may still use GitHub tools to read issues and pull requests.
+      </p>
+    }
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
         <p class="overline">Memory spaces</p>
         <h3>Gardens</h3>
       </div>
@@ -181,7 +286,9 @@
     </div>
     <p class="hint">
       @if (cloudExclusive()) {
-        Conversation and background agents both use your Grok model. Switch to Local first to download on-device models again.
+        Conversation uses your Grok model. Background agents stay local unless you set GitHub Copilot above.
+      } @else if (agentRuntime() === 'copilot' && copilotSignedIn()) {
+        Conversation stays local. Background agent work is handed to GitHub Copilot.
       } @else {
         Pick separate local models for quick conversation replies and background agent tasks. Experimental Heretic models are less-filtered and may be less stable.
       }
@@ -207,7 +314,7 @@
         </div>
       </div>
 
-      @if (!cloudExclusive()) {
+      @if (!cloudExclusive() && !(agentRuntime() === 'copilot' && copilotSignedIn())) {
       <div>
         <p class="speaker-label">Background Agent</p>
         <div class="model-list">
@@ -597,7 +704,7 @@
         <span>Agent model</span>
         <strong>{{ cloudExclusive() ? conversationRuntimeLabel() : agentRuntimeLabel() }}</strong>
         <small>Configured: {{ cloudExclusive() ? selectedConversationModel().name : selectedAgentModel().name }}</small>
-        @if (!cloudExclusive()) {
+        @if (!cloudExclusive() && agentRuntime() !== 'copilot') {
         <button
           class="fallback-btn"
           type="button"

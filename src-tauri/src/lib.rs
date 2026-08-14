@@ -2,6 +2,7 @@ use std::{env, fs, io};
 
 use tauri::Manager;
 
+mod copilot;
 mod llm;
 mod mcp;
 mod voice_session;
@@ -128,6 +129,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_deep_link::init())
     .manage(llm::NativeLlm::default())
+    .manage(copilot::CopilotHost::default())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -156,6 +158,11 @@ pub fn run() {
       reset_app_cache,
       mcp_tts_complete,
       mcp_server_info,
+      copilot::copilot_status,
+      copilot::copilot_read_gh_auth,
+      copilot::copilot_pick_folder,
+      copilot::copilot_run_task,
+      copilot::copilot_abort,
       llm::llm_native_status,
       llm::llm_load_model,
       llm::llm_generate,

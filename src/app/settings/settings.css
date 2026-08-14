@@ -427,6 +427,21 @@ input:focus {
   background: linear-gradient(135deg, #55c7b8, #bdd7a6);
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 6px;
+  color: #edf5ff;
+  font-weight: 650;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #55c7b8;
+}
+
 /* Voice / TTS picker */
 .voice-list {
   display: grid;

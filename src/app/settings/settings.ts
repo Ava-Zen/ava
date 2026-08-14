@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, inject, Input, computed, signal } from '@angular/core';
+import { Component, Output, EventEmitter, inject, Input, computed, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
@@ -10,6 +10,7 @@ import { LlmService } from '../services/llm';
 import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 import { XaiAuthService } from '../services/xai/xai-auth';
+import { CopilotAuthService } from '../services/copilot/copilot-auth';
 
 interface ModelFileInfo {
   name: string;
@@ -36,6 +37,7 @@ export class Settings {
   private readonly agentsService = inject(AgentsService);
   private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
   private readonly xai = inject(XaiAuthService);
+  private readonly copilotAuth = inject(CopilotAuthService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
@@ -59,6 +61,8 @@ export class Settings {
   mcpError = '';
   apiKeyDraft = '';
   xaiBusy = false;
+  patDraft = '';
+  copilotBusy = false;
 
   constructor() {
     // Seed per-server OAuth drafts from persisted config so saved values show.
@@ -69,6 +73,9 @@ export class Settings {
     void this.loadMcpServerInfo();
     void this.refreshModelFiles();
     if (this.xai.signedIn()) void this.ttsService.refreshGrokVoices();
+    effect(() => {
+      this.workspaceDraft = this.currentGarden()?.workspace ?? '';
+    });
   }
 
   statusFor(id: string): McpServerStatus | undefined {
@@ -229,6 +236,19 @@ export class Settings {
   protected readonly grokCliAvailable = this.xai.grokCliAvailable;
   protected readonly intelligenceMode = this.llmService.intelligenceMode;
   protected readonly cloudExclusive = this.llmService.isCloudExclusive;
+  protected readonly copilotSignedIn = this.copilotAuth.signedIn;
+  protected readonly copilotMethod = this.copilotAuth.method;
+  protected readonly copilotAccount = this.copilotAuth.accountLabel;
+  protected readonly copilotError = this.copilotAuth.error;
+  protected readonly copilotPending = this.copilotAuth.loginPending;
+  protected readonly copilotDevice = this.copilotAuth.deviceLogin;
+  protected readonly copilotHost = this.copilotAuth.host;
+  protected readonly ghCliAvailable = this.copilotAuth.ghCliAvailable;
+  protected readonly agentRuntime = this.agentsService.runtime;
+  protected readonly copilotWorkspace = this.agentsService.workspace;
+  protected readonly copilotAllowWrites = this.agentsService.allowWrites;
+  protected readonly copilotModel = this.agentsService.copilotModel;
+  workspaceDraft = '';
 
   // MCP voice server: lets other local agents call Ava to speak.
   protected readonly mcpServerUrl = signal<string | null>(null);
@@ -255,6 +275,9 @@ export class Settings {
   });
 
   protected readonly agentRuntimeLabel = computed(() => {
+    if (this.agentRuntime() === 'copilot' && this.copilotSignedIn()) {
+      return `GitHub Copilot · ${this.copilotAccount() || 'signed in'}`;
+    }
     const active = this.activeAgentModel();
     if (active) return `${active.name} · ${this.agentLoadInfo() || 'loaded'}`;
     if (this.agentLoading()) return this.agentLoadInfo() || 'Loading';
@@ -421,6 +444,83 @@ export class Settings {
 
   selectAgentModel(id: string) {
     this.agentsService.setModel(id);
+  }
+
+  setAgentRuntime(runtime: 'local' | 'copilot') {
+    this.agentsService.setRuntime(runtime);
+  }
+
+  saveCopilotWorkspace() {
+    this.agentsService.setWorkspace(this.workspaceDraft);
+  }
+
+  setCopilotAllowWrites(allow: boolean) {
+    this.agentsService.setAllowWrites(allow);
+  }
+
+  setCopilotModel(id: string) {
+    this.agentsService.setCopilotModel(id);
+  }
+
+  async signInWithGithub() {
+    if (this.copilotAuth.loginPending()) return;
+    this.copilotBusy = true;
+    try {
+      const login = this.copilotAuth.loginWithGitHub();
+      this.copilotBusy = false;
+      await login;
+      if (this.copilotAuth.signedIn()) this.setAgentRuntime('copilot');
+    } catch {
+      // surfaced via copilotError
+    } finally {
+      this.copilotBusy = false;
+    }
+  }
+
+  async signInWithGithubPat() {
+    this.copilotBusy = true;
+    try {
+      await this.copilotAuth.loginWithPat(this.patDraft);
+      this.patDraft = '';
+      this.setAgentRuntime('copilot');
+    } catch (err) {
+      this.copilotAuth.error.set(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.copilotBusy = false;
+    }
+  }
+
+  async importGithubCli() {
+    this.copilotBusy = true;
+    try {
+      const ok = await this.copilotAuth.importGhCliAuth();
+      if (ok) {
+        this.setAgentRuntime('copilot');
+      } else {
+        this.copilotAuth.error.set('No GitHub CLI login was found on this computer.');
+      }
+    } finally {
+      this.copilotBusy = false;
+    }
+  }
+
+  useCopilotCliLogin() {
+    this.copilotAuth.useStoredCliLogin();
+    this.setAgentRuntime('copilot');
+  }
+
+  signOutCopilot() {
+    this.copilotAuth.logout();
+    this.setAgentRuntime('local');
+  }
+
+  cancelCopilotLogin() {
+    this.copilotBusy = false;
+    this.copilotAuth.cancelLogin();
+  }
+
+  openCopilotVerification() {
+    void this.copilotAuth.openVerificationPage();
   }
 
   fallbackConversationToCpu() {

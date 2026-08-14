@@ -10,12 +10,18 @@ import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn, GeneratedImage } from './services/llm';
-import { AgentsService, AgentToolDef } from './services/agents';
+import { AgentsService, AgentTask, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 import { XaiClient } from './services/xai/xai-client';
 import { XaiAuthService } from './services/xai/xai-auth';
+import {
+  CopilotAuthService,
+  inferCopilotAgent,
+  isGithubWorkRequest,
+  shouldUseCopilot,
+} from './services/copilot/copilot-auth';
 
 interface Message {
   role: 'user' | 'ava';
@@ -33,8 +39,8 @@ interface Message {
   retryFor?: string;
   /** Imagine images returned by Grok. */
   images?: GeneratedImage[];
-  /** Spoken line that arrived through the local MCP voice server. */
-  via?: 'mcp';
+  /** Spoken line that arrived through the local MCP voice server or Copilot. */
+  via?: 'mcp' | 'copilot';
 }
 
 interface QuickPrompt {
@@ -124,13 +130,16 @@ export class App {
   private readonly onboarding = inject(OnboardingService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
+  private readonly copilotAuth = inject(CopilotAuthService);
   private readonly xaiClient = new XaiClient(this.xai);
+  private readonly announcedAgentTasks = new Set<string>();
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('audioFilePicker') private audioFilePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('workspaceShell') private workspaceShellEl?: ElementRef<HTMLDivElement>;
 
   // Gardens
   protected readonly gardens = this.gardensService.gardens;
@@ -155,6 +164,19 @@ export class App {
   });
   protected readonly manualInputEnabled = signal(false);
   protected readonly composerMenuOpen = signal(false);
+  protected readonly workspaceMenuOpen = signal(false);
+  protected readonly workspaceDraftOpen = signal(false);
+  protected readonly workspaceDraft = signal('');
+  protected readonly copilotSignedIn = this.copilotAuth.signedIn;
+  protected readonly copilotPending = this.copilotAuth.loginPending;
+  protected readonly copilotDevice = this.copilotAuth.deviceLogin;
+  protected readonly copilotError = this.copilotAuth.error;
+  protected readonly currentWorkspace = computed(() => this.currentGarden()?.workspace ?? '');
+  protected readonly allowLocalTools = computed(() => this.currentGarden()?.allowLocalTools === true);
+  protected readonly recentWorkspaces = this.gardensService.recentWorkspaces;
+  protected readonly workspaceLabel = computed(() =>
+    this.gardensService.workspaceLabel(this.currentWorkspace())
+  );
   /** Right-click quick-select menu for the conversation model. */
   protected readonly modelMenuOpen = signal(false);
   protected readonly conversationModels = this.llm.models;
@@ -181,7 +203,12 @@ export class App {
     if (this.agents.isLoading()) return 'Loading agent';
     if (this.isGeneratingAudioFile()) return 'Generating audio';
     if (this.isThinking()) return 'Thinking';
-    if (this.hasActiveAgents()) return 'Agent working';
+    if (this.hasActiveAgents()) {
+      const usingCopilot = this.agentTasks().some(
+        t => t.engine === 'copilot' && (t.status === 'queued' || t.status === 'running'),
+      );
+      return usingCopilot ? 'Copilot working' : 'Agent working';
+    }
     if (this.status() === 'speaking') return 'Speaking';
     if (this.status() === 'listening') return 'Listening';
     return this.llm.isCloudExclusive() ? 'Grok cloud' : 'Local first';
@@ -228,6 +255,53 @@ export class App {
     });
 
     this.registerMcpTtsBridge();
+    this.watchAgentCompletions();
+  }
+
+  /** Speaks a short wrap-up when a background agent (local or Copilot) finishes. */
+  private watchAgentCompletions() {
+    effect(() => {
+      const tasks = this.agentTasks();
+      for (const task of tasks) {
+        if (task.status !== 'done' && task.status !== 'error') continue;
+        if (this.announcedAgentTasks.has(task.id)) continue;
+        this.announcedAgentTasks.add(task.id);
+        queueMicrotask(() => this.announceAgentResult(task));
+      }
+    });
+  }
+
+  private announceAgentResult(task: AgentTask) {
+    const gardenId = this.currentGarden()?.id;
+    if (!gardenId) return;
+
+    if (task.status === 'error') {
+      const spoken = task.error || 'The background agent could not finish.';
+      this.addAvaNotice(gardenId, spoken, task.engine === 'copilot' ? 'copilot' : undefined);
+      if (!this.isThinking()) void this.speak(spoken);
+      return;
+    }
+
+    const result = (task.result || '').trim();
+    if (!result) return;
+    const via = task.engine === 'copilot' ? 'copilot' : undefined;
+    this.addAvaNotice(gardenId, result, via);
+    if (this.isThinking()) return;
+    const spoken = markdownToPlainText(result);
+    const preview = spoken.length > 420 ? spoken.slice(0, 400).trim() + '…' : spoken;
+    void this.speak(preview);
+  }
+
+  private addAvaNotice(gardenId: string, text: string, via?: Message['via']) {
+    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    currentMsgs.push({
+      role: 'ava',
+      text,
+      timestamp: new Date(),
+      via,
+    });
+    this.setGardenMessages(gardenId, currentMsgs);
+    this.scrollToBottom();
   }
 
   /**
@@ -311,9 +385,11 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen())) {
+    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen())) {
       this.composerMenuOpen.set(false);
       this.modelMenuOpen.set(false);
+      this.workspaceMenuOpen.set(false);
+      this.workspaceDraftOpen.set(false);
       return;
     }
 
@@ -334,12 +410,14 @@ export class App {
   protected onDocumentMouseDown(event: MouseEvent) {
     this.closeComposerMenuIfOutside(event.target);
     this.closeModelMenuIfOutside(event.target);
+    this.closeWorkspaceMenuIfOutside(event.target);
   }
 
   @HostListener('document:touchstart', ['$event'])
   protected onDocumentTouchStart(event: TouchEvent) {
     this.closeComposerMenuIfOutside(event.target);
     this.closeModelMenuIfOutside(event.target);
+    this.closeWorkspaceMenuIfOutside(event.target);
   }
 
   /** Right-clicking the Settings button opens the model quick-select menu. */
@@ -371,7 +449,10 @@ export class App {
     this.stopCurrentAudio();
     this.xai.cancelLogin();
     this.xai.logout();
+    this.copilotAuth.cancelLogin();
+    this.copilotAuth.logout();
     this.llm.setIntelligenceMode('local');
+    this.agents.setRuntime('local');
 
     await this.clearBrowserDatabases();
     await this.clearBrowserCaches();
@@ -389,6 +470,12 @@ export class App {
       'ava-llm-uncensored',
       'ava-tts-config',
       'ava-agent-model',
+      'ava-agent-runtime',
+      'ava-copilot-auth',
+      'ava-copilot-workspace',
+      'ava-copilot-allow-writes',
+      'ava-copilot-model',
+      'ava-workspace-recents',
       'ava-onboarding-complete',
       'ava-user-profile',
       'ava-messages-by-garden',
@@ -1393,8 +1480,8 @@ export class App {
       this.addUserMessage(gardenId, text);
     }
 
-    // 1) Explicit agent / background-task request → hand off to Qwen.
-    if (this.detectAgentRequest(text)) {
+    // 1) Copilot / GitHub / background-task request.
+    if (this.detectAgentRequest(text) || shouldUseCopilot(text, this.copilotAuth.signedIn(), this.agents.runtime() === 'copilot') || isGithubWorkRequest(text)) {
       await this.handleAgentRequest(gardenId, text);
       return;
     }
@@ -1572,8 +1659,34 @@ export class App {
     await this.handleLlmReply(gardenId, retryFor);
   }
 
-  /** Hands the request to a Qwen background agent and confirms by voice. */
+  /** Hands the request to a local or Copilot background agent and confirms by voice. */
   private async handleAgentRequest(gardenId: string, text: string) {
+    const wantsCopilot = shouldUseCopilot(
+      text,
+      this.copilotAuth.signedIn(),
+      this.agents.runtime() === 'copilot',
+    );
+    if ((wantsCopilot || isGithubWorkRequest(text)) && !this.copilotAuth.signedIn()) {
+      await this.respond(
+        gardenId,
+        'I can pull that with GitHub Copilot. Sign in from the Copilot bar below, then ask again.',
+      );
+      return;
+    }
+
+    if (wantsCopilot) {
+      this.agents.runTask(text, {
+        engine: 'copilot',
+        agent: inferCopilotAgent(text),
+      });
+      this.agents.ensureLoaded().catch(() => {});
+      await this.respond(
+        gardenId,
+        'Okay, I will ask Copilot to work on that in the background and let you know when it is ready.',
+      );
+      return;
+    }
+
     const tools = this.mcp.tools();
     if (tools.length) {
       const toolDefs: AgentToolDef[] = tools.map(t => ({
@@ -2453,6 +2566,81 @@ export class App {
     if (shell && node && !shell.contains(node)) {
       this.modelMenuOpen.set(false);
     }
+  }
+
+  private closeWorkspaceMenuIfOutside(target: EventTarget | null) {
+    if (!this.workspaceMenuOpen() && !this.workspaceDraftOpen()) return;
+    const shell = this.workspaceShellEl?.nativeElement;
+    const node = target as Node | null;
+    if (shell && node && !shell.contains(node)) {
+      this.workspaceMenuOpen.set(false);
+      this.workspaceDraftOpen.set(false);
+    }
+  }
+
+  protected folderLabel(path: string): string {
+    return this.gardensService.workspaceLabel(path);
+  }
+
+  protected toggleWorkspaceMenu(event: Event) {
+    event.stopPropagation();
+    this.workspaceMenuOpen.update(open => !open);
+    this.workspaceDraftOpen.set(false);
+  }
+
+  protected toggleLocalTools() {
+    this.gardensService.setCurrentAllowLocalTools(!this.allowLocalTools());
+  }
+
+  protected chooseRecentWorkspace(path: string) {
+    this.gardensService.setCurrentWorkspace(path);
+    this.workspaceMenuOpen.set(false);
+    this.workspaceDraftOpen.set(false);
+  }
+
+  protected startWorkspaceDraft() {
+    this.workspaceDraft.set(this.currentWorkspace());
+    this.workspaceDraftOpen.set(true);
+    this.workspaceMenuOpen.set(true);
+  }
+
+  protected commitWorkspaceDraft() {
+    this.gardensService.setCurrentWorkspace(this.workspaceDraft());
+    this.workspaceDraftOpen.set(false);
+    this.workspaceMenuOpen.set(false);
+  }
+
+  async pickWorkspaceFolder() {
+    this.workspaceMenuOpen.set(false);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const path = await invoke<string | null>('copilot_pick_folder');
+      if (path?.trim()) {
+        this.gardensService.setCurrentWorkspace(path.trim());
+        return;
+      }
+    } catch {
+      // Browser or older host — fall through to a typed path.
+    }
+    this.startWorkspaceDraft();
+  }
+
+  async connectCopilotFromChat() {
+    if (this.copilotAuth.loginPending() || this.copilotAuth.signedIn()) return;
+    try {
+      await this.copilotAuth.loginWithGitHub();
+      if (this.copilotAuth.signedIn()) this.agents.setRuntime('copilot');
+    } catch {
+      // surfaced on the Copilot bar
+    }
+  }
+
+  openCopilotVerification() {
+    void this.copilotAuth.openVerificationPage();
+  }
+
+  cancelCopilotLogin() {
+    this.copilotAuth.cancelLogin();
   }
 
   private isTextFile(file: File): boolean {
