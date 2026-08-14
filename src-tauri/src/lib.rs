@@ -1,4 +1,4 @@
-use std::{env, fs, io};
+use std::{env, fs, io, path::Path};
 
 use tauri::Manager;
 
@@ -50,6 +50,21 @@ fn xai_read_grok_cli_auth() -> Option<String> {
     .ok()?;
   let path = std::path::Path::new(&home).join(".grok").join("auth.json");
   fs::read_to_string(path).ok().filter(|raw| !raw.trim().is_empty())
+}
+
+#[tauri::command]
+fn write_file_bytes(path: String, contents: Vec<u8>) -> Result<String, String> {
+  let dest = Path::new(&path);
+  if path.trim().is_empty() {
+    return Err("Missing file path.".into());
+  }
+  if let Some(parent) = dest.parent() {
+    if !parent.as_os_str().is_empty() {
+      fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+  }
+  fs::write(dest, contents).map_err(|error| error.to_string())?;
+  Ok(dest.display().to_string())
 }
 
 #[tauri::command]
@@ -155,6 +170,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       suggested_user_name,
       xai_read_grok_cli_auth,
+      write_file_bytes,
       reset_app_cache,
       mcp_tts_complete,
       mcp_server_info,

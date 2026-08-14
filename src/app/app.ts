@@ -11,7 +11,13 @@ import { GardensService, Garden } from './services/gardens';
 import { ChatsService } from './services/chats';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn, GeneratedImage } from './services/llm';
-import { wantsImageEdit } from './services/llm/grok-chat-backend';
+import {
+  spokenImageSaveReply,
+  wantsImage,
+  wantsImageEdit,
+  wantsPhotoHelp,
+  wantsSaveImagesToDisk,
+} from './services/llm/grok-chat-backend';
 import { AgentsService, AgentTask, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
@@ -27,7 +33,7 @@ import {
   shouldUseCopilot,
 } from './services/copilot/copilot-auth';
 
-type CopilotGateKind = 'signin' | 'workspace' | 'tools';
+type CopilotGateKind = 'signin' | 'workspace' | 'tools' | 'photo';
 
 interface CopilotGate {
   kind: CopilotGateKind;
@@ -85,6 +91,49 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('Could not read that file.'));
     reader.readAsDataURL(file);
   });
+}
+
+export function imageFileName(image: GeneratedImage, index = 0): string {
+  const slug = (image.prompt || 'photo')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'photo';
+  const stamp = Date.now().toString(36);
+  const suffix = index > 0 ? `-${index + 1}` : '';
+  return `ava-${slug}${suffix}-${stamp}.jpg`;
+}
+
+export function joinPath(folder: string, file: string): string {
+  const slash = folder.includes('\\') && !folder.includes('/') ? '\\' : '/';
+  return `${folder.replace(/[\\/]+$/, '')}${slash}${file}`;
+}
+
+export async function dataUrlToBytes(dataUrl: string): Promise<Uint8Array> {
+  if (/^https?:\/\//i.test(dataUrl)) {
+    const res = await fetch(dataUrl);
+    if (!res.ok) throw new Error('Could not download that photo.');
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  const comma = dataUrl.indexOf(',');
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  if (/^https?:\/\//i.test(dataUrl)) {
+    const res = await fetch(dataUrl);
+    if (!res.ok) throw new Error('Could not download that photo.');
+    return res.blob();
+  }
+  const bytes = await dataUrlToBytes(dataUrl);
+  const mime = dataUrl.match(/^data:([^;]+);/i)?.[1] || 'image/jpeg';
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return new Blob([copy], { type: mime });
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -179,6 +228,10 @@ export class App {
   protected readonly chatStarted = computed(() =>
     this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading()
   );
+  /** Keep previous chats reachable from an empty new chat. */
+  protected readonly showChatPanel = computed(() =>
+    this.chatStarted() || this.chats.chatsInGarden().length > 1
+  );
 
   /** Name of the currently selected text-to-speech voice. */
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
@@ -193,6 +246,7 @@ export class App {
   protected readonly workspaceDraftOpen = signal(false);
   protected readonly workspaceDraft = signal('');
   protected readonly pendingImages = signal<GeneratedImage[]>([]);
+  protected readonly viewerImage = signal<GeneratedImage | null>(null);
   protected readonly copilotSignedIn = this.copilotAuth.signedIn;
   protected readonly copilotPending = this.copilotAuth.loginPending;
   protected readonly copilotDevice = this.copilotAuth.deviceLogin;
@@ -259,6 +313,8 @@ export class App {
   // Per-chat message storage
   private messagesByChat = signal<Record<string, Message[]>>({});
   private pendingCopilot: { prompt: string; chatId: string; allowOnce?: boolean } | null = null;
+  private pendingPhotoEdit: { prompt: string; chatId: string } | null = null;
+  private pendingImageSave: { prompt: string; chatId: string; images: GeneratedImage[] } | null = null;
 
   protected readonly messages = computed(() => {
     const chatId = this.chats.currentChatId() || 'default';
@@ -410,7 +466,10 @@ export class App {
   protected startNewChat() {
     const gardenId = this.currentGarden()?.id;
     this.pendingCopilot = null;
+    this.pendingPhotoEdit = null;
+    this.pendingImageSave = null;
     this.pendingImages.set([]);
+    this.viewerImage.set(null);
     this.chats.createChat(gardenId);
     this.currentTranscript.set('');
     this.manualPrompt.set('');
@@ -448,6 +507,11 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && this.viewerImage()) {
+      this.closePhotoViewer();
+      return;
+    }
+
     if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen())) {
       this.composerMenuOpen.set(false);
       this.modelMenuOpen.set(false);
@@ -629,7 +693,20 @@ export class App {
 
   protected openImagePicker() {
     this.setManualInputMode(true);
+    this.composerMenuOpen.set(false);
     this.imagePickerEl?.nativeElement.click();
+  }
+
+  protected pickPhotoFromChat() {
+    this.imagePickerEl?.nativeElement.click();
+  }
+
+  protected openPhotoViewer(image: GeneratedImage) {
+    this.viewerImage.set(image);
+  }
+
+  protected closePhotoViewer() {
+    this.viewerImage.set(null);
   }
 
   protected removePendingImage(dataUrl: string) {
@@ -673,12 +750,34 @@ export class App {
       this.composerNotice.set('Choose a JPG, PNG, or similar photo.');
       return;
     }
+    const pendingEdit = this.pendingPhotoEdit;
+    if (pendingEdit) {
+      this.pendingPhotoEdit = null;
+      this.closeOpenGates(pendingEdit.chatId, 'done');
+      this.attachImagesToLastUser(pendingEdit.chatId, loaded);
+      this.status.set('thinking');
+      this.isThinking.set(true);
+      await this.handleImagineEdit(pendingEdit.chatId, pendingEdit.prompt, loaded);
+      return;
+    }
+
     this.pendingImages.update(list => [...list, ...loaded].slice(0, 3));
     this.composerNotice.set(
       loaded.length === 1
         ? `${loaded[0].prompt} is ready. Say what to change, like enhance this photo.`
         : `${loaded.length} photos are ready. Say what Grok Imagine should change.`,
     );
+  }
+
+  private attachImagesToLastUser(chatId: string, images: GeneratedImage[]) {
+    const msgs = this.messagesByChat()[chatId] || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== 'user') continue;
+      const next = [...msgs];
+      next[i] = { ...next[i], images: [...(next[i].images || []), ...images] };
+      this.setChatMessages(chatId, next);
+      return;
+    }
   }
 
   private async handleImagineEdit(gardenId: string, text: string, attached: GeneratedImage[]) {
@@ -713,6 +812,54 @@ export class App {
       console.error('Imagine edit failed', e);
       const friendly = this.llm.friendlyError(e);
       await this.respond(gardenId, friendly ?? 'I could not edit that photo just now.', undefined, text);
+    }
+  }
+
+  private async handleImagineGenerate(chatId: string, text: string) {
+    if (!this.xai.signedIn()) {
+      await this.respond(chatId, 'Sign in with Grok in Settings and I can make that photo with Imagine.');
+      return;
+    }
+
+    this.status.set('speaking');
+    this.speak(this.pickThinkingFiller());
+
+    try {
+      const startedAt = performance.now();
+      const result = await this.llm.generate(text, this.buildChatHistory(chatId));
+      const images = result.images ?? [];
+      const debug: Message['debug'] = {
+        model: 'Grok Imagine',
+        durationMs: performance.now() - startedAt,
+      };
+      const spoken = result.text.trim() || (images.length > 1 ? 'I made those for you.' : 'I made that for you.');
+
+      if (wantsSaveImagesToDisk(text) && images.length) {
+        if (!this.currentWorkspace()) {
+          this.pendingImageSave = { prompt: text, chatId, images };
+          await this.respond(chatId, spoken, debug, undefined, images);
+          this.addGateMessage(
+            chatId,
+            'workspace',
+            text,
+            'Choose a folder for this chat and I will save the photos there.',
+          );
+          void this.speak('Choose a folder and I will save the photos there.');
+          return;
+        }
+        const saved = await this.saveImagesToWorkspace(images, this.currentWorkspace());
+        const follow = saved.length
+          ? ` ${spokenImageSaveReply(saved.length, this.currentWorkspace())}`
+          : ' I could not save them to that folder, but you can still save from the photo.';
+        await this.respond(chatId, `${spoken}${follow}`, debug, undefined, images);
+        return;
+      }
+
+      await this.respond(chatId, spoken, debug, undefined, images);
+    } catch (e) {
+      console.error('Imagine generate failed', e);
+      const friendly = this.llm.friendlyError(e);
+      await this.respond(chatId, friendly ?? 'I could not make that photo just now.', undefined, text);
     }
   }
 
@@ -1672,15 +1819,42 @@ export class App {
       this.addUserMessage(gardenId, text, false, attached);
     }
 
-    if (attached.length || (wantsImageEdit(text) && this.lastChatImage())) {
-      await this.handleImagineEdit(gardenId, text, attached);
+    const chatId = this.threadId();
+    const referringToExisting = /\b(this|that)\b/i.test(text);
+
+    if (attached.length) {
+      await this.handleImagineEdit(chatId, text, attached);
+      return;
+    }
+
+    if (wantsPhotoHelp(text) && (!this.lastChatImage() || !referringToExisting)) {
+      this.pendingPhotoEdit = { prompt: text, chatId };
+      this.addGateMessage(
+        chatId,
+        'photo',
+        text,
+        'Choose a photo and I will work on it here.',
+      );
+      void this.speak('Choose a photo and I will take it from there.');
+      this.isThinking.set(false);
+      this.status.set('idle');
+      return;
+    }
+
+    if (wantsImageEdit(text) && this.lastChatImage()) {
+      await this.handleImagineEdit(chatId, text, attached);
+      return;
+    }
+
+    if (wantsImage(text)) {
+      await this.handleImagineGenerate(chatId, text);
       return;
     }
 
     // 1) Copilot / GitHub / background-task request.
     if (
       this.detectAgentRequest(text) ||
-      shouldUseCopilot(text, this.copilotAuth.signedIn(), this.agents.runtime() === 'copilot') ||
+      shouldUseCopilot(text, this.copilotAuth.signedIn()) ||
       isGithubWorkRequest(text) ||
       isFileWorkRequest(text)
     ) {
@@ -1863,14 +2037,14 @@ export class App {
 
   /** Hands the request to a local or Copilot background agent and confirms by voice. */
   private async handleAgentRequest(gardenId: string, text: string) {
-    const wantsCopilot = shouldUseCopilot(
-      text,
-      this.copilotAuth.signedIn(),
-      this.agents.runtime() === 'copilot',
-    );
+    const signedIn = this.copilotAuth.signedIn();
+    const explicitCopilot = shouldUseCopilot(text, signedIn);
+    const wantsCopilot =
+      explicitCopilot ||
+      (this.agents.runtime() === 'copilot' && signedIn && this.detectAgentRequest(text));
     const chatId = this.threadId();
 
-    if ((wantsCopilot || isGithubWorkRequest(text) || isFileWorkRequest(text)) && !this.copilotAuth.signedIn()) {
+    if ((explicitCopilot || isGithubWorkRequest(text) || isFileWorkRequest(text)) && !signedIn) {
       this.pendingCopilot = { prompt: text, chatId };
       this.addGateMessage(chatId, 'signin', text, 'I can do that with GitHub Copilot. Sign in and I will continue.');
       await this.respond(chatId, 'Sign in with GitHub Copilot and I will take it from there.');
@@ -2396,6 +2570,89 @@ export class App {
     await player.play().catch(settle);
   }
 
+  private async afterWorkspaceChosen() {
+    this.closeOpenGates(this.threadId(), 'done');
+    if (this.pendingImageSave) {
+      await this.flushPendingImageSave();
+      return;
+    }
+    void this.continuePendingCopilot();
+  }
+
+  private async flushPendingImageSave() {
+    const pending = this.pendingImageSave;
+    if (!pending) return;
+    this.pendingImageSave = null;
+    const folder = this.currentWorkspace();
+    if (!folder) {
+      await this.respond(pending.chatId, 'Choose a folder and I will save the photos there.');
+      return;
+    }
+    const saved = await this.saveImagesToWorkspace(pending.images, folder);
+    const spoken = saved.length
+      ? spokenImageSaveReply(saved.length, folder)
+      : 'I could not save those photos to that folder. You can still save them from the photo.';
+    await this.respond(pending.chatId, spoken);
+  }
+
+  protected async saveChatImage(image: GeneratedImage, event?: Event) {
+    event?.stopPropagation();
+    const filename = imageFileName(image);
+    try {
+      const blob = await dataUrlToBlob(image.dataUrl);
+      const savePicker = (window as any).showSaveFilePicker;
+      if (typeof savePicker === 'function') {
+        try {
+          const handle = await savePicker({
+            suggestedName: filename,
+            types: [
+              {
+                description: 'Photo',
+                accept: { 'image/jpeg': ['.jpg', '.jpeg'], 'image/png': ['.png'] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (e) {
+          if ((e as any)?.name === 'AbortError') return;
+          console.warn('Save picker failed; falling back to download', e);
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      console.warn('Could not save photo', e);
+      this.composerNotice.set('Could not save that photo.');
+    }
+  }
+
+  private async saveImagesToWorkspace(images: GeneratedImage[], folder: string): Promise<string[]> {
+    const saved: string[] = [];
+    for (let i = 0; i < images.length; i++) {
+      const image = images[i];
+      const filename = imageFileName(image, i);
+      const path = joinPath(folder, filename);
+      try {
+        const bytes = await dataUrlToBytes(image.dataUrl);
+        await invoke('write_file_bytes', { path, contents: Array.from(bytes) });
+        saved.push(path);
+      } catch (e) {
+        console.warn('Could not write photo to workspace', e);
+      }
+    }
+    return saved;
+  }
+
   protected async saveAudioDownload(download: AudioDownload) {
     const savePicker = (window as any).showSaveFilePicker;
     if (typeof savePicker === 'function') {
@@ -2868,8 +3125,7 @@ export class App {
     this.chats.setWorkspace(path);
     this.workspaceMenuOpen.set(false);
     this.workspaceDraftOpen.set(false);
-    this.closeOpenGates(this.threadId(), 'done');
-    void this.continuePendingCopilot();
+    void this.afterWorkspaceChosen();
   }
 
   protected startWorkspaceDraft() {
@@ -2882,8 +3138,7 @@ export class App {
     this.chats.setWorkspace(this.workspaceDraft());
     this.workspaceDraftOpen.set(false);
     this.workspaceMenuOpen.set(false);
-    this.closeOpenGates(this.threadId(), 'done');
-    void this.continuePendingCopilot();
+    void this.afterWorkspaceChosen();
   }
 
   async pickWorkspaceFolder() {
@@ -2893,8 +3148,7 @@ export class App {
       const path = await invoke<string | null>('copilot_pick_folder');
       if (path?.trim()) {
         this.chats.setWorkspace(path.trim());
-        this.closeOpenGates(this.threadId(), 'done');
-        void this.continuePendingCopilot();
+        void this.afterWorkspaceChosen();
         return;
       }
     } catch {

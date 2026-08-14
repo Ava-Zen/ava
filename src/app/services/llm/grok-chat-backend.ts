@@ -162,9 +162,13 @@ export class GrokChatBackend implements ChatBackend {
     }
 
     const result = parseResponsesPayload(await res.json());
-    if (result.images?.length || !wantsImage(userText)) return result;
-    const fallback = await this.client.generateImage(userText);
-    return fallback ? { ...result, images: [fallback] } : result;
+    if (!wantsImage(userText)) return result;
+    const count = requestedImageCount(userText);
+    const have = result.images ?? [];
+    if (have.length >= count) return { ...result, images: have.slice(0, count) };
+    const fallback = await this.client.generateImage(userText, count - have.length);
+    const images = [...have, ...fallback];
+    return images.length ? { ...result, images } : result;
   }
 
   isLoaded(): boolean {
@@ -199,9 +203,57 @@ export function wantsImageEdit(text: string): boolean {
   );
 }
 
+/** User asked for help with a photo they still need to pick. */
+export function wantsPhotoHelp(text: string): boolean {
+  if (wantsImage(text)) return false;
+  const lower = text.toLowerCase();
+  if (!/\b(photo|image|picture|photograph|pic)\b/.test(lower)) return false;
+  return /\b(enhance|improve|edit|fix|upscale|sharpen|colorize|restyle|retouch|restore|brighten|crop|help)\b/.test(
+    lower,
+  );
+}
+
+export function requestedImageCount(text: string): number {
+  const words: Record<string, number> = {
+    a: 1,
+    an: 1,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+  };
+  const before = text.match(
+    /\b(\d+|a|an|one|two|three|four|five|six)\s+(photos?|images?|pictures?|photographs?|illustrations?|pics?)\b/i,
+  );
+  const after = text.match(
+    /\b(photos?|images?|pictures?|photographs?)\s*(?:x|×|:)?\s*(\d+|one|two|three|four|five|six)\b/i,
+  );
+  const raw = (before?.[1] || after?.[2] || '').toLowerCase();
+  if (!raw) return 1;
+  const n = words[raw] ?? Number(raw);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(6, Math.floor(n));
+}
+
+export function wantsSaveImagesToDisk(text: string): boolean {
+  return (
+    /\b(save|download|export|write|store)\b.{0,48}\b(computer|disk|desktop|folder|directory|workspace|drive|machine|pc|laptop|downloads?)\b/i.test(
+      text,
+    ) || /\bsave (them|it|these|those)( (to|on) disk)?\b/i.test(text)
+  );
+}
+
 export function spokenImageEditReply(prompt: string): string {
   if (/enhance|improve|upscale|sharpen|retouch/i.test(prompt)) {
     return 'I enhanced that photo for you.';
   }
   return 'I updated that photo for you.';
+}
+
+export function spokenImageSaveReply(count: number, folder: string): string {
+  const name = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
+  if (count === 1) return `I saved that photo to ${name}.`;
+  return `I saved ${count} photos to ${name}.`;
 }

@@ -1,7 +1,7 @@
 <main class="ava-root">
-  <div class="app-frame" [class.chat-active]="chatStarted()">
-    <section class="companion-grid" [class.chat-active]="chatStarted()">
-      <section class="voice-console" [class.mini]="chatStarted()" aria-labelledby="voice-title">
+  <div class="app-frame" [class.chat-active]="showChatPanel()">
+    <section class="companion-grid" [class.chat-active]="showChatPanel()">
+      <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
         <button type="button" class="garden-eyebrow" (click)="openSettings()" title="Switch garden">
           <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
           <span>{{ currentGarden()?.name || 'Personal Garden' }}</span>
@@ -81,7 +81,7 @@
         }
       </section>
 
-      @if (chatStarted()) {
+      @if (showChatPanel()) {
         <section
           class="history-panel"
           aria-label="Conversation history"
@@ -133,6 +133,9 @@
           }
 
           <div class="transcript" aria-live="polite" #transcript>
+            @if (!messages().length) {
+              <p class="chat-empty">This chat is empty. Open another above, or start talking.</p>
+            }
             @for (msg of messages(); track msg.timestamp) {
               <article
                 class="message"
@@ -217,6 +220,11 @@
                             <button class="message-action danger" type="button" (click)="denyTools()">Not now</button>
                           </div>
                         }
+                        @if (msg.gate.kind === 'photo') {
+                          <div class="message-actions">
+                            <button class="message-action" type="button" (click)="pickPhotoFromChat()">Choose a photo</button>
+                          </div>
+                        }
                         @if (copilotError()) {
                           <small class="copilot-error">{{ copilotError() }}</small>
                         }
@@ -225,7 +233,29 @@
                     @if (msg.images?.length) {
                       <div class="message-images">
                         @for (image of msg.images; track image.dataUrl) {
-                          <img [src]="image.dataUrl" [alt]="image.prompt || 'Generated image'" />
+                          <div class="photo-tile">
+                            <button
+                              type="button"
+                              class="photo-open"
+                              (click)="openPhotoViewer(image)"
+                              [attr.aria-label]="'Open ' + (image.prompt || 'photo')"
+                            >
+                              <img [src]="image.dataUrl" [alt]="image.prompt || 'Generated image'" />
+                            </button>
+                            <button
+                              type="button"
+                              class="photo-save"
+                              title="Save photo"
+                              aria-label="Save photo"
+                              (click)="saveChatImage(image, $event)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 3v12"></path>
+                                <path d="M7 10l5 5 5-5"></path>
+                                <path d="M5 21h14"></path>
+                              </svg>
+                            </button>
+                          </div>
                         }
                       </div>
                     }
@@ -312,7 +342,29 @@
                     @if (msg.images?.length) {
                       <div class="message-images">
                         @for (image of msg.images; track image.dataUrl) {
-                          <img [src]="image.dataUrl" [alt]="image.prompt || 'Attached photo'" />
+                          <div class="photo-tile">
+                            <button
+                              type="button"
+                              class="photo-open"
+                              (click)="openPhotoViewer(image)"
+                              [attr.aria-label]="'Open ' + (image.prompt || 'photo')"
+                            >
+                              <img [src]="image.dataUrl" [alt]="image.prompt || 'Attached photo'" />
+                            </button>
+                            <button
+                              type="button"
+                              class="photo-save"
+                              title="Save photo"
+                              aria-label="Save photo"
+                              (click)="saveChatImage(image, $event)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 3v12"></path>
+                                <path d="M7 10l5 5 5-5"></path>
+                                <path d="M5 21h14"></path>
+                              </svg>
+                            </button>
+                          </div>
                         }
                       </div>
                     }
@@ -611,6 +663,43 @@
 
   @if (showOnboarding()) {
     <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
+  }
+
+  @if (viewerImage(); as image) {
+    <div class="photo-viewer" (click)="closePhotoViewer()" role="dialog" aria-modal="true" aria-label="Photo viewer">
+      <div class="photo-viewer-frame" (click)="$event.stopPropagation()">
+        <img [src]="image.dataUrl" [alt]="image.prompt || 'Photo'" />
+        <div class="photo-viewer-actions">
+          <button
+            type="button"
+            class="photo-viewer-btn"
+            title="Save photo"
+            aria-label="Save photo"
+            (click)="saveChatImage(image, $event)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12"></path>
+              <path d="M7 10l5 5 5-5"></path>
+              <path d="M5 21h14"></path>
+            </svg>
+            <span>Save</span>
+          </button>
+          <button
+            type="button"
+            class="photo-viewer-btn"
+            title="Close"
+            aria-label="Close photo"
+            (click)="closePhotoViewer()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12"></path>
+              <path d="M18 6L6 18"></path>
+            </svg>
+            <span>Close</span>
+          </button>
+        </div>
+      </div>
+    </div>
   }
 
   <router-outlet />

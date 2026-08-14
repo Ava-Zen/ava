@@ -131,14 +131,33 @@ export class XaiClient {
     return this.postImagine('/images/edits', body, prompt);
   }
 
-  async generateImage(prompt: string): Promise<{ dataUrl: string; prompt?: string } | null> {
-    const body = JSON.stringify({
-      model: 'grok-imagine-image-2.0',
-      prompt,
-      n: 1,
-      response_format: 'b64_json',
-    });
-    return this.postImagine('/images/generations', body, prompt);
+  async generateImage(
+    prompt: string,
+    n = 1,
+  ): Promise<Array<{ dataUrl: string; prompt?: string }>> {
+    const count = Math.min(6, Math.max(1, Math.round(n)));
+    const collected: Array<{ dataUrl: string; prompt?: string }> = [];
+    while (collected.length < count) {
+      const remaining = count - collected.length;
+      const batch = await this.postImagineAll(
+        '/images/generations',
+        JSON.stringify({
+          model: 'grok-imagine-image-2.0',
+          prompt,
+          n: remaining,
+          response_format: 'b64_json',
+        }),
+        prompt,
+      );
+      if (!batch.length) break;
+      collected.push(...batch);
+      if (batch.length < remaining && remaining > 1 && batch.length === 1) {
+        // API ignored n and returned one image; keep requesting the rest.
+        continue;
+      }
+      if (batch.length < 1) break;
+    }
+    return collected.slice(0, count);
   }
 
   private async postImagine(
@@ -146,6 +165,15 @@ export class XaiClient {
     body: string,
     prompt: string,
   ): Promise<{ dataUrl: string; prompt?: string } | null> {
+    const images = await this.postImagineAll(path, body, prompt);
+    return images[0] ?? null;
+  }
+
+  private async postImagineAll(
+    path: string,
+    body: string,
+    prompt: string,
+  ): Promise<Array<{ dataUrl: string; prompt?: string }>> {
     for (const kind of ['media', 'chat'] as const) {
       try {
         const res = await this.request(
@@ -161,16 +189,20 @@ export class XaiClient {
         const data = (await res.json()) as {
           data?: Array<{ b64_json?: string; url?: string }>;
         };
-        const first = data.data?.[0];
-        if (first?.b64_json) {
-          return { dataUrl: `data:image/jpeg;base64,${first.b64_json}`, prompt };
+        const images: Array<{ dataUrl: string; prompt?: string }> = [];
+        for (const item of data.data ?? []) {
+          if (item.b64_json) {
+            images.push({ dataUrl: `data:image/jpeg;base64,${item.b64_json}`, prompt });
+          } else if (item.url) {
+            images.push({ dataUrl: item.url, prompt });
+          }
         }
-        if (first?.url) return { dataUrl: first.url, prompt };
+        if (images.length) return images;
       } catch {
         // try the other host
       }
     }
-    return null;
+    return [];
   }
 
   async transcribe(samples: Float32Array, sampleRate: number): Promise<string> {

@@ -256,6 +256,10 @@ export function inferCopilotAgent(text: string): string | undefined {
 
 export function isFileWorkRequest(text: string): boolean {
   const lower = text.toLowerCase();
+  // Photo / Imagine work stays on Grok, even when the user also says "save".
+  if (/\b(photo|image|picture|photograph|illustration|pic)\b/.test(lower)) {
+    return false;
+  }
   return (
     /\b(create|write|save|make|generate|add|put)\b[\s\S]{0,60}\b(file|txt|text file|\.txt|\.md|\.json|folder|directory)\b/.test(lower) ||
     /\b(file|txt|text file)\b[\s\S]{0,32}\b(with (this )?content|called|named)\b/.test(lower)
@@ -283,11 +287,12 @@ export function isGithubWorkRequest(text: string): boolean {
 export function shouldUseCopilot(
   text: string,
   signedIn: boolean,
-  runtimeIsCopilot: boolean,
+  _runtimeIsCopilot = false,
 ): boolean {
   if (!signedIn) return false;
+  // Runtime is only a preference for background-agent work. Casual chat,
+  // jokes, and Imagine stay on Grok even after Copilot is signed in.
   return (
-    runtimeIsCopilot ||
     isExplicitCopilotRequest(text) ||
     isGithubWorkRequest(text) ||
     isFileWorkRequest(text)

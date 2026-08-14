@@ -36,6 +36,7 @@ describe('Copilot auth helpers', () => {
     expect(isFileWorkRequest('Create a txt file with this content')).toBeTrue();
     expect(needsLocalFileAccess('save this to notes.md')).toBeTrue();
     expect(isFileWorkRequest('get my GitHub issues')).toBeFalse();
+    expect(isFileWorkRequest('generate 3 photos of women and save it to my computer')).toBeFalse();
   });
 
   it('routes GitHub work to Copilot when signed in', () => {
@@ -44,5 +45,11 @@ describe('Copilot auth helpers', () => {
     expect(isGithubWorkRequest('what is the weather')).toBeFalse();
     expect(shouldUseCopilot('get my GitHub issues', true, false)).toBeTrue();
     expect(shouldUseCopilot('get my GitHub issues', false, false)).toBeFalse();
+  });
+
+  it('keeps casual chat on Grok even when Copilot is the agent runtime', () => {
+    expect(shouldUseCopilot('Tell me a good joke that includes some swear words.', true, true)).toBeFalse();
+    expect(shouldUseCopilot('how are you today', true, true)).toBeFalse();
+    expect(shouldUseCopilot('Ask Copilot to review this', true, false)).toBeTrue();
   });
 });

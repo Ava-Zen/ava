@@ -1,4 +1,13 @@
-import { copyTextToClipboard } from './app';
+import { copyTextToClipboard, imageFileName, joinPath } from './app';
+
+describe('image helpers', () => {
+  it('builds a workspace path and a safe photo filename', () => {
+    expect(joinPath('C:\\src\\photos', 'ava.jpg')).toBe('C:\\src\\photos\\ava.jpg');
+    expect(imageFileName({ dataUrl: 'data:image/jpeg;base64,abc', prompt: 'Three women' })).toMatch(
+      /^ava-three-women-\w+\.jpg$/,
+    );
+  });
+});
 
 describe('copyTextToClipboard', () => {
   it('uses the browser clipboard API when available', async () => {

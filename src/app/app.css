@@ -554,6 +554,12 @@
   font-size: 0.86rem;
   font-weight: 750;
 }
+.chat-empty {
+  margin: 12px 6px 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
 .transcript {
   min-height: 0;
   overflow-y: scroll;
@@ -728,12 +734,70 @@
   display: grid;
   gap: 10px;
 }
-.message-images img {
+.photo-tile {
+  position: relative;
+  max-width: 420px;
+}
+.photo-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.message-images img,
+.photo-open img {
   width: 100%;
   max-width: 420px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: block;
+}
+.photo-save {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(13, 20, 24, 0.75);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.photo-tile:hover .photo-save,
+.photo-tile:focus-within .photo-save {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.photo-save:hover {
+  border-color: rgba(85, 199, 184, 0.42);
+  background: rgba(20, 31, 36, 0.92);
+}
+.photo-save svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: none) {
+  .photo-save {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
 }
 .audio-download {
   margin-top: 12px;
@@ -1544,6 +1608,85 @@
   .manual-input {
     min-height: 52px;
     max-height: 132px;
+  }
+}
+
+/* ---------- Photo viewer ---------- */
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 3vw, 36px);
+  background: rgba(3, 6, 10, 0.78);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  backdrop-filter: blur(22px) saturate(1.2);
+  animation: fade 0.2s ease both;
+}
+.photo-viewer-frame {
+  position: relative;
+  max-width: min(1100px, 100%);
+  max-height: 100%;
+}
+.photo-viewer-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: min(88dvh, 100%);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.55);
+  object-fit: contain;
+}
+.photo-viewer-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 8px;
+}
+.photo-viewer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(13, 20, 24, 0.78);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.photo-viewer:hover .photo-viewer-btn,
+.photo-viewer:focus-within .photo-viewer-btn {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.photo-viewer-btn:hover {
+  border-color: rgba(85, 199, 184, 0.42);
+  background: rgba(20, 31, 36, 0.94);
+}
+.photo-viewer-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (hover: none) {
+  .photo-viewer-btn {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
 }
 

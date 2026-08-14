@@ -1,11 +1,21 @@
 import { GROK_OAUTH_API_BASE, XAI_API_BASE, resolveXaiBaseUrl } from '../xai/xai-http';
 import { parseDataUrl } from '../xai/xai-client';
-import { parseResponsesPayload, spokenImageEditReply, wantsImage, wantsImageEdit } from './grok-chat-backend';
+import {
+  parseResponsesPayload,
+  requestedImageCount,
+  spokenImageEditReply,
+  spokenImageSaveReply,
+  wantsImage,
+  wantsImageEdit,
+  wantsPhotoHelp,
+  wantsSaveImagesToDisk,
+} from './grok-chat-backend';
 
 describe('wantsImage', () => {
   it('detects casual photo requests', () => {
     expect(wantsImage('make a photo for me')).toBeTrue();
     expect(wantsImage('Can you draw a picture of a garden?')).toBeTrue();
+    expect(wantsImage('Can you generate 3 photos of women and save it to my computer')).toBeTrue();
     expect(wantsImage('what time is it')).toBeFalse();
   });
 
@@ -14,6 +24,26 @@ describe('wantsImage', () => {
     expect(wantsImageEdit('remove the background')).toBeTrue();
     expect(wantsImageEdit('what time is it')).toBeFalse();
     expect(spokenImageEditReply('Enhance this photo')).toBe('I enhanced that photo for you.');
+  });
+
+  it('detects when the user still needs to pick a photo', () => {
+    expect(wantsPhotoHelp('Can you help me enhance a photo')).toBeTrue();
+    expect(wantsPhotoHelp('edit this picture')).toBeTrue();
+    expect(wantsPhotoHelp('tell me a joke')).toBeFalse();
+    expect(wantsPhotoHelp('Can you generate 3 photos of women and save it to my computer')).toBeFalse();
+  });
+
+  it('reads how many photos to generate', () => {
+    expect(requestedImageCount('generate 3 photos of women')).toBe(3);
+    expect(requestedImageCount('make two pictures of a garden')).toBe(2);
+    expect(requestedImageCount('draw a photo of a lake')).toBe(1);
+  });
+
+  it('detects save-to-disk requests', () => {
+    expect(wantsSaveImagesToDisk('generate 3 photos of women and save it to my computer')).toBeTrue();
+    expect(wantsSaveImagesToDisk('save them to disk')).toBeTrue();
+    expect(wantsSaveImagesToDisk('make a photo of a garden')).toBeFalse();
+    expect(spokenImageSaveReply(3, 'C:\\src\\photos')).toBe('I saved 3 photos to photos.');
   });
 });
 
