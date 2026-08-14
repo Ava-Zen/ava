@@ -4,7 +4,7 @@ import { detectDeviceCapability, DeviceTier } from './device-capability';
 import { ChatTurn, LlmModelOption, LlmService } from './llm';
 import { CopilotAuthService, inferCopilotAgent } from './copilot/copilot-auth';
 import { CopilotRuntimeService } from './copilot/copilot-client';
-import { GardensService } from './gardens';
+import { ChatsService } from './chats';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 export type AgentRuntime = 'local' | 'copilot';
@@ -29,6 +29,7 @@ export interface AgentTask {
   prompt: string;
   status: AgentTaskStatus;
   engine: AgentEngine;
+  chatId?: string;
   result?: string;
   error?: string;
   progress?: string;
@@ -41,6 +42,8 @@ export interface AgentRunOptions {
   exec?: AgentToolExecutor;
   engine?: AgentEngine;
   agent?: string;
+  allowWrites?: boolean;
+  chatId?: string;
 }
 
 /**
@@ -106,7 +109,7 @@ export class AgentsService {
   private readonly llm = inject(LlmService);
   private readonly copilotAuth = inject(CopilotAuthService);
   private readonly copilot = inject(CopilotRuntimeService);
-  private readonly gardens = inject(GardensService);
+  private readonly chats = inject(ChatsService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
@@ -117,8 +120,8 @@ export class AgentsService {
 
   private readonly modelId = signal<string>(this.loadStoredModel());
   readonly runtime = signal<AgentRuntime>(this.loadRuntime());
-  readonly workspace = computed(() => this.gardens.currentGarden()?.workspace ?? '');
-  readonly allowWrites = computed(() => this.gardens.currentGarden()?.allowLocalTools === true);
+  readonly workspace = computed(() => this.chats.currentChat()?.workspace ?? '');
+  readonly allowWrites = computed(() => this.chats.currentChat()?.allowLocalTools === true);
   readonly copilotModel = signal<string>(this.loadCopilotModel());
 
   readonly selectedModel = computed(
@@ -167,11 +170,11 @@ export class AgentsService {
   }
 
   setWorkspace(path: string): void {
-    this.gardens.setCurrentWorkspace(path);
+    this.chats.setWorkspace(path);
   }
 
   setAllowWrites(allow: boolean): void {
-    this.gardens.setCurrentAllowLocalTools(allow);
+    this.chats.setAllowLocalTools(allow);
   }
 
   setCopilotModel(id: string): void {
@@ -231,6 +234,7 @@ export class AgentsService {
       prompt,
       status: 'queued',
       engine,
+      chatId: options.chatId,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -241,6 +245,9 @@ export class AgentsService {
     if (options.agent) {
       this.agentByTask.set(task.id, options.agent);
     }
+    if (options.allowWrites) {
+      this.allowOnceByTask.add(task.id);
+    }
 
     // Chain onto the queue so tasks execute one at a time.
     this.queue = this.queue.then(() => this.execute(task.id));
@@ -248,6 +255,7 @@ export class AgentsService {
   }
 
   private readonly agentByTask = new Map<string, string>();
+  private readonly allowOnceByTask = new Set<string>();
 
   private async execute(taskId: string): Promise<void> {
     this.patchTask(taskId, { status: 'running' });
@@ -255,7 +263,12 @@ export class AgentsService {
       const task = this.tasks().find(t => t.id === taskId);
       if (!task) return;
       const result = task.engine === 'copilot'
-        ? await this.generateWithCopilot(task.prompt, this.agentByTask.get(taskId), taskId)
+        ? await this.generateWithCopilot(
+          task.prompt,
+          this.agentByTask.get(taskId),
+          taskId,
+          this.allowOnceByTask.has(taskId),
+        )
         : await this.generateLocal(task);
       this.patchTask(taskId, { status: 'done', result, progress: undefined });
     } catch (err: any) {
@@ -268,6 +281,7 @@ export class AgentsService {
     } finally {
       this.toolContext.delete(taskId);
       this.agentByTask.delete(taskId);
+      this.allowOnceByTask.delete(taskId);
     }
   }
 
@@ -278,15 +292,21 @@ export class AgentsService {
       : await this.generate(task.prompt);
   }
 
-  private async generateWithCopilot(prompt: string, agent: string | undefined, taskId: string): Promise<string> {
+  private async generateWithCopilot(
+    prompt: string,
+    agent: string | undefined,
+    taskId: string,
+    allowOnce = false,
+  ): Promise<string> {
     this.patchTask(taskId, { progress: 'Starting GitHub Copilot…' });
+    const allowLocal = allowOnce || this.allowWrites();
     return this.copilot.runTask({
       prompt,
       agent: agent ?? inferCopilotAgent(prompt),
       model: this.copilotModel(),
       workspace: this.workspace(),
-      allowWrites: this.allowWrites(),
-      allowLocalTools: this.allowWrites(),
+      allowWrites: allowLocal,
+      allowLocalTools: allowLocal,
       onEvent: event => {
         if (event.text) this.patchTask(taskId, { progress: event.text });
       },

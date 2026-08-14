@@ -99,13 +99,30 @@
               {{ activityBadgeLabel() }}
             </span>
           </div>
-          @if (copilotSignedIn()) {
-            <p class="chat-workspace">
-              {{ currentWorkspace() ? workspaceLabel() : 'No folder yet' }}
-              · local tools {{ allowLocalTools() ? 'on' : 'off' }}
-              · {{ currentGarden()?.name }}
-            </p>
-          }
+          <div class="chat-switcher" aria-label="Chats">
+            <div class="chat-pills">
+              @for (chat of chatsInGarden(); track chat.id) {
+                <button
+                  type="button"
+                  class="chat-pill"
+                  [class.active]="chat.id === currentChat()?.id"
+                  (click)="selectChat(chat.id)"
+                >
+                  <span>{{ chat.title }}</span>
+                  @if (chatsInGarden().length > 1 && chat.id === currentChat()?.id) {
+                    <span
+                      class="chat-close"
+                      role="button"
+                      tabindex="0"
+                      title="Close chat"
+                      (click)="closeChat($event, chat.id)"
+                    >×</span>
+                  }
+                </button>
+              }
+            </div>
+            <button type="button" class="chat-pill add" title="New chat" (click)="startNewChat()">+</button>
+          </div>
 
           @if (isThinking() && llmThinkingTrace().length) {
             <div class="thinking-trace" aria-label="Ava thinking status">
@@ -150,6 +167,61 @@
                   </button>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
+                    @if (msg.gate?.status === 'open') {
+                      <div class="gate-card">
+                        @if (msg.gate.kind === 'signin') {
+                          @if (copilotDevice(); as device) {
+                            <p>Approve <strong>{{ device.userCode }}</strong> on GitHub</p>
+                            <div class="message-actions">
+                              <button class="message-action" type="button" (click)="openCopilotVerification()">Open GitHub</button>
+                              <button class="message-action" type="button" (click)="cancelCopilotLogin()">Cancel</button>
+                            </div>
+                          } @else {
+                            <div class="message-actions">
+                              <button class="message-action" type="button" (click)="connectCopilotFromChat()">
+                                {{ copilotPending() ? 'Starting…' : 'Sign in to Copilot' }}
+                              </button>
+                            </div>
+                          }
+                        }
+                        @if (msg.gate.kind === 'workspace') {
+                          <div class="message-actions">
+                            <button class="message-action" type="button" (click)="pickWorkspaceFolder()">Choose folder</button>
+                            <button class="message-action" type="button" (click)="startWorkspaceDraft()">Paste a path</button>
+                          </div>
+                          @if (recentWorkspaces().length) {
+                            <div class="message-actions">
+                              @for (path of recentWorkspaces(); track path) {
+                                <button class="message-action" type="button" (click)="chooseRecentWorkspace(path)">
+                                  {{ folderLabel(path) }}
+                                </button>
+                              }
+                            </div>
+                          }
+                          @if (workspaceDraftOpen()) {
+                            <label class="gate-path">
+                              <span class="sr-only">Folder path</span>
+                              <input
+                                [value]="workspaceDraft()"
+                                (input)="workspaceDraft.set($any($event.target).value)"
+                                (keydown.enter)="commitWorkspaceDraft()"
+                                placeholder="C:\src\my-project"
+                              />
+                            </label>
+                          }
+                        }
+                        @if (msg.gate.kind === 'tools') {
+                          <div class="message-actions">
+                            <button class="message-action" type="button" (click)="allowToolsOnce()">Allow once</button>
+                            <button class="message-action" type="button" (click)="allowToolsAlways()">Always in this chat</button>
+                            <button class="message-action danger" type="button" (click)="denyTools()">Not now</button>
+                          </div>
+                        }
+                        @if (copilotError()) {
+                          <small class="copilot-error">{{ copilotError() }}</small>
+                        }
+                      </div>
+                    }
                     @if (msg.images?.length) {
                       <div class="message-images">
                         @for (image of msg.images; track image.dataUrl) {
@@ -237,6 +309,13 @@
                     }
                   } @else {
                     <div class="message-text">{{ msg.text }}</div>
+                    @if (msg.images?.length) {
+                      <div class="message-images">
+                        @for (image of msg.images; track image.dataUrl) {
+                          <img [src]="image.dataUrl" [alt]="image.prompt || 'Attached photo'" />
+                        }
+                      </div>
+                    }
                   }
                 </div>
               </article>
@@ -287,6 +366,14 @@
               >
                 <strong>Add files</strong>
                 <span>Attach local text files into the manual prompt</span>
+              </button>
+              <button
+                class="menu-action"
+                type="button"
+                (click)="openImagePicker()"
+              >
+                <strong>Add photo</strong>
+                <span>Send a local image to Grok Imagine, then say what to change</span>
               </button>
               <button
                 class="menu-action"
@@ -369,79 +456,15 @@
 
       <div class="footer-center">
         <div class="composer-stack">
-          <div class="copilot-bar" #workspaceShell>
-            @if (copilotDevice(); as device) {
-              <div class="copilot-auth">
-                <span>Approve {{ device.userCode }} on GitHub</span>
-                <button type="button" (click)="openCopilotVerification()">Open</button>
-                <button type="button" (click)="cancelCopilotLogin()">Cancel</button>
-              </div>
-            } @else if (copilotPending()) {
-              <div class="copilot-auth">
-                <span>Contacting GitHub…</span>
-                <button type="button" (click)="cancelCopilotLogin()">Cancel</button>
-              </div>
-            } @else if (!copilotSignedIn()) {
-              <button type="button" class="copilot-connect" (click)="connectCopilotFromChat()">
-                Connect Copilot
-              </button>
-              <span class="copilot-hint">Needed for GitHub issues, PRs, and agents</span>
-            } @else {
-              <div class="workspace-picker">
-                <button
-                  type="button"
-                  class="workspace-current"
-                  [class.empty]="!currentWorkspace()"
-                  title="{{ currentWorkspace() || 'Choose a working folder for this garden' }}"
-                  (click)="toggleWorkspaceMenu($event)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 7h7l2 2h9v10H3V7Z"></path>
-                  </svg>
-                  <span>{{ workspaceLabel() }}</span>
+          @if (pendingImages().length) {
+            <div class="pending-photos">
+              @for (image of pendingImages(); track image.dataUrl) {
+                <button type="button" class="pending-photo" (click)="removePendingImage(image.dataUrl)" title="Remove photo">
+                  <img [src]="image.dataUrl" [alt]="image.prompt || 'Selected photo'" />
                 </button>
-                @if (workspaceMenuOpen()) {
-                  <div class="workspace-menu" role="menu">
-                    <button type="button" (click)="pickWorkspaceFolder()">Choose folder…</button>
-                    <button type="button" (click)="startWorkspaceDraft()">Paste a path</button>
-                    @if (recentWorkspaces().length) {
-                      <p>Recent folders</p>
-                      @for (path of recentWorkspaces(); track path) {
-                        <button type="button" (click)="chooseRecentWorkspace(path)">
-                          <strong>{{ folderLabel(path) }}</strong>
-                          <small>{{ path }}</small>
-                        </button>
-                      }
-                    }
-                    @if (workspaceDraftOpen()) {
-                      <label>
-                        <span class="sr-only">Workspace path</span>
-                        <input
-                          [value]="workspaceDraft()"
-                          (input)="workspaceDraft.set($any($event.target).value)"
-                          (keydown.enter)="commitWorkspaceDraft()"
-                          placeholder="C:\src\my-project"
-                        />
-                      </label>
-                    }
-                  </div>
-                }
-              </div>
-              <button
-                type="button"
-                class="local-tools-toggle"
-                [class.on]="allowLocalTools()"
-                (click)="toggleLocalTools()"
-                [attr.aria-pressed]="allowLocalTools()"
-                title="Allow Copilot to edit files and run commands in this garden's folder"
-              >
-                Local tools {{ allowLocalTools() ? 'on' : 'off' }}
-              </button>
-            }
-            @if (copilotError()) {
-              <span class="copilot-error">{{ copilotError() }}</span>
-            }
-          </div>
+              }
+            </div>
+          }
           <div class="composer-row">
             @if (manualInputEnabled()) {
               <label class="manual-composer">
@@ -544,6 +567,16 @@
         title="Choose files to add to the manual prompt"
         accept=".txt,.md,.markdown,.json,.csv,.ts,.tsx,.js,.jsx,.html,.css,.scss,.xml,.yml,.yaml,.log,text/*"
         (change)="onFilesSelected($event)"
+      />
+      <input
+        #imagePicker
+        class="sr-only"
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+        aria-label="Choose a photo for Grok Imagine"
+        title="Choose a photo for Grok Imagine"
+        (change)="onImagesSelected($event)"
       />
       <input
         #audioFilePicker

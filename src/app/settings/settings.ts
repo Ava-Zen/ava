@@ -74,7 +74,7 @@ export class Settings {
     void this.refreshModelFiles();
     if (this.xai.signedIn()) void this.ttsService.refreshGrokVoices();
     effect(() => {
-      this.workspaceDraft = this.currentGarden()?.workspace ?? '';
+      this.workspaceDraft = this.agentsService.workspace();
     });
   }
 

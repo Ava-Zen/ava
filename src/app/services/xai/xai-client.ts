@@ -111,6 +111,26 @@ export class XaiClient {
     return await res.blob();
   }
 
+  async editImage(
+    prompt: string,
+    images: Array<{ dataUrl: string }>,
+  ): Promise<{ dataUrl: string; prompt?: string } | null> {
+    const refs = images
+      .map(image => parseDataUrl(image.dataUrl))
+      .filter((image): image is { url: string; type: 'image_url' } => !!image);
+    if (!refs.length) return null;
+
+    const body = JSON.stringify({
+      model: 'grok-imagine-image-2.0',
+      prompt,
+      image: refs[0],
+      images: refs.length > 1 ? refs : undefined,
+      n: 1,
+      response_format: 'b64_json',
+    });
+    return this.postImagine('/images/edits', body, prompt);
+  }
+
   async generateImage(prompt: string): Promise<{ dataUrl: string; prompt?: string } | null> {
     const body = JSON.stringify({
       model: 'grok-imagine-image-2.0',
@@ -118,10 +138,18 @@ export class XaiClient {
       n: 1,
       response_format: 'b64_json',
     });
+    return this.postImagine('/images/generations', body, prompt);
+  }
+
+  private async postImagine(
+    path: string,
+    body: string,
+    prompt: string,
+  ): Promise<{ dataUrl: string; prompt?: string } | null> {
     for (const kind of ['media', 'chat'] as const) {
       try {
         const res = await this.request(
-          '/images/generations',
+          path,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -156,6 +184,15 @@ export class XaiClient {
     const data = (await res.json()) as { text?: string };
     return (data.text || '').trim();
   }
+}
+
+export function parseDataUrl(dataUrl: string): { url: string; type: 'image_url' } | null {
+  const value = dataUrl.trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:image/')) {
+    return { url: value, type: 'image_url' };
+  }
+  return { url: `data:image/jpeg;base64,${value}`, type: 'image_url' };
 }
 
 function writeAscii(view: DataView, offset: number, value: string): void {

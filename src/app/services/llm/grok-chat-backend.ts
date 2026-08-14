@@ -102,6 +102,15 @@ export class GrokChatBackend implements ChatBackend {
   async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult> {
     if (!this.loaded) throw new Error('Grok is not connected.');
 
+    const userText = lastUserText(messages);
+    if (options.images?.length) {
+      const edited = await this.client.editImage(userText, options.images);
+      if (!edited) {
+        throw new Error('Grok Imagine could not edit that photo. Try another image or sign in again.');
+      }
+      return { text: spokenImageEditReply(userText), images: [edited] };
+    }
+
     const oauth = this.auth.method() === 'oauth';
     const tools = resolveGrokTools(messages, oauth);
     const payload: {
@@ -153,8 +162,8 @@ export class GrokChatBackend implements ChatBackend {
     }
 
     const result = parseResponsesPayload(await res.json());
-    if (result.images?.length || !wantsImage(lastUserText(messages))) return result;
-    const fallback = await this.client.generateImage(lastUserText(messages));
+    if (result.images?.length || !wantsImage(userText)) return result;
+    const fallback = await this.client.generateImage(userText);
     return fallback ? { ...result, images: [fallback] } : result;
   }
 
@@ -182,4 +191,17 @@ export function wantsImage(text: string): boolean {
   return /\b(draw|sketch|paint|imagine|generate|make|create|take|shoot|render)\b.{0,60}\b(image|picture|photo|photograph|illustration|art|pic)\b|\b(image|picture|photo|photograph) of\b|\bmake me (a|an)\b/i.test(
     text,
   );
+}
+
+export function wantsImageEdit(text: string): boolean {
+  return /\b(enhance|improve|edit|fix|upscale|sharpen|colorize|restyle|retouch|restore|brighten|crop|remove|replace)\b/i.test(
+    text,
+  );
+}
+
+export function spokenImageEditReply(prompt: string): string {
+  if (/enhance|improve|upscale|sharpen|retouch/i.test(prompt)) {
+    return 'I enhanced that photo for you.';
+  }
+  return 'I updated that photo for you.';
 }

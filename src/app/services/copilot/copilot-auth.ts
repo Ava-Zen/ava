@@ -242,6 +242,7 @@ export function isSupportedGithubToken(value: string): boolean {
 
 export function inferCopilotAgent(text: string): string | undefined {
   if (isGithubWorkRequest(text)) return 'github';
+  if (isFileWorkRequest(text)) return 'implementer';
   const lower = text.toLowerCase();
   if (/\b(implement|edit|fix|change|write code|refactor|patch|apply)\b/.test(lower)) {
     return 'implementer';
@@ -251,6 +252,18 @@ export function inferCopilotAgent(text: string): string | undefined {
     return 'researcher';
   }
   return undefined;
+}
+
+export function isFileWorkRequest(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    /\b(create|write|save|make|generate|add|put)\b[\s\S]{0,60}\b(file|txt|text file|\.txt|\.md|\.json|folder|directory)\b/.test(lower) ||
+    /\b(file|txt|text file)\b[\s\S]{0,32}\b(with (this )?content|called|named)\b/.test(lower)
+  );
+}
+
+export function needsLocalFileAccess(text: string): boolean {
+  return isFileWorkRequest(text) || inferCopilotAgent(text) === 'implementer';
 }
 
 export function isExplicitCopilotRequest(text: string): boolean {
@@ -273,7 +286,12 @@ export function shouldUseCopilot(
   runtimeIsCopilot: boolean,
 ): boolean {
   if (!signedIn) return false;
-  return runtimeIsCopilot || isExplicitCopilotRequest(text) || isGithubWorkRequest(text);
+  return (
+    runtimeIsCopilot ||
+    isExplicitCopilotRequest(text) ||
+    isGithubWorkRequest(text) ||
+    isFileWorkRequest(text)
+  );
 }
 
 interface DeviceCodeResponse {

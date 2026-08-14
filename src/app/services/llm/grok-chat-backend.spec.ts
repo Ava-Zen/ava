@@ -1,11 +1,26 @@
 import { GROK_OAUTH_API_BASE, XAI_API_BASE, resolveXaiBaseUrl } from '../xai/xai-http';
-import { parseResponsesPayload, wantsImage } from './grok-chat-backend';
+import { parseDataUrl } from '../xai/xai-client';
+import { parseResponsesPayload, spokenImageEditReply, wantsImage, wantsImageEdit } from './grok-chat-backend';
 
 describe('wantsImage', () => {
   it('detects casual photo requests', () => {
     expect(wantsImage('make a photo for me')).toBeTrue();
     expect(wantsImage('Can you draw a picture of a garden?')).toBeTrue();
     expect(wantsImage('what time is it')).toBeFalse();
+  });
+
+  it('detects photo edits', () => {
+    expect(wantsImageEdit('Enhance this photo')).toBeTrue();
+    expect(wantsImageEdit('remove the background')).toBeTrue();
+    expect(wantsImageEdit('what time is it')).toBeFalse();
+    expect(spokenImageEditReply('Enhance this photo')).toBe('I enhanced that photo for you.');
+  });
+});
+
+describe('parseDataUrl', () => {
+  it('keeps data URIs and wraps raw base64', () => {
+    expect(parseDataUrl('data:image/png;base64,abc')?.url).toBe('data:image/png;base64,abc');
+    expect(parseDataUrl('abc123')?.url).toBe('data:image/jpeg;base64,abc123');
   });
 });
 

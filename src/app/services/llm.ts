@@ -4,6 +4,7 @@ import {
   ChatBackend,
   ChatResult,
   ChatTurn,
+  GeneratedImage,
   LlmModelOption,
   resolveChatBackend,
 } from './llm/chat-backend';
@@ -298,7 +299,11 @@ export class LlmService {
    * Generates a spoken-style reply for the given user text and prior history.
    * History should be the recent conversation turns (excluding the system prompt).
    */
-  async generate(userText: string, history: ChatTurn[] = []): Promise<ChatResult> {
+  async generate(
+    userText: string,
+    history: ChatTurn[] = [],
+    images?: GeneratedImage[],
+  ): Promise<ChatResult> {
     this.thinkingTrace.set([
       'Preparing context',
       this.isCloudExclusive() ? 'Talking to Grok' : 'Building local prompt',
@@ -328,6 +333,7 @@ export class LlmService {
         temperature: 0.7,
         topP: 0.9,
         modelId: this.selectedModel().id,
+        images,
       });
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);

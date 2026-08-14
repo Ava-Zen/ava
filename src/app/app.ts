@@ -8,8 +8,10 @@ import { Onboarding } from './onboarding/onboarding';
 import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
+import { ChatsService } from './services/chats';
 import { TtsService } from './services/tts';
 import { LlmService, ChatTurn, GeneratedImage } from './services/llm';
+import { wantsImageEdit } from './services/llm/grok-chat-backend';
 import { AgentsService, AgentTask, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
@@ -19,17 +21,29 @@ import { XaiAuthService } from './services/xai/xai-auth';
 import {
   CopilotAuthService,
   inferCopilotAgent,
+  isFileWorkRequest,
   isGithubWorkRequest,
+  needsLocalFileAccess,
   shouldUseCopilot,
 } from './services/copilot/copilot-auth';
+
+type CopilotGateKind = 'signin' | 'workspace' | 'tools';
+
+interface CopilotGate {
+  kind: CopilotGateKind;
+  prompt: string;
+  status: 'open' | 'done' | 'dismissed';
+}
 
 interface Message {
   role: 'user' | 'ava';
   text: string;
   timestamp: Date;
+  id?: string;
   downloadId?: string;
   exportTaskId?: string;
   pending?: boolean;
+  gate?: CopilotGate;
   /** Generation diagnostics shown in small text under Ava replies. */
   debug?: {
     model: string;
@@ -62,6 +76,15 @@ interface AudioExportTask {
   status: 'running' | 'complete' | 'failed' | 'aborted';
   current: number;
   total: number;
+}
+
+export function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read that file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -123,6 +146,7 @@ export class App {
   ]);
 
   private readonly gardensService = inject(GardensService);
+  private readonly chats = inject(ChatsService);
   private readonly tts = inject(TtsService);
   private readonly llm = inject(LlmService);
   private readonly agents = inject(AgentsService);
@@ -136,6 +160,7 @@ export class App {
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
+  @ViewChild('imagePicker') private imagePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('audioFilePicker') private audioFilePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
@@ -167,15 +192,18 @@ export class App {
   protected readonly workspaceMenuOpen = signal(false);
   protected readonly workspaceDraftOpen = signal(false);
   protected readonly workspaceDraft = signal('');
+  protected readonly pendingImages = signal<GeneratedImage[]>([]);
   protected readonly copilotSignedIn = this.copilotAuth.signedIn;
   protected readonly copilotPending = this.copilotAuth.loginPending;
   protected readonly copilotDevice = this.copilotAuth.deviceLogin;
   protected readonly copilotError = this.copilotAuth.error;
-  protected readonly currentWorkspace = computed(() => this.currentGarden()?.workspace ?? '');
-  protected readonly allowLocalTools = computed(() => this.currentGarden()?.allowLocalTools === true);
+  protected readonly currentChat = this.chats.currentChat;
+  protected readonly chatsInGarden = this.chats.chatsInGarden;
+  protected readonly currentWorkspace = computed(() => this.currentChat()?.workspace ?? '');
+  protected readonly allowLocalTools = computed(() => this.currentChat()?.allowLocalTools === true);
   protected readonly recentWorkspaces = this.gardensService.recentWorkspaces;
   protected readonly workspaceLabel = computed(() =>
-    this.gardensService.workspaceLabel(this.currentWorkspace())
+    this.chats.workspaceLabel(this.currentWorkspace())
   );
   /** Right-click quick-select menu for the conversation model. */
   protected readonly modelMenuOpen = signal(false);
@@ -228,13 +256,13 @@ export class App {
   private activeAudioExportController: AbortController | null = null;
   private audioPreviewPlayer: HTMLAudioElement | null = null;
 
-  // Per-garden message storage (keyed by garden id)
-  private messagesByGarden = signal<Record<string, Message[]>>({});
+  // Per-chat message storage
+  private messagesByChat = signal<Record<string, Message[]>>({});
+  private pendingCopilot: { prompt: string; chatId: string; allowOnce?: boolean } | null = null;
 
   protected readonly messages = computed(() => {
-    const gardenId = this.currentGarden()?.id || 'default';
-    const all = this.messagesByGarden();
-    return all[gardenId] ?? [];
+    const chatId = this.chats.currentChatId() || 'default';
+    return this.messagesByChat()[chatId] ?? [];
   });
 
   // Background agent tasks (Qwen) surfaced for the UI.
@@ -272,7 +300,7 @@ export class App {
   }
 
   private announceAgentResult(task: AgentTask) {
-    const gardenId = this.currentGarden()?.id;
+    const gardenId = task.chatId || this.threadId();
     if (!gardenId) return;
 
     if (task.status === 'error') {
@@ -293,14 +321,15 @@ export class App {
   }
 
   private addAvaNotice(gardenId: string, text: string, via?: Message['via']) {
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    const chatId = this.chats.chats().some(chat => chat.id === gardenId) ? gardenId : this.threadId();
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push({
       role: 'ava',
       text,
       timestamp: new Date(),
       via,
     });
-    this.setGardenMessages(gardenId, currentMsgs);
+    this.setChatMessages(chatId, currentMsgs);
     this.scrollToBottom();
   }
 
@@ -342,7 +371,7 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!spoken || !gardenId) return;
 
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
     currentMsgs.push({
       role: 'ava',
       text: spoken,
@@ -367,7 +396,41 @@ export class App {
 
   protected selectGarden(id: string) {
     this.gardensService.selectGarden(id);
+    this.chats.ensureChatForGarden(id);
     this.currentTranscript.set('');
+  }
+
+  protected selectChat(id: string) {
+    this.chats.selectChat(id);
+    this.pendingImages.set([]);
+    this.currentTranscript.set('');
+    this.scrollToBottom();
+  }
+
+  protected startNewChat() {
+    const gardenId = this.currentGarden()?.id;
+    this.pendingCopilot = null;
+    this.pendingImages.set([]);
+    this.chats.createChat(gardenId);
+    this.currentTranscript.set('');
+    this.manualPrompt.set('');
+    this.composerNotice.set('');
+  }
+
+  protected closeChat(event: Event, id: string) {
+    event.stopPropagation();
+    const remaining = this.chatsInGarden();
+    if (remaining.length <= 1) {
+      this.resetCurrentConversation();
+      return;
+    }
+    this.messagesByChat.update(all => {
+      const copy = { ...all };
+      delete copy[id];
+      return copy;
+    });
+    this.chats.deleteChat(id);
+    this.saveMessagesToStorage();
   }
 
   protected openSettings() {
@@ -476,6 +539,9 @@ export class App {
       'ava-copilot-allow-writes',
       'ava-copilot-model',
       'ava-workspace-recents',
+      'ava-chats',
+      'ava-current-chat',
+      'ava-messages-by-chat',
       'ava-onboarding-complete',
       'ava-user-profile',
       'ava-messages-by-garden',
@@ -561,6 +627,95 @@ export class App {
     this.filePickerEl?.nativeElement.click();
   }
 
+  protected openImagePicker() {
+    this.setManualInputMode(true);
+    this.imagePickerEl?.nativeElement.click();
+  }
+
+  protected removePendingImage(dataUrl: string) {
+    this.pendingImages.update(list => list.filter(image => image.dataUrl !== dataUrl));
+  }
+
+  private takePendingImages(): GeneratedImage[] {
+    const images = this.pendingImages();
+    if (images.length) this.pendingImages.set([]);
+    return images;
+  }
+
+  private lastChatImage(): GeneratedImage | undefined {
+    const msgs = this.messages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const image = msgs[i].images?.[0];
+      if (image?.dataUrl) return image;
+    }
+    return undefined;
+  }
+
+  protected async onImagesSelected(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    const files = Array.from(input?.files ?? []);
+    if (input) input.value = '';
+    if (!files.length) return;
+
+    const loaded: GeneratedImage[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        loaded.push({
+          dataUrl: await readFileAsDataUrl(file),
+          prompt: file.name,
+        });
+      } catch {
+        this.composerNotice.set(`Could not read ${file.name}.`);
+      }
+    }
+    if (!loaded.length) {
+      this.composerNotice.set('Choose a JPG, PNG, or similar photo.');
+      return;
+    }
+    this.pendingImages.update(list => [...list, ...loaded].slice(0, 3));
+    this.composerNotice.set(
+      loaded.length === 1
+        ? `${loaded[0].prompt} is ready. Say what to change, like enhance this photo.`
+        : `${loaded.length} photos are ready. Say what Grok Imagine should change.`,
+    );
+  }
+
+  private async handleImagineEdit(gardenId: string, text: string, attached: GeneratedImage[]) {
+    const source = attached.length ? attached : this.lastChatImage() ? [this.lastChatImage()!] : [];
+    if (!source.length) {
+      await this.handleLlmReply(gardenId, text);
+      return;
+    }
+    if (!this.xai.signedIn()) {
+      await this.respond(gardenId, 'Sign in with Grok in Settings and I can edit that photo with Imagine.');
+      return;
+    }
+
+    this.status.set('speaking');
+    this.speak('I will send that photo to Imagine.');
+
+    try {
+      const startedAt = performance.now();
+      const result = await this.llm.generate(text, this.buildChatHistory(gardenId), source);
+      const debug: Message['debug'] = {
+        model: 'Grok Imagine',
+        durationMs: performance.now() - startedAt,
+      };
+      await this.respond(
+        gardenId,
+        result.text.trim() || 'I updated that photo for you.',
+        debug,
+        undefined,
+        result.images,
+      );
+    } catch (e) {
+      console.error('Imagine edit failed', e);
+      const friendly = this.llm.friendlyError(e);
+      await this.respond(gardenId, friendly ?? 'I could not edit that photo just now.', undefined, text);
+    }
+  }
+
   protected openAudioFilePicker() {
     this.composerMenuOpen.set(false);
     this.audioFilePickerEl?.nativeElement.click();
@@ -642,8 +797,8 @@ export class App {
   // Garden management handlers (called from Settings component)
   protected onCreateGarden(data: { name: string; description?: string }) {
     const garden = this.gardensService.createGarden(data.name, data.description);
-    // Initialize empty messages for new garden
-    this.setGardenMessages(garden.id, []);
+    const chat = this.chats.createChat(garden.id, 'New chat');
+    this.setChatMessages(chat.id, []);
   }
 
   protected onUpdateGarden(data: { id: string; name: string; description?: string }) {
@@ -651,80 +806,116 @@ export class App {
   }
 
   protected onDeleteGarden(id: string) {
+    const chatIds = this.chats.chats().filter(chat => chat.gardenId === id).map(chat => chat.id);
     this.gardensService.deleteGarden(id);
-    // Clean up messages for deleted garden
-    this.messagesByGarden.update(all => {
+    this.chats.deleteForGarden(id);
+    this.messagesByChat.update(all => {
       const copy = { ...all };
-      delete copy[id];
+      for (const chatId of chatIds) delete copy[chatId];
       return copy;
     });
     this.saveMessagesToStorage();
   }
 
-  private setGardenMessages(gardenId: string, msgs: Message[]) {
-    this.messagesByGarden.update(all => ({
+  private threadId(): string {
+    const gardenId = this.currentGarden()?.id;
+    const current = this.chats.currentChat();
+    if (current && (!gardenId || current.gardenId === gardenId)) return current.id;
+    if (gardenId) return this.chats.ensureChatForGarden(gardenId).id;
+    return this.chats.currentChatId() || 'default';
+  }
+
+  private setChatMessages(chatId: string, msgs: Message[]) {
+    this.messagesByChat.update(all => ({
       ...all,
-      [gardenId]: msgs
+      [chatId]: msgs
     }));
     this.saveMessagesToStorage();
   }
 
-  private addUserMessage(gardenId: string, text: string, pending = false): Message {
-    const message: Message = { role: 'user', text, timestamp: new Date(), pending };
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+  private setGardenMessages(id: string, msgs: Message[]) {
+    const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
+    this.setChatMessages(chatId, msgs);
+  }
+
+  private addUserMessage(id: string, text: string, pending = false, images?: GeneratedImage[]): Message {
+    const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
+    const message: Message = { role: 'user', text, timestamp: new Date(), pending, images };
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push(message);
-    this.setGardenMessages(gardenId, currentMsgs);
+    this.setChatMessages(chatId, currentMsgs);
+    if (!pending) this.chats.touch(chatId, this.titleFromPrompt(text));
     this.scrollToBottom();
     return message;
   }
 
-  private updateMessageText(gardenId: string, target: Message, text: string, pending = false) {
-    const currentMsgs = this.messagesByGarden()[gardenId] || [];
+  private titleFromPrompt(text: string): string {
+    const clean = text.replace(/\s+/g, ' ').trim();
+    if (!clean) return 'New chat';
+    return clean.length > 28 ? `${clean.slice(0, 26).trim()}…` : clean;
+  }
+
+  private updateMessageText(id: string, target: Message, text: string, pending = false) {
+    const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
+    const currentMsgs = this.messagesByChat()[chatId] || [];
     const nextMsgs = currentMsgs.map(msg =>
-      msg === target || msg.timestamp === target.timestamp
+      msg === target || msg.id === target.id || msg.timestamp === target.timestamp
         ? { ...msg, text, pending }
         : msg
     );
-    this.setGardenMessages(gardenId, nextMsgs);
+    this.setChatMessages(chatId, nextMsgs);
     this.scrollToBottom();
   }
 
-  private removeMessage(gardenId: string, target: Message) {
-    const currentMsgs = this.messagesByGarden()[gardenId] || [];
-    this.setGardenMessages(
-      gardenId,
-      currentMsgs.filter(msg => msg !== target && msg.timestamp !== target.timestamp)
+  private removeMessage(id: string, target: Message) {
+    const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
+    const currentMsgs = this.messagesByChat()[chatId] || [];
+    this.setChatMessages(
+      chatId,
+      currentMsgs.filter(msg => msg !== target && msg.id !== target.id && msg.timestamp !== target.timestamp)
     );
   }
 
   private loadMessagesFromStorage() {
     try {
-      const saved = localStorage.getItem('ava-messages-by-garden');
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, Message[]>;
-        const hydrated = Object.fromEntries(
-          Object.entries(parsed).map(([gardenId, messages]) => [
-            gardenId,
-            messages.map(msg => ({
-              ...msg,
-              timestamp: new Date(msg.timestamp as unknown as string)
-            }))
-          ])
-        );
-        this.messagesByGarden.set(hydrated);
+      const byChat = localStorage.getItem('ava-messages-by-chat');
+      const raw = byChat || localStorage.getItem('ava-messages-by-garden');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, Message[]>;
+      const hydrated = Object.fromEntries(
+        Object.entries(parsed).map(([key, messages]) => [
+          key,
+          messages.map(msg => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp as unknown as string)
+          }))
+        ])
+      );
+      if (byChat) {
+        this.messagesByChat.set(hydrated);
+        return;
       }
+      const migrated: Record<string, Message[]> = {};
+      for (const [gardenId, messages] of Object.entries(hydrated)) {
+        const chat = this.chats.ensureChatForGarden(gardenId);
+        migrated[chat.id] = messages;
+        const firstUser = messages.find(msg => msg.role === 'user')?.text;
+        if (firstUser) this.chats.touch(chat.id, this.titleFromPrompt(firstUser));
+      }
+      this.messagesByChat.set(migrated);
+      this.saveMessagesToStorage();
     } catch {}
   }
 
   private saveMessagesToStorage() {
     try {
       const persisted = Object.fromEntries(
-        Object.entries(this.messagesByGarden()).map(([gardenId, messages]) => [
-          gardenId,
+        Object.entries(this.messagesByChat()).map(([chatId, messages]) => [
+          chatId,
           messages.filter(message => !message.pending)
         ])
       );
-      localStorage.setItem('ava-messages-by-garden', JSON.stringify(persisted));
+      localStorage.setItem('ava-messages-by-chat', JSON.stringify(persisted));
     } catch {}
   }
 
@@ -1464,24 +1655,35 @@ export class App {
     if (!gardenId) return;
 
     if (this.isNewConversationCommand(text)) {
-      this.resetCurrentConversation(gardenId);
+      this.startNewChat();
       this.status.set('thinking');
       this.isThinking.set(true);
-      await this.respond(gardenId, 'Okay, starting a fresh conversation.');
+      await this.respond(this.threadId(), 'Okay, starting a fresh conversation.');
       return;
     }
 
     this.status.set('thinking');
     this.isThinking.set(true);
 
+    const attached = this.takePendingImages();
     if (existingUserMessage) {
       this.updateMessageText(gardenId, existingUserMessage, text);
     } else {
-      this.addUserMessage(gardenId, text);
+      this.addUserMessage(gardenId, text, false, attached);
+    }
+
+    if (attached.length || (wantsImageEdit(text) && this.lastChatImage())) {
+      await this.handleImagineEdit(gardenId, text, attached);
+      return;
     }
 
     // 1) Copilot / GitHub / background-task request.
-    if (this.detectAgentRequest(text) || shouldUseCopilot(text, this.copilotAuth.signedIn(), this.agents.runtime() === 'copilot') || isGithubWorkRequest(text)) {
+    if (
+      this.detectAgentRequest(text) ||
+      shouldUseCopilot(text, this.copilotAuth.signedIn(), this.agents.runtime() === 'copilot') ||
+      isGithubWorkRequest(text) ||
+      isFileWorkRequest(text)
+    ) {
       await this.handleAgentRequest(gardenId, text);
       return;
     }
@@ -1599,7 +1801,7 @@ export class App {
     retryFor?: string,
     images?: GeneratedImage[],
   ) {
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor, images };
     currentMsgs.push(avaMsg);
     this.setGardenMessages(gardenId, currentMsgs);
@@ -1623,7 +1825,7 @@ export class App {
     try {
       const history = this.buildChatHistory(gardenId);
       const startedAt = performance.now();
-      const result = await this.llm.generate(text, history);
+      const result = await this.llm.generate(text, history, this.takePendingImages());
       const reply = result.text.trim();
       const debug: Message['debug'] = {
         model: this.llm.activeModel()?.name ?? (this.llm.isCloudExclusive() ? 'Grok' : 'local model'),
@@ -1666,23 +1868,21 @@ export class App {
       this.copilotAuth.signedIn(),
       this.agents.runtime() === 'copilot',
     );
-    if ((wantsCopilot || isGithubWorkRequest(text)) && !this.copilotAuth.signedIn()) {
-      await this.respond(
-        gardenId,
-        'I can pull that with GitHub Copilot. Sign in from the Copilot bar below, then ask again.',
-      );
+    const chatId = this.threadId();
+
+    if ((wantsCopilot || isGithubWorkRequest(text) || isFileWorkRequest(text)) && !this.copilotAuth.signedIn()) {
+      this.pendingCopilot = { prompt: text, chatId };
+      this.addGateMessage(chatId, 'signin', text, 'I can do that with GitHub Copilot. Sign in and I will continue.');
+      await this.respond(chatId, 'Sign in with GitHub Copilot and I will take it from there.');
       return;
     }
 
     if (wantsCopilot) {
-      this.agents.runTask(text, {
-        engine: 'copilot',
-        agent: inferCopilotAgent(text),
-      });
-      this.agents.ensureLoaded().catch(() => {});
+      if (this.gateCopilotIfNeeded(chatId, text)) return;
+      this.startCopilotTask(text);
       await this.respond(
-        gardenId,
-        'Okay, I will ask Copilot to work on that in the background and let you know when it is ready.',
+        chatId,
+        'Okay, I will ask Copilot to work on that and let you know when it is ready.',
       );
       return;
     }
@@ -1707,6 +1907,79 @@ export class App {
     this.respond(gardenId, ack);
   }
 
+  private gateCopilotIfNeeded(chatId: string, text: string): boolean {
+    const needsFiles = needsLocalFileAccess(text);
+    if (needsFiles && !this.currentWorkspace()) {
+      this.pendingCopilot = { prompt: text, chatId };
+      this.addGateMessage(
+        chatId,
+        'workspace',
+        text,
+        'Choose a folder for this chat first. Copilot will work there.',
+      );
+      void this.speak('Choose a folder for this chat and I will continue.');
+      this.isThinking.set(false);
+      this.status.set('idle');
+      return true;
+    }
+    if (needsFiles && !this.allowLocalTools() && !this.pendingCopilot?.allowOnce) {
+      this.pendingCopilot = { prompt: text, chatId };
+      this.addGateMessage(
+        chatId,
+        'tools',
+        text,
+        'Allow Copilot to create and edit files in this folder?',
+      );
+      void this.speak('Do you want to allow Copilot to change files in this folder?');
+      this.isThinking.set(false);
+      this.status.set('idle');
+      return true;
+    }
+    return false;
+  }
+
+  private addGateMessage(chatId: string, kind: CopilotGateKind, prompt: string, text: string) {
+    const message: Message = {
+      role: 'ava',
+      text,
+      timestamp: new Date(),
+      id: `gate-${Date.now()}-${kind}`,
+      gate: { kind, prompt, status: 'open' },
+    };
+    this.setChatMessages(chatId, [...(this.messagesByChat()[chatId] || []), message]);
+    this.scrollToBottom();
+  }
+
+  private closeOpenGates(chatId: string, status: 'done' | 'dismissed') {
+    const msgs = this.messagesByChat()[chatId] || [];
+    this.setChatMessages(
+      chatId,
+      msgs.map(msg =>
+        msg.gate?.status === 'open' ? { ...msg, gate: { ...msg.gate, status } } : msg
+      ),
+    );
+  }
+
+  private startCopilotTask(text: string, allowOnce = false) {
+    this.agents.runTask(text, {
+      engine: 'copilot',
+      agent: inferCopilotAgent(text),
+      allowWrites: allowOnce || this.allowLocalTools(),
+      chatId: this.threadId(),
+    });
+    this.agents.ensureLoaded().catch(() => {});
+    this.pendingCopilot = null;
+  }
+
+  private async continuePendingCopilot() {
+    const pending = this.pendingCopilot;
+    if (!pending) return;
+    if (this.chats.currentChatId() !== pending.chatId) this.chats.selectChat(pending.chatId);
+    if (this.gateCopilotIfNeeded(pending.chatId, pending.prompt)) return;
+    this.startCopilotTask(pending.prompt, pending.allowOnce === true);
+    await this.respond(pending.chatId, 'Okay, Copilot is on it.');
+  }
+
   /** Resolves an MCP tool by name and invokes it, returning text for the agent. */
   private async runMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
     const tool = this.mcp.findTool(name);
@@ -1728,7 +2001,7 @@ export class App {
 
   /** Builds recent conversation history (excluding the latest user turn) for the LLM. */
   private buildChatHistory(gardenId: string, maxTurns = 6): ChatTurn[] {
-    const msgs = this.messagesByGarden()[gardenId] || [];
+    const msgs = this.messagesByChat()[gardenId] || [];
     // Drop the just-added user message; it is passed separately.
     const prior = msgs.slice(0, -1).slice(-maxTurns);
     return prior.map<ChatTurn>(m => ({
@@ -2167,7 +2440,7 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
 
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
     currentMsgs.push({ role: 'ava', text, timestamp: new Date(), exportTaskId });
     this.setGardenMessages(gardenId, currentMsgs);
     this.scrollToBottom();
@@ -2177,7 +2450,7 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
 
-    const currentMsgs = this.messagesByGarden()[gardenId] || [];
+    const currentMsgs = this.messagesByChat()[gardenId] || [];
     const nextMsgs = currentMsgs.map(msg =>
       msg.exportTaskId === exportTaskId
         ? { ...msg, text, downloadId: downloadId ?? msg.downloadId }
@@ -2199,7 +2472,7 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
 
-    const currentMsgs = [...(this.messagesByGarden()[gardenId] || [])];
+    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
     currentMsgs.push({ role: 'ava', text, timestamp: new Date() });
     this.setGardenMessages(gardenId, currentMsgs);
     this.scrollToBottom();
@@ -2452,12 +2725,11 @@ export class App {
 
   protected clearConversation() {
     this.composerMenuOpen.set(false);
-    const gardenId = this.currentGarden()?.id;
-    if (gardenId) this.resetCurrentConversation(gardenId);
+    this.resetCurrentConversation();
   }
 
-  private resetCurrentConversation(gardenId: string) {
-    this.setGardenMessages(gardenId, []);
+  private resetCurrentConversation(_gardenId?: string) {
+    this.setChatMessages(this.threadId(), []);
     this.currentTranscript.set('');
     this.manualPrompt.set('');
     this.composerNotice.set('');
@@ -2589,13 +2861,15 @@ export class App {
   }
 
   protected toggleLocalTools() {
-    this.gardensService.setCurrentAllowLocalTools(!this.allowLocalTools());
+    this.chats.setAllowLocalTools(!this.allowLocalTools());
   }
 
   protected chooseRecentWorkspace(path: string) {
-    this.gardensService.setCurrentWorkspace(path);
+    this.chats.setWorkspace(path);
     this.workspaceMenuOpen.set(false);
     this.workspaceDraftOpen.set(false);
+    this.closeOpenGates(this.threadId(), 'done');
+    void this.continuePendingCopilot();
   }
 
   protected startWorkspaceDraft() {
@@ -2605,9 +2879,11 @@ export class App {
   }
 
   protected commitWorkspaceDraft() {
-    this.gardensService.setCurrentWorkspace(this.workspaceDraft());
+    this.chats.setWorkspace(this.workspaceDraft());
     this.workspaceDraftOpen.set(false);
     this.workspaceMenuOpen.set(false);
+    this.closeOpenGates(this.threadId(), 'done');
+    void this.continuePendingCopilot();
   }
 
   async pickWorkspaceFolder() {
@@ -2616,7 +2892,9 @@ export class App {
       const { invoke } = await import('@tauri-apps/api/core');
       const path = await invoke<string | null>('copilot_pick_folder');
       if (path?.trim()) {
-        this.gardensService.setCurrentWorkspace(path.trim());
+        this.chats.setWorkspace(path.trim());
+        this.closeOpenGates(this.threadId(), 'done');
+        void this.continuePendingCopilot();
         return;
       }
     } catch {
@@ -2629,10 +2907,33 @@ export class App {
     if (this.copilotAuth.loginPending() || this.copilotAuth.signedIn()) return;
     try {
       await this.copilotAuth.loginWithGitHub();
-      if (this.copilotAuth.signedIn()) this.agents.setRuntime('copilot');
+      if (this.copilotAuth.signedIn()) {
+        this.agents.setRuntime('copilot');
+        this.closeOpenGates(this.threadId(), 'done');
+        void this.continuePendingCopilot();
+      }
     } catch {
-      // surfaced on the Copilot bar
+      // surfaced on the inline card
     }
+  }
+
+  protected allowToolsOnce() {
+    if (this.pendingCopilot) this.pendingCopilot.allowOnce = true;
+    this.closeOpenGates(this.threadId(), 'done');
+    void this.continuePendingCopilot();
+  }
+
+  protected allowToolsAlways() {
+    this.chats.setAllowLocalTools(true);
+    this.closeOpenGates(this.threadId(), 'done');
+    void this.continuePendingCopilot();
+  }
+
+  protected denyTools() {
+    this.closeOpenGates(this.threadId(), 'dismissed');
+    this.pendingCopilot = null;
+    const chatId = this.threadId();
+    void this.respond(chatId, 'Okay, I will not change files.');
   }
 
   openCopilotVerification() {

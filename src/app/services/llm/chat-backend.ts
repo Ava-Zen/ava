@@ -57,6 +57,8 @@ export interface ChatGenerateOptions {
   modelId?: string;
   /** Streaming hook; backends that support it deliver incremental text. */
   onToken?: (chunk: string) => void;
+  /** Local photos to send to Grok Imagine for editing. */
+  images?: GeneratedImage[];
 }
 
 /** Result of a successful backend load. */

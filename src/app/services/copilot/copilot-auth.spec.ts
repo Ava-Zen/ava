@@ -1,8 +1,10 @@
 import {
   inferCopilotAgent,
   isExplicitCopilotRequest,
+  isFileWorkRequest,
   isGithubWorkRequest,
   isSupportedGithubToken,
+  needsLocalFileAccess,
   shouldUseCopilot,
 } from './copilot-auth';
 
@@ -26,7 +28,14 @@ describe('Copilot auth helpers', () => {
     expect(inferCopilotAgent('implement a fix for the crash')).toBe('implementer');
     expect(inferCopilotAgent('plan the migration steps')).toBe('planner');
     expect(inferCopilotAgent('get my GitHub issues')).toBe('github');
+    expect(inferCopilotAgent('Create a txt file with this content')).toBe('implementer');
     expect(inferCopilotAgent('just think about this')).toBeUndefined();
+  });
+
+  it('detects local file work that needs a workspace and tools', () => {
+    expect(isFileWorkRequest('Create a txt file with this content')).toBeTrue();
+    expect(needsLocalFileAccess('save this to notes.md')).toBeTrue();
+    expect(isFileWorkRequest('get my GitHub issues')).toBeFalse();
   });
 
   it('routes GitHub work to Copilot when signed in', () => {

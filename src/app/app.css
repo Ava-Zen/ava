@@ -326,16 +326,17 @@
 
 .voice-status {
   width: min(460px, 100%);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-width: 0;
   padding: clamp(12px, 2vmin, 18px) clamp(14px, 2.4vmin, 22px);
   border-radius: 22px;
   background: rgba(4, 8, 13, 0.5);
   border: 1px solid var(--line);
-  text-align: left;
+  text-align: center;
 }
 .voice-status span {
   min-width: 0;
@@ -343,12 +344,13 @@
   font-weight: 780;
   overflow-wrap: anywhere;
   word-break: break-word;
+  text-align: center;
 }
 .voice-status small {
   min-width: 0;
   color: var(--muted);
   font-size: clamp(0.82rem, 1.8vmin, 1rem);
-  text-align: right;
+  text-align: center;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;
@@ -1238,11 +1240,101 @@
 .composer-note {
   margin: 0 2px;
 }
-.chat-workspace {
-  margin: -4px 0 10px;
+.chat-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 12px;
+  min-width: 0;
+}
+.chat-pills {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-pills::-webkit-scrollbar {
+  display: none;
+}
+.chat-pill {
+  flex: 0 0 auto;
+  min-height: 34px;
+  max-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 650;
+  background: rgba(255, 255, 255, 0.04);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 720;
+  cursor: pointer;
+}
+.chat-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-pill.active {
+  color: #06110f;
+  background: linear-gradient(135deg, #55c7b8, #bdd7a6);
+  border-color: transparent;
+}
+.chat-pill.add {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.chat-close {
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.7;
+}
+.chat-close:hover {
+  opacity: 1;
+}
+.gate-card {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.gate-path input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+}
+.pending-photos {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pending-photo {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+.pending-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .sr-only {
   position: absolute;
