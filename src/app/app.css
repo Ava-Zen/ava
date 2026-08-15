@@ -896,9 +896,12 @@
   position: relative;
   z-index: 1;
   padding: 4px 0 2px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  display: grid;
+  grid-template-columns:
+    minmax(var(--settings-size), 1fr)
+    minmax(0, 720px)
+    minmax(var(--settings-size), 1fr);
+  align-items: end;
   overflow: visible;
   background: transparent;
   border: 0;
@@ -913,8 +916,10 @@
   align-items: center;
 }
 .input-card {
+  grid-column: 2;
+  justify-self: center;
   width: max-content;
-  max-width: min(720px, calc(100% - var(--settings-size) - 24px));
+  max-width: 100%;
   min-width: 0;
   display: grid;
   gap: 8px;
@@ -928,7 +933,8 @@
 }
 .input-card.expanded,
 .input-card.has-attachments {
-  width: min(720px, calc(100% - var(--settings-size) - 24px));
+  width: 720px;
+  max-width: 100%;
 }
 .input-card.has-attachments {
   padding-top: 12px;
@@ -1117,9 +1123,10 @@
   color: var(--text);
 }
 .footer-settings {
-  position: absolute;
-  right: 0;
-  bottom: var(--composer-pad);
+  grid-column: 3;
+  justify-self: end;
+  align-self: end;
+  margin-bottom: var(--composer-pad);
 }
 .settings-btn {
   width: var(--settings-size);
@@ -1138,22 +1145,16 @@
 }
 .expand-type {
   flex: 0 0 auto;
-  width: auto;
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 12px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0;
   border: 0;
-  border-radius: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
   color: var(--muted);
   background: transparent;
-  font: inherit;
-  font-size: 0.98rem;
-  font-weight: 650;
-  white-space: nowrap;
-  text-align: left;
   cursor: pointer;
   transition: color 0.18s ease, background 0.18s ease;
 }
@@ -1172,9 +1173,6 @@
   background: rgba(255, 255, 255, 0.05);
 }
 .expand-type.active {
-  width: 40px;
-  padding: 0;
-  justify-content: center;
   color: var(--text);
   background: rgba(255, 255, 255, 0.1);
 }
@@ -1588,39 +1586,13 @@
 @media (max-width: 860px) {
   .ava-footer {
     --composer-pad: 8px;
-    display: flex;
-    align-items: flex-end;
-    justify-content: flex-start;
-    gap: 8px;
   }
   .input-card {
-    flex: 0 1 auto;
-    width: max-content;
-    max-width: 100%;
     border-radius: 24px;
     padding: var(--composer-pad) 10px;
   }
-  .input-card.expanded,
-  .input-card.has-attachments {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
-  }
-  .footer-settings {
-    position: static;
-    flex: 0 0 auto;
-    margin-bottom: var(--composer-pad);
-  }
   .composer-row {
     gap: 4px;
-  }
-  .expand-type {
-    width: 40px;
-    padding: 0;
-    justify-content: center;
-  }
-  .expand-type span {
-    display: none;
   }
   .attachment-file {
     max-width: min(180px, 52vw);
