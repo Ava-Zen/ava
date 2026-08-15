@@ -85,6 +85,13 @@ interface AudioExportTask {
   total: number;
 }
 
+interface PendingFile {
+  id: string;
+  name: string;
+  sizeLabel: string;
+  text: string;
+}
+
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -135,6 +142,31 @@ export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const copy = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(copy).set(bytes);
   return new Blob([copy], { type: mime });
+}
+
+export function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (typeof error === 'object' && (error as { name?: string }).name === 'AbortError') return true;
+  const message = String((error as { message?: string })?.message ?? error);
+  return /aborted|The user aborted a request|cancelled by the user/i.test(message);
+}
+
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 10 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function composeManualPrompt(
+  text: string,
+  files: Array<{ name: string; text: string }>,
+): string {
+  const parts = files.map(file => `Use this file as context:\nFile: ${file.name}\n\n${file.text}`);
+  const trimmed = text.trim();
+  if (trimmed) parts.push(trimmed);
+  return parts.join('\n\n');
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -212,6 +244,7 @@ export class App {
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('imagePicker') private imagePickerEl?: ElementRef<HTMLInputElement>;
   @ViewChild('audioFilePicker') private audioFilePickerEl?: ElementRef<HTMLInputElement>;
+  @ViewChild('manualInput') private manualInputEl?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('workspaceShell') private workspaceShellEl?: ElementRef<HTMLDivElement>;
@@ -260,6 +293,10 @@ export class App {
   protected readonly workspaceDraftOpen = signal(false);
   protected readonly workspaceDraft = signal('');
   protected readonly pendingImages = signal<GeneratedImage[]>([]);
+  protected readonly pendingFiles = signal<PendingFile[]>([]);
+  protected readonly hasComposerAttachments = computed(
+    () => this.pendingImages().length > 0 || this.pendingFiles().length > 0,
+  );
   protected readonly viewerImage = signal<GeneratedImage | null>(null);
   protected readonly viewerZoom = signal(1);
   protected readonly viewerPanX = signal(0);
@@ -298,8 +335,18 @@ export class App {
   protected readonly audioPreviewPaused = signal(false);
   protected readonly copiedMessageId = signal<string | null>(null);
   protected readonly canSubmitManualPrompt = computed(() =>
-    this.manualPrompt().trim().length > 0 && !this.isThinking()
+    !this.isThinking() && (
+      this.manualPrompt().trim().length > 0 ||
+      this.pendingFiles().length > 0 ||
+      this.pendingImages().length > 0
+    )
   );
+  protected readonly canAbortRequest = computed(() =>
+    this.isThinking() ||
+    this.status() === 'speaking' ||
+    this.isGeneratingAudioFile()
+  );
+  private requestSeq = 0;
   protected readonly chatModelLoading = computed(() => this.llm.isLoading());
   protected readonly chatModelLoadStatus = computed(() => this.llm.downloadStatus());
 
@@ -484,6 +531,7 @@ export class App {
   protected selectChat(id: string) {
     this.chats.selectChat(id);
     this.pendingImages.set([]);
+    this.pendingFiles.set([]);
     this.currentTranscript.set('');
     this.scrollToBottom();
   }
@@ -494,6 +542,7 @@ export class App {
     this.pendingPhotoEdit = null;
     this.pendingImageSave = null;
     this.pendingImages.set([]);
+    this.pendingFiles.set([]);
     this.closePhotoViewer();
     this.chats.createChat(gardenId);
     this.currentTranscript.set('');
@@ -684,6 +733,10 @@ export class App {
     void this.toggleVoice();
   }
 
+  protected toggleManualInput() {
+    this.setManualInputMode(!this.manualInputEnabled());
+  }
+
   protected setManualInputMode(enabled: boolean) {
     if (enabled && this.voiceEnabled()) {
       this.disableVoiceChannel();
@@ -693,7 +746,15 @@ export class App {
     this.composerMenuOpen.set(false);
     if (!enabled) {
       this.composerNotice.set('');
+      return;
     }
+
+    setTimeout(() => {
+      const el = this.manualInputEl?.nativeElement;
+      if (!el) return;
+      el.focus();
+      this.resizeManualInput();
+    }, 0);
   }
 
   protected onAddButtonClick(event: Event) {
@@ -704,9 +765,15 @@ export class App {
   protected onManualPromptInput(event: Event) {
     const target = event.target as HTMLTextAreaElement | null;
     this.manualPrompt.set(target?.value ?? '');
+    this.resizeManualInput();
   }
 
   protected onManualPromptKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      this.setManualInputMode(false);
+      return;
+    }
+
     if (event.key !== 'Enter' || event.shiftKey) return;
 
     event.preventDefault();
@@ -714,12 +781,24 @@ export class App {
   }
 
   protected async submitManualPrompt() {
-    const text = this.manualPrompt().trim();
-    if (!text || this.isThinking()) return;
+    if (this.isThinking()) return;
+
+    const files = this.takePendingFiles();
+    const text = composeManualPrompt(this.manualPrompt(), files)
+      || (this.pendingImages().length ? 'Look at this photo.' : '');
+    if (!text) return;
 
     this.manualPrompt.set('');
     this.composerNotice.set('');
+    this.resizeManualInput();
     await this.handleUserSpeech(text);
+  }
+
+  private resizeManualInput() {
+    const el = this.manualInputEl?.nativeElement;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 152)}px`;
   }
 
   protected queueQuickPrompt(prompt: string) {
@@ -903,6 +982,16 @@ export class App {
     this.pendingImages.update(list => list.filter(image => image.dataUrl !== dataUrl));
   }
 
+  protected removePendingFile(id: string) {
+    this.pendingFiles.update(list => list.filter(file => file.id !== id));
+  }
+
+  private takePendingFiles(): PendingFile[] {
+    const files = this.pendingFiles();
+    if (files.length) this.pendingFiles.set([]);
+    return files;
+  }
+
   private takePendingImages(): GeneratedImage[] {
     const images = this.pendingImages();
     if (images.length) this.pendingImages.set([]);
@@ -945,18 +1034,14 @@ export class App {
       this.pendingPhotoEdit = null;
       this.closeOpenGates(pendingEdit.chatId, 'done');
       this.attachImagesToLastUser(pendingEdit.chatId, loaded);
+      const seq = this.beginRequest();
       this.status.set('thinking');
       this.isThinking.set(true);
-      await this.handleImagineEdit(pendingEdit.chatId, pendingEdit.prompt, loaded);
+      await this.handleImagineEdit(pendingEdit.chatId, pendingEdit.prompt, loaded, seq);
       return;
     }
 
     this.pendingImages.update(list => [...list, ...loaded].slice(0, 3));
-    this.composerNotice.set(
-      loaded.length === 1
-        ? `${loaded[0].prompt} is ready. Say what to change, like enhance this photo.`
-        : `${loaded.length} photos are ready. Say what Grok Imagine should change.`,
-    );
   }
 
   private attachImagesToLastUser(chatId: string, images: GeneratedImage[]) {
@@ -970,14 +1055,19 @@ export class App {
     }
   }
 
-  private async handleImagineEdit(gardenId: string, text: string, attached: GeneratedImage[]) {
+  private async handleImagineEdit(
+    gardenId: string,
+    text: string,
+    attached: GeneratedImage[],
+    requestSeq = this.requestSeq,
+  ) {
     const source = attached.length ? attached : this.lastChatImage() ? [this.lastChatImage()!] : [];
     if (!source.length) {
-      await this.handleLlmReply(gardenId, text);
+      await this.handleLlmReply(gardenId, text, requestSeq);
       return;
     }
     if (!this.xai.signedIn()) {
-      await this.respond(gardenId, 'Sign in with Grok in Settings and I can edit that photo with Imagine.');
+      await this.respond(gardenId, 'Sign in with Grok in Settings and I can edit that photo with Imagine.', undefined, undefined, undefined, requestSeq);
       return;
     }
 
@@ -987,6 +1077,7 @@ export class App {
     try {
       const startedAt = performance.now();
       const result = await this.llm.generate(text, this.buildChatHistory(gardenId), source);
+      if (!this.isCurrentRequest(requestSeq)) return;
       const debug: Message['debug'] = {
         model: 'Grok Imagine',
         durationMs: performance.now() - startedAt,
@@ -997,17 +1088,19 @@ export class App {
         debug,
         undefined,
         result.images,
+        requestSeq,
       );
     } catch (e) {
+      if (!this.isCurrentRequest(requestSeq) || isAbortError(e)) return;
       console.error('Imagine edit failed', e);
       const friendly = this.llm.friendlyError(e);
-      await this.respond(gardenId, friendly ?? 'I could not edit that photo just now.', undefined, text);
+      await this.respond(gardenId, friendly ?? 'I could not edit that photo just now.', undefined, text, undefined, requestSeq);
     }
   }
 
-  private async handleImagineGenerate(chatId: string, text: string) {
+  private async handleImagineGenerate(chatId: string, text: string, requestSeq = this.requestSeq) {
     if (!this.xai.signedIn()) {
-      await this.respond(chatId, 'Sign in with Grok in Settings and I can make that photo with Imagine.');
+      await this.respond(chatId, 'Sign in with Grok in Settings and I can make that photo with Imagine.', undefined, undefined, undefined, requestSeq);
       return;
     }
 
@@ -1017,6 +1110,7 @@ export class App {
     try {
       const startedAt = performance.now();
       const result = await this.llm.generate(text, this.buildChatHistory(chatId));
+      if (!this.isCurrentRequest(requestSeq)) return;
       const images = result.images ?? [];
       const debug: Message['debug'] = {
         model: 'Grok Imagine',
@@ -1027,7 +1121,7 @@ export class App {
       if (wantsSaveImagesToDisk(text) && images.length) {
         if (!this.currentWorkspace()) {
           this.pendingImageSave = { prompt: text, chatId, images };
-          await this.respond(chatId, spoken, debug, undefined, images);
+          await this.respond(chatId, spoken, debug, undefined, images, requestSeq);
           this.addGateMessage(
             chatId,
             'workspace',
@@ -1038,18 +1132,20 @@ export class App {
           return;
         }
         const saved = await this.saveImagesToWorkspace(images, this.currentWorkspace());
+        if (!this.isCurrentRequest(requestSeq)) return;
         const follow = saved.length
           ? ` ${spokenImageSaveReply(saved.length, this.currentWorkspace())}`
           : ' I could not save them to that folder, but you can still save from the photo.';
-        await this.respond(chatId, `${spoken}${follow}`, debug, undefined, images);
+        await this.respond(chatId, `${spoken}${follow}`, debug, undefined, images, requestSeq);
         return;
       }
 
-      await this.respond(chatId, spoken, debug, undefined, images);
+      await this.respond(chatId, spoken, debug, undefined, images, requestSeq);
     } catch (e) {
+      if (!this.isCurrentRequest(requestSeq) || isAbortError(e)) return;
       console.error('Imagine generate failed', e);
       const friendly = this.llm.friendlyError(e);
-      await this.respond(chatId, friendly ?? 'I could not make that photo just now.', undefined, text);
+      await this.respond(chatId, friendly ?? 'I could not make that photo just now.', undefined, text, undefined, requestSeq);
     }
   }
 
@@ -1061,47 +1157,59 @@ export class App {
   protected async onFilesSelected(event: Event) {
     const input = event.target as HTMLInputElement | null;
     const files = Array.from(input?.files ?? []);
+    if (input) input.value = '';
     if (files.length === 0) return;
 
-    const segments: string[] = [];
+    const loaded: PendingFile[] = [];
+    let failed = 0;
 
     for (const file of files) {
       if (!this.isTextFile(file)) {
-        segments.push(`[${file.name}] could not be added because it does not look like a text file.`);
+        failed += 1;
         continue;
       }
 
       try {
         const raw = await file.text();
         const trimmed = raw.trim();
-        if (!trimmed) {
-          segments.push(`File: ${file.name}\n\n[empty file]`);
-          continue;
-        }
+        const clipped = !trimmed
+          ? '[empty file]'
+          : trimmed.length > this.MAX_FILE_CHARS
+            ? `${trimmed.slice(0, this.MAX_FILE_CHARS)}\n\n[truncated to ${this.MAX_FILE_CHARS.toLocaleString()} characters]`
+            : trimmed;
 
-        const clipped = trimmed.length > this.MAX_FILE_CHARS
-          ? `${trimmed.slice(0, this.MAX_FILE_CHARS)}\n\n[truncated to ${this.MAX_FILE_CHARS.toLocaleString()} characters]`
-          : trimmed;
-
-        segments.push(`Use this file as context:\nFile: ${file.name}\n\n${clipped}`);
+        loaded.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          name: file.name,
+          sizeLabel: formatFileSize(file.size),
+          text: clipped,
+        });
       } catch {
-        segments.push(`File: ${file.name}\n\n[could not read this file]`);
+        failed += 1;
       }
     }
 
-    for (const segment of segments) {
-      this.appendToManualPrompt(segment);
+    if (loaded.length) {
+      this.pendingFiles.update(list => [...list, ...loaded].slice(0, 6));
+      this.setManualInputMode(true);
+    }
+
+    if (!loaded.length) {
+      this.composerNotice.set(
+        files.length === 1
+          ? `${files[0].name} does not look like a text file.`
+          : 'Those files could not be added.',
+      );
+      return;
     }
 
     this.composerNotice.set(
-      files.length === 1
-        ? `Added ${files[0].name} to the manual prompt.`
-        : `Added ${files.length} files to the manual prompt.`
+      failed
+        ? `${loaded.length} file${loaded.length === 1 ? '' : 's'} ready. ${failed} could not be added.`
+        : loaded.length === 1
+          ? `${loaded[0].name} is ready.`
+          : `${loaded.length} files are ready.`,
     );
-
-    if (input) {
-      input.value = '';
-    }
   }
 
   protected async onAudioFileSelected(event: Event) {
@@ -1991,11 +2099,13 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
 
+    const seq = this.beginRequest();
+
     if (this.isNewConversationCommand(text)) {
       this.startNewChat();
       this.status.set('thinking');
       this.isThinking.set(true);
-      await this.respond(this.threadId(), 'Okay, starting a fresh conversation.');
+      await this.respond(this.threadId(), 'Okay, starting a fresh conversation.', undefined, undefined, undefined, seq);
       return;
     }
 
@@ -2013,7 +2123,7 @@ export class App {
     const referringToExisting = /\b(this|that)\b/i.test(text);
 
     if (attached.length) {
-      await this.handleImagineEdit(chatId, text, attached);
+      await this.handleImagineEdit(chatId, text, attached, seq);
       return;
     }
 
@@ -2032,12 +2142,12 @@ export class App {
     }
 
     if (wantsImageEdit(text) && this.lastChatImage()) {
-      await this.handleImagineEdit(chatId, text, attached);
+      await this.handleImagineEdit(chatId, text, attached, seq);
       return;
     }
 
     if (wantsImage(text)) {
-      await this.handleImagineGenerate(chatId, text);
+      await this.handleImagineGenerate(chatId, text, seq);
       return;
     }
 
@@ -2048,13 +2158,13 @@ export class App {
       isGithubWorkRequest(text) ||
       isFileWorkRequest(text)
     ) {
-      await this.handleAgentRequest(gardenId, text);
+      await this.handleAgentRequest(gardenId, text, seq);
       return;
     }
 
     // 2) Weather questions → answer right now with the built-in weather tools.
     if (this.detectWeatherRequest(text)) {
-      await this.handleWeatherRequest(gardenId, text);
+      await this.handleWeatherRequest(gardenId, text, seq);
       return;
     }
 
@@ -2062,12 +2172,13 @@ export class App {
     const fixed = this.generateAvaResponse(text);
     if (fixed) {
       await this.delay(350 + Math.random() * 350);
-      this.respond(gardenId, fixed);
+      if (!this.isCurrentRequest(seq)) return;
+      this.respond(gardenId, fixed, undefined, undefined, undefined, seq);
       return;
     }
 
     // 4) Anything else → Gemma. Acknowledge immediately, then think.
-    await this.handleLlmReply(gardenId, text);
+    await this.handleLlmReply(gardenId, text, seq);
   }
 
   /** Detects when the user is explicitly asking for a background agent/task. */
@@ -2087,10 +2198,10 @@ export class App {
   }
 
   /** Answers a weather question now using the built-in weather tools + Qwen. */
-  private async handleWeatherRequest(gardenId: string, text: string) {
+  private async handleWeatherRequest(gardenId: string, text: string, requestSeq = this.requestSeq) {
     const weatherTools = this.mcp.tools().filter((t) => t.serverId === WEATHER_SERVER_ID);
     if (!weatherTools.length) {
-      await this.handleLlmReply(gardenId, text);
+      await this.handleLlmReply(gardenId, text, requestSeq);
       return;
     }
 
@@ -2122,10 +2233,12 @@ export class App {
           instructions,
         )
       ).trim();
-      this.respond(gardenId, reply || 'I could not get the weather just now.');
+      if (!this.isCurrentRequest(requestSeq)) return;
+      this.respond(gardenId, reply || 'I could not get the weather just now.', undefined, undefined, undefined, requestSeq);
     } catch (e) {
+      if (!this.isCurrentRequest(requestSeq) || isAbortError(e)) return;
       console.error('Weather request failed', e);
-      this.respond(gardenId, 'Sorry, I could not get the weather right now.');
+      this.respond(gardenId, 'Sorry, I could not get the weather right now.', undefined, undefined, undefined, requestSeq);
     }
   }
 
@@ -2164,7 +2277,10 @@ export class App {
     debug?: Message['debug'],
     retryFor?: string,
     images?: GeneratedImage[],
+    requestSeq = this.requestSeq,
   ) {
+    if (!this.isCurrentRequest(requestSeq)) return;
+
     const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
     const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor, images };
     currentMsgs.push(avaMsg);
@@ -2176,12 +2292,13 @@ export class App {
 
     await this.speak(response);
 
+    if (!this.isCurrentRequest(requestSeq)) return;
     if (this.status() === 'speaking') this.status.set('idle');
     this.resumeVoiceCaptureIfEnabled();
   }
 
   /** Routes an open-ended question to the local LLM, speaking a filler line first. */
-  private async handleLlmReply(gardenId: string, text: string) {
+  private async handleLlmReply(gardenId: string, text: string, requestSeq = this.requestSeq) {
     // Speak the filler immediately so the user knows Ava is working.
     this.status.set('speaking');
     this.speak(this.pickThinkingFiller());
@@ -2190,6 +2307,7 @@ export class App {
       const history = this.buildChatHistory(gardenId);
       const startedAt = performance.now();
       const result = await this.llm.generate(text, history, this.takePendingImages());
+      if (!this.isCurrentRequest(requestSeq)) return;
       const reply = result.text.trim();
       const debug: Message['debug'] = {
         model: this.llm.activeModel()?.name ?? (this.llm.isCloudExclusive() ? 'Grok' : 'local model'),
@@ -2202,14 +2320,16 @@ export class App {
           debug,
           undefined,
           result.images,
+          requestSeq,
         );
       } else {
-        this.respond(gardenId, 'I am not sure how to answer that just yet.', debug, text);
+        this.respond(gardenId, 'I am not sure how to answer that just yet.', debug, text, undefined, requestSeq);
       }
     } catch (e) {
+      if (!this.isCurrentRequest(requestSeq) || isAbortError(e)) return;
       console.error('LLM reply failed', e);
       const friendly = this.llm.friendlyError(e);
-      this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.', undefined, text);
+      this.respond(gardenId, friendly ?? 'Sorry, I could not think that through just now.', undefined, text, undefined, requestSeq);
     }
   }
 
@@ -2220,13 +2340,14 @@ export class App {
     const gardenId = this.currentGarden()?.id;
     if (!gardenId) return;
 
+    const seq = this.beginRequest();
     this.status.set('thinking');
     this.isThinking.set(true);
-    await this.handleLlmReply(gardenId, retryFor);
+    await this.handleLlmReply(gardenId, retryFor, seq);
   }
 
   /** Hands the request to a local or Copilot background agent and confirms by voice. */
-  private async handleAgentRequest(gardenId: string, text: string) {
+  private async handleAgentRequest(gardenId: string, text: string, requestSeq = this.requestSeq) {
     const signedIn = this.copilotAuth.signedIn();
     const explicitCopilot = shouldUseCopilot(text, signedIn);
     const wantsCopilot =
@@ -2237,7 +2358,7 @@ export class App {
     if ((explicitCopilot || isGithubWorkRequest(text) || isFileWorkRequest(text)) && !signedIn) {
       this.pendingCopilot = { prompt: text, chatId };
       this.addGateMessage(chatId, 'signin', text, 'I can do that with GitHub Copilot. Sign in and I will continue.');
-      await this.respond(chatId, 'Sign in with GitHub Copilot and I will take it from there.');
+      await this.respond(chatId, 'Sign in with GitHub Copilot and I will take it from there.', undefined, undefined, undefined, requestSeq);
       return;
     }
 
@@ -2247,6 +2368,10 @@ export class App {
       await this.respond(
         chatId,
         'Okay, I will ask Copilot to work on that and let you know when it is ready.',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
       );
       return;
     }
@@ -2268,7 +2393,7 @@ export class App {
 
     const ack =
       'Okay, I will work on that in the background and let you know when it is ready.';
-    this.respond(gardenId, ack);
+    this.respond(gardenId, ack, undefined, undefined, undefined, requestSeq);
   }
 
   private gateCopilotIfNeeded(chatId: string, text: string): boolean {
@@ -3084,6 +3209,28 @@ export class App {
     this.resumeVoiceCaptureIfEnabled();
   }
 
+  private beginRequest(): number {
+    this.requestSeq += 1;
+    return this.requestSeq;
+  }
+
+  private isCurrentRequest(seq: number): boolean {
+    return seq === this.requestSeq;
+  }
+
+  /** Aborts the in-flight reply, image job, or spoken response. */
+  protected stopCurrentRequest() {
+    this.requestSeq += 1;
+    this.llm.cancel();
+    this.agents.abortActive();
+    this.stopSpeaking();
+    if (this.activeAudioExportController) {
+      this.activeAudioExportController.abort();
+    }
+    this.isThinking.set(false);
+    if (this.status() !== 'listening') this.status.set('idle');
+  }
+
   private async playAudioBlob(blob: Blob): Promise<boolean> {
     this.stopCurrentAudio();
     const url = URL.createObjectURL(blob);
@@ -3183,6 +3330,8 @@ export class App {
     this.setChatMessages(this.threadId(), []);
     this.currentTranscript.set('');
     this.manualPrompt.set('');
+    this.pendingFiles.set([]);
+    this.pendingImages.set([]);
     this.composerNotice.set('');
     this.status.set('idle');
     this.speechGen++;

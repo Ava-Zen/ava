@@ -153,6 +153,7 @@ export class LlmService {
   private backend: ChatBackend | null = null;
   private loadPromise: Promise<ChatBackend> | null = null;
   private loadedDevice: string | null = null;
+  private generationAbort: AbortController | null = null;
 
   constructor() {
     if (this.intelligenceMode() === 'grok' && !this.xai.signedIn()) {
@@ -299,11 +300,20 @@ export class LlmService {
    * Generates a spoken-style reply for the given user text and prior history.
    * History should be the recent conversation turns (excluding the system prompt).
    */
+  /** Stops the in-flight generation so the UI can abort a request. */
+  cancel(): void {
+    this.generationAbort?.abort();
+    this.generationAbort = null;
+    this.thinkingTrace.set([]);
+    this.backend?.cancel?.();
+  }
+
   async generate(
     userText: string,
     history: ChatTurn[] = [],
     images?: GeneratedImage[],
   ): Promise<ChatResult> {
+    const signal = this.beginGeneration();
     this.thinkingTrace.set([
       'Preparing context',
       this.isCloudExclusive() ? 'Talking to Grok' : 'Building local prompt',
@@ -311,6 +321,7 @@ export class LlmService {
 
     try {
       const backend = await this.ensureLoaded();
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       // Qwen3 ONNX builds emit <think>…</think> reasoning that eats the short
       // spoken-reply token budget; the /no_think soft switch disables it.
       // Only the web engine needs it — newer Qwen3.5 GGUFs don't understand
@@ -334,19 +345,24 @@ export class LlmService {
         topP: 0.9,
         modelId: this.selectedModel().id,
         images,
+        signal,
       });
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
       const reply = this.sanitizeModelOutput(raw.text);
       this.thinkingTrace.set([]);
       return { text: reply, images: raw.images };
     } catch (e) {
+      this.thinkingTrace.set([]);
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
         console.warn('[LLM] Accelerator generation failed; CPU fallback is available in Settings', e);
         this.loadInfo.set('GPU/NPU chat failed during generation. CPU fallback is available in Settings.');
       }
-      this.thinkingTrace.set([]);
       throw e;
+    } finally {
+      if (this.generationAbort?.signal === signal) this.generationAbort = null;
     }
   }
 
@@ -355,14 +371,30 @@ export class LlmService {
     messages: ChatTurn[],
     options?: { maxNewTokens?: number; temperature?: number; topP?: number },
   ): Promise<ChatResult> {
+    const signal = this.beginGeneration();
     const backend = await this.ensureLoaded();
-    return backend.generate(messages, {
-      maxNewTokens: options?.maxNewTokens ?? 1024,
-      doSample: true,
-      temperature: options?.temperature ?? 0.6,
-      topP: options?.topP ?? 0.95,
-      modelId: this.selectedModel().id,
-    });
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    try {
+      const result = await backend.generate(messages, {
+        maxNewTokens: options?.maxNewTokens ?? 1024,
+        doSample: true,
+        temperature: options?.temperature ?? 0.6,
+        topP: options?.topP ?? 0.95,
+        modelId: this.selectedModel().id,
+        signal,
+      });
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      return result;
+    } finally {
+      if (this.generationAbort?.signal === signal) this.generationAbort = null;
+    }
+  }
+
+  private beginGeneration(): AbortSignal {
+    this.generationAbort?.abort();
+    const abort = new AbortController();
+    this.generationAbort = abort;
+    return abort.signal;
   }
 
   private isRecoverableAcceleratorRuntimeError(error: unknown): boolean {
@@ -396,6 +428,9 @@ export class LlmService {
     }
     if (/cannot use the API|rate-limiting/i.test(message)) {
       return message;
+    }
+    if ((error as { name?: string })?.name === 'AbortError' || /aborted/i.test(message)) {
+      return null;
     }
     return null;
   }

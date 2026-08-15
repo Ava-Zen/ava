@@ -378,236 +378,293 @@
     </section>
 
     <footer class="ava-footer" aria-label="Conversation actions">
-      <div class="footer-side footer-side-start">
-        <div class="action-menu-shell" #primaryActionShell>
-          <button
-            class="tool-btn add-tool"
-            type="button"
-            [attr.aria-expanded]="composerMenuOpen()"
-            aria-haspopup="menu"
-            aria-label="Open add menu"
-            title="Add"
-            (click)="onAddButtonClick($event)"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 5v14"></path>
-              <path d="M5 12h14"></path>
-            </svg>
-          </button>
-
-          @if (composerMenuOpen()) {
-            <div class="action-menu" role="group" aria-label="Add options">
-              <div class="menu-header">
-                <span>Actions</span>
-                <button
-                  class="menu-close"
-                  type="button"
-                  aria-label="Close add menu"
-                  (click)="composerMenuOpen.set(false)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M6 6l12 12"></path>
-                    <path d="M18 6L6 18"></path>
+      <div
+        class="input-card"
+        [class.expanded]="manualInputEnabled()"
+        [class.has-attachments]="hasComposerAttachments()"
+      >
+        @if (hasComposerAttachments()) {
+          <div class="composer-attachments" aria-label="Attachments">
+            @for (image of pendingImages(); track image.dataUrl) {
+              <button
+                type="button"
+                class="attachment-thumb"
+                (click)="removePendingImage(image.dataUrl)"
+                title="Remove photo"
+                [attr.aria-label]="'Remove ' + (image.prompt || 'photo')"
+              >
+                <img [src]="image.dataUrl" [alt]="image.prompt || 'Selected photo'" />
+                <span class="attachment-remove" aria-hidden="true">×</span>
+              </button>
+            }
+            @for (file of pendingFiles(); track file.id) {
+              <button
+                type="button"
+                class="attachment-file"
+                (click)="removePendingFile(file.id)"
+                title="Remove file"
+                [attr.aria-label]="'Remove ' + file.name"
+              >
+                <span class="attachment-file-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
+                    <path d="M14 3v5h5"></path>
                   </svg>
+                </span>
+                <span class="attachment-file-meta">
+                  <strong>{{ file.name }}</strong>
+                  <small>{{ file.sizeLabel }}</small>
+                </span>
+                <span class="attachment-remove" aria-hidden="true">×</span>
+              </button>
+            }
+          </div>
+        }
+
+        <div class="composer-row">
+          <div class="action-menu-shell" #primaryActionShell>
+            <button
+              class="card-icon-btn add-btn"
+              type="button"
+              [attr.aria-expanded]="composerMenuOpen()"
+              aria-haspopup="menu"
+              aria-label="Open add menu"
+              title="Add"
+              (click)="onAddButtonClick($event)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14"></path>
+                <path d="M5 12h14"></path>
+              </svg>
+            </button>
+
+            @if (composerMenuOpen()) {
+              <div class="action-menu" role="group" aria-label="Add options">
+                <div class="menu-header">
+                  <span>Actions</span>
+                  <button
+                    class="menu-close"
+                    type="button"
+                    aria-label="Close add menu"
+                    (click)="composerMenuOpen.set(false)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 6l12 12"></path>
+                      <path d="M18 6L6 18"></path>
+                    </svg>
+                  </button>
+                </div>
+                <button
+                  class="menu-action"
+                  type="button"
+                  (click)="openFilePicker()"
+                >
+                  <strong>Add files</strong>
+                  <span>Attach a local text file. You’ll see a preview before sending.</span>
+                </button>
+                <button
+                  class="menu-action"
+                  type="button"
+                  (click)="openImagePicker()"
+                >
+                  <strong>Add photo</strong>
+                  <span>Attach a photo for Grok Imagine, then say what to change</span>
+                </button>
+                <button
+                  class="menu-action"
+                  type="button"
+                  (click)="openAudioFilePicker()"
+                  [disabled]="isGeneratingAudioFile()"
+                >
+                  <strong>Generate audio file</strong>
+                  <span>Upload text and download Ava speaking it as WAV</span>
+                </button>
+                <button
+                  class="menu-action"
+                  type="button"
+                  (click)="setManualInputMode(!manualInputEnabled())"
+                >
+                  <strong>{{
+                    manualInputEnabled() ? 'Hide text input' : 'Type a message'
+                  }}</strong>
+                  <span>{{
+                    manualInputEnabled()
+                      ? 'Collapse the composer back to the type button'
+                      : 'Open the text field inside this card'
+                  }}</span>
+                </button>
+
+                <div class="menu-divider"></div>
+
+                <p class="menu-label">Built-in prompts</p>
+                <div class="quick-prompt-list">
+                  @for (prompt of quickPrompts; track prompt.label) {
+                    <button
+                      class="quick-prompt"
+                      type="button"
+                      role="menuitem"
+                      (click)="queueQuickPrompt(prompt.text)"
+                    >
+                      {{ prompt.label }}
+                    </button>
+                  }
+                </div>
+
+                <div class="menu-divider"></div>
+
+                <button
+                  class="menu-action danger"
+                  type="button"
+                  role="menuitem"
+                  (click)="clearConversation()"
+                >
+                  <strong>Clear conversation</strong>
+                  <span>Reset the current garden's visible chat</span>
                 </button>
               </div>
-              <button
-                class="menu-action"
-                type="button"
-                (click)="openFilePicker()"
-              >
-                <strong>Add files</strong>
-                <span>Attach local text files into the manual prompt</span>
-              </button>
-              <button
-                class="menu-action"
-                type="button"
-                (click)="openImagePicker()"
-              >
-                <strong>Add photo</strong>
-                <span>Send a local image to Grok Imagine, then say what to change</span>
-              </button>
-              <button
-                class="menu-action"
-                type="button"
-                (click)="openAudioFilePicker()"
-                [disabled]="isGeneratingAudioFile()"
-              >
-                <strong>Generate audio file</strong>
-                <span>Upload text and download Ava speaking it as WAV</span>
-              </button>
-              <button
-                class="menu-action"
-                type="button"
-                (click)="setManualInputMode(!manualInputEnabled())"
-              >
-                <strong>{{
-                  manualInputEnabled() ? 'Use voice button' : 'Use text input'
-                }}</strong>
-                <span>{{
-                  manualInputEnabled()
-                    ? 'Swap the composer back to Speak'
-                    : 'Replace Speak with a manual prompt field'
-                }}</span>
-              </button>
+            }
+          </div>
 
-              <div class="menu-divider"></div>
-
-              <p class="menu-label">Built-in prompts</p>
-              <div class="quick-prompt-list">
-                @for (prompt of quickPrompts; track prompt.label) {
-                  <button
-                    class="quick-prompt"
-                    type="button"
-                    role="menuitem"
-                    (click)="queueQuickPrompt(prompt.text)"
-                  >
-                    {{ prompt.label }}
-                  </button>
-                }
-              </div>
-
-              <div class="menu-divider"></div>
-
-              <button
-                class="menu-action danger"
-                type="button"
-                role="menuitem"
-                (click)="clearConversation()"
-              >
-                <strong>Clear conversation</strong>
-                <span>Reset the current garden's visible chat</span>
-              </button>
-            </div>
-          }
-        </div>
-        @if (status() === 'speaking') {
           <button
-            class="tool-btn"
-            (click)="togglePause()"
-            [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'"
+            type="button"
+            class="expand-type"
+            [class.active]="manualInputEnabled()"
+            (click)="toggleManualInput()"
+            [attr.aria-pressed]="manualInputEnabled()"
+            [attr.aria-label]="manualInputEnabled() ? 'Hide text input' : 'Type a message'"
+            [title]="manualInputEnabled() ? 'Hide text input' : 'Type a message'"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              @if (isPaused()) {
-                <path d="M8 5v14l11-7z"></path>
-              } @else {
-                <rect x="7" y="5" width="4" height="14" rx="1"></rect>
-                <rect x="13" y="5" width="4" height="14" rx="1"></rect>
-              }
+              <rect x="3" y="6" width="18" height="13" rx="2"></rect>
+              <path d="M7 19h10"></path>
+              <path d="M8 10h8"></path>
+              <path d="M8 14h5"></path>
             </svg>
-            <span>{{ isPaused() ? 'Resume' : 'Pause' }}</span>
+            @if (!manualInputEnabled()) {
+              <span>Type a message</span>
+            }
           </button>
-          <button class="tool-btn stop" (click)="stopSpeaking()" aria-label="Stop speaking">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
-            </svg>
-            <span>Stop voice</span>
-          </button>
+
+          @if (manualInputEnabled()) {
+            <label class="manual-composer">
+              <span class="sr-only">Ask anything</span>
+              <textarea
+                #manualInput
+                class="manual-input"
+                rows="1"
+                [value]="manualPrompt()"
+                (input)="onManualPromptInput($event)"
+                (keydown)="onManualPromptKeydown($event)"
+                placeholder="Ask anything"
+              ></textarea>
+            </label>
+          }
+
+          <div class="composer-actions">
+            @if (status() === 'speaking') {
+              <button
+                class="card-icon-btn"
+                type="button"
+                (click)="togglePause()"
+                [attr.aria-label]="isPaused() ? 'Resume speaking' : 'Pause speaking'"
+                [title]="isPaused() ? 'Resume' : 'Pause'"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  @if (isPaused()) {
+                    <path d="M8 5v14l11-7z"></path>
+                  } @else {
+                    <rect x="7" y="5" width="4" height="14" rx="1"></rect>
+                    <rect x="13" y="5" width="4" height="14" rx="1"></rect>
+                  }
+                </svg>
+              </button>
+            }
+
+            @if (canAbortRequest()) {
+              <button
+                class="send-circle stop-circle"
+                type="button"
+                (click)="stopCurrentRequest()"
+                aria-label="Stop current request"
+                title="Stop"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+                </svg>
+              </button>
+            } @else if (manualInputEnabled() || canSubmitManualPrompt()) {
+              <button
+                class="send-circle"
+                type="button"
+                [disabled]="!canSubmitManualPrompt()"
+                aria-label="Send"
+                title="Send"
+                (click)="submitManualPrompt()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 19V5"></path>
+                  <path d="M6 11l6-6 6 6"></path>
+                </svg>
+              </button>
+            } @else {
+              <button
+                class="send-circle speak-circle"
+                type="button"
+                [attr.aria-label]="voiceEnabled() ? 'Turn off voice' : 'Start speaking'"
+                [title]="voiceButtonLabel()"
+                (click)="onPrimaryActionClick()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  @if (voiceEnabled()) {
+                    <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
+                  } @else {
+                    <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                    <path d="M5 11a7 7 0 0 0 14 0"></path>
+                    <path d="M12 18v4"></path>
+                    <path d="M8 22h8"></path>
+                  }
+                </svg>
+              </button>
+            }
+          </div>
+        </div>
+
+        @if (composerNotice()) {
+          <p class="composer-note">{{ composerNotice() }}</p>
         }
       </div>
 
-      <div class="footer-center">
-        <div class="composer-stack">
-          @if (pendingImages().length) {
-            <div class="pending-photos">
-              @for (image of pendingImages(); track image.dataUrl) {
-                <button type="button" class="pending-photo" (click)="removePendingImage(image.dataUrl)" title="Remove photo">
-                  <img [src]="image.dataUrl" [alt]="image.prompt || 'Selected photo'" />
-                </button>
-              }
-            </div>
-          }
-          <div class="composer-row">
-            @if (manualInputEnabled()) {
-              <label class="manual-composer">
-                <span class="sr-only">Manual prompt</span>
-                <textarea
-                  class="manual-input"
-                  rows="1"
-                  [value]="manualPrompt()"
-                  (input)="onManualPromptInput($event)"
-                  (keydown)="onManualPromptKeydown($event)"
-                  placeholder="Type a prompt, add a file, or insert a built-in message"
-                ></textarea>
-              </label>
+      <div class="action-menu-shell footer-settings" #settingsActionShell>
+        <button
+          class="card-icon-btn settings-btn"
+          (click)="openSettings()"
+          (contextmenu)="onSettingsContextMenu($event)"
+          [attr.aria-expanded]="modelMenuOpen()"
+          aria-haspopup="menu"
+          aria-label="Settings"
+          title="Manage gardens and settings · right-click for quick model switch"
+        >
+          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
+        </button>
+
+        @if (modelMenuOpen()) {
+          <div class="action-menu model-menu" role="menu" aria-label="Quick-select conversation model">
+            <p class="menu-label">Conversation model</p>
+            @for (model of conversationModels(); track model.id) {
+              <button
+                class="menu-action"
+                [class.active]="model.id === selectedConversationModelId()"
+                type="button"
+                role="menuitemradio"
+                [attr.aria-checked]="model.id === selectedConversationModelId()"
+                (click)="quickSelectModel(model.id)"
+              >
+                <strong>{{ model.name }}</strong>
+                <span>{{ model.provider === 'grok' ? 'Grok cloud' : model.size }}{{ model.id === selectedConversationModelId() ? ' · selected' : '' }}</span>
+              </button>
             }
-
-            <div class="action-menu-shell">
-              @if (manualInputEnabled()) {
-                <button
-                  class="primary-tool send-tool"
-                  type="button"
-                  [disabled]="!canSubmitManualPrompt()"
-                  aria-label="Send manual prompt"
-                  (click)="onPrimaryActionClick()"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 12 20 4 15 20 11 13 4 12Z"></path>
-                  </svg>
-                  <span>Send</span>
-                </button>
-              } @else {
-                <button
-                  class="primary-tool"
-                  type="button"
-                  aria-label="Toggle voice"
-                  (click)="onPrimaryActionClick()"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    @if (voiceEnabled()) {
-                      <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
-                    } @else {
-                      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-                      <path d="M5 11a7 7 0 0 0 14 0"></path>
-                      <path d="M12 18v4"></path>
-                      <path d="M8 22h8"></path>
-                    }
-                  </svg>
-                  <span>{{ voiceButtonLabel() }}</span>
-                </button>
-              }
-            </div>
           </div>
-
-          @if (composerNotice()) {
-            <p class="composer-note">{{ composerNotice() }}</p>
-          }
-        </div>
-      </div>
-
-      <div class="footer-side footer-side-end">
-        <div class="action-menu-shell" #settingsActionShell>
-          <button
-            class="tool-btn"
-            (click)="openSettings()"
-            (contextmenu)="onSettingsContextMenu($event)"
-            [attr.aria-expanded]="modelMenuOpen()"
-            aria-haspopup="menu"
-            title="Manage gardens and settings · right-click for quick model switch"
-          >
-            <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
-            <span>Settings</span>
-          </button>
-
-          @if (modelMenuOpen()) {
-            <div class="action-menu model-menu" role="menu" aria-label="Quick-select conversation model">
-              <p class="menu-label">Conversation model</p>
-              @for (model of conversationModels(); track model.id) {
-                <button
-                  class="menu-action"
-                  [class.active]="model.id === selectedConversationModelId()"
-                  type="button"
-                  role="menuitemradio"
-                  [attr.aria-checked]="model.id === selectedConversationModelId()"
-                  (click)="quickSelectModel(model.id)"
-                >
-                  <strong>{{ model.name }}</strong>
-                  <span>{{ model.provider === 'grok' ? 'Grok cloud' : model.size }}{{ model.id === selectedConversationModelId() ? ' · selected' : '' }}</span>
-                </button>
-              }
-            </div>
-          }
-        </div>
+        }
       </div>
 
       <input

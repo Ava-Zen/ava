@@ -114,6 +114,7 @@ export class XaiClient {
   async editImage(
     prompt: string,
     images: Array<{ dataUrl: string }>,
+    signal?: AbortSignal,
   ): Promise<{ dataUrl: string; prompt?: string } | null> {
     const refs = images
       .map(image => parseDataUrl(image.dataUrl))
@@ -128,16 +129,18 @@ export class XaiClient {
       n: 1,
       response_format: 'b64_json',
     });
-    return this.postImagine('/images/edits', body, prompt);
+    return this.postImagine('/images/edits', body, prompt, signal);
   }
 
   async generateImage(
     prompt: string,
     n = 1,
+    signal?: AbortSignal,
   ): Promise<Array<{ dataUrl: string; prompt?: string }>> {
     const count = Math.min(6, Math.max(1, Math.round(n)));
     const collected: Array<{ dataUrl: string; prompt?: string }> = [];
     while (collected.length < count) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const remaining = count - collected.length;
       const batch = await this.postImagineAll(
         '/images/generations',
@@ -148,6 +151,7 @@ export class XaiClient {
           response_format: 'b64_json',
         }),
         prompt,
+        signal,
       );
       if (!batch.length) break;
       collected.push(...batch);
@@ -164,8 +168,9 @@ export class XaiClient {
     path: string,
     body: string,
     prompt: string,
+    signal?: AbortSignal,
   ): Promise<{ dataUrl: string; prompt?: string } | null> {
-    const images = await this.postImagineAll(path, body, prompt);
+    const images = await this.postImagineAll(path, body, prompt, signal);
     return images[0] ?? null;
   }
 
@@ -173,6 +178,7 @@ export class XaiClient {
     path: string,
     body: string,
     prompt: string,
+    signal?: AbortSignal,
   ): Promise<Array<{ dataUrl: string; prompt?: string }>> {
     for (const kind of ['media', 'chat'] as const) {
       try {
@@ -182,6 +188,7 @@ export class XaiClient {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body,
+            signal,
           },
           kind,
         );

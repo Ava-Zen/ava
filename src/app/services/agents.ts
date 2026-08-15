@@ -159,6 +159,10 @@ export class AgentsService {
     this.modelId.set(QWEN_MODELS[tier].id);
   }
 
+  abortActive(): void {
+    void this.copilot.abort();
+  }
+
   setRuntime(runtime: AgentRuntime): void {
     if (runtime === 'copilot' && !this.copilotAuth.signedIn()) return;
     this.runtime.set(runtime);

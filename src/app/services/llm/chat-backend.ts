@@ -59,6 +59,8 @@ export interface ChatGenerateOptions {
   onToken?: (chunk: string) => void;
   /** Local photos to send to Grok Imagine for editing. */
   images?: GeneratedImage[];
+  /** When aborted, backends that support it should stop generating. */
+  signal?: AbortSignal;
 }
 
 /** Result of a successful backend load. */
@@ -104,6 +106,9 @@ export interface ChatBackend {
 
   /** Generates a completion for the given conversation. Requires `load()`. */
   generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult>;
+
+  /** Aborts an in-flight `generate()` when the backend supports it. */
+  cancel?(): void;
 
   /** True once a model is loaded and ready to generate. */
   isLoaded(): boolean;

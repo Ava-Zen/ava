@@ -150,6 +150,10 @@ export class NativeLlamaBackend implements ChatBackend {
       onToken.onmessage = chunk => options.onToken?.(chunk);
     }
 
+    if (options.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     const text = await invoke<string>('llm_generate', {
       messages,
       options: {
@@ -160,7 +164,16 @@ export class NativeLlamaBackend implements ChatBackend {
       },
       onToken,
     });
+    if (options.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     return { text };
+  }
+
+  cancel(): void {
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('llm_cancel'))
+      .catch(() => {});
   }
 
   isLoaded(): boolean {

@@ -101,10 +101,13 @@ export class GrokChatBackend implements ChatBackend {
 
   async generate(messages: ChatTurn[], options: ChatGenerateOptions): Promise<ChatResult> {
     if (!this.loaded) throw new Error('Grok is not connected.');
+    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     const userText = lastUserText(messages);
+    const signal = options.signal;
     if (options.images?.length) {
-      const edited = await this.client.editImage(userText, options.images);
+      const edited = await this.client.editImage(userText, options.images, signal);
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       if (!edited) {
         throw new Error('Grok Imagine could not edit that photo. Try another image or sign in again.');
       }
@@ -129,6 +132,7 @@ export class GrokChatBackend implements ChatBackend {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     });
 
     // Subscription chat rejects developer-API tool payloads. Retry as plain chat.
@@ -138,6 +142,7 @@ export class GrokChatBackend implements ChatBackend {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
+        signal,
       });
     }
 
@@ -150,6 +155,7 @@ export class GrokChatBackend implements ChatBackend {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(payload),
+            signal,
           });
         }
         if (!res.ok) {
@@ -166,7 +172,7 @@ export class GrokChatBackend implements ChatBackend {
     const count = requestedImageCount(userText);
     const have = result.images ?? [];
     if (have.length >= count) return { ...result, images: have.slice(0, count) };
-    const fallback = await this.client.generateImage(userText, count - have.length);
+    const fallback = await this.client.generateImage(userText, count - have.length, signal);
     const images = [...have, ...fallback];
     return images.length ? { ...result, images } : result;
   }
