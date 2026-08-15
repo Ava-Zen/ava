@@ -666,9 +666,64 @@
   }
 
   @if (viewerImage(); as image) {
-    <div class="photo-viewer" (click)="closePhotoViewer()" role="dialog" aria-modal="true" aria-label="Photo viewer">
-      <div class="photo-viewer-frame" (click)="$event.stopPropagation()">
-        <img [src]="image.dataUrl" [alt]="image.prompt || 'Photo'" />
+    <div class="photo-viewer" (click)="onPhotoViewerBackdrop()" role="dialog" aria-modal="true" aria-label="Photo viewer">
+      <div
+        class="photo-viewer-stage"
+        #photoStage
+        [class.is-zoomed]="viewerZoom() > 1"
+        [class.is-panning]="viewerPanning()"
+        [class.is-interacting]="viewerInteracting()"
+        (click)="onPhotoViewerStageClick($event)"
+        (pointerdown)="onPhotoViewerPointerDown($event)"
+        (pointermove)="onPhotoViewerPointerMove($event)"
+        (pointerup)="onPhotoViewerPointerUp($event)"
+        (pointercancel)="onPhotoViewerPointerUp($event)"
+        (dblclick)="onPhotoViewerDoubleClick($event)"
+      >
+        <img
+          [src]="image.dataUrl"
+          [alt]="image.prompt || 'Photo'"
+          [style.transform]="photoViewerTransform()"
+          draggable="false"
+        />
+      </div>
+      <div class="photo-viewer-toolbar" (click)="$event.stopPropagation()">
+        <div class="photo-viewer-zoom" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            class="photo-viewer-btn"
+            title="Zoom out"
+            aria-label="Zoom out"
+            [disabled]="viewerZoom() <= photoZoomMin"
+            (click)="nudgePhotoViewerZoom(-1)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="photo-viewer-btn photo-viewer-zoom-label"
+            title="Reset zoom"
+            aria-label="Reset zoom"
+            (click)="resetPhotoViewerZoom()"
+          >
+            {{ viewerZoomLabel() }}
+          </button>
+          <button
+            type="button"
+            class="photo-viewer-btn"
+            title="Zoom in"
+            aria-label="Zoom in"
+            [disabled]="viewerZoom() >= photoZoomMax"
+            (click)="nudgePhotoViewerZoom(1)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14"></path>
+              <path d="M5 12h14"></path>
+            </svg>
+          </button>
+        </div>
         <div class="photo-viewer-actions">
           <button
             type="button"

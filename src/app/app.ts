@@ -32,6 +32,7 @@ import {
   needsLocalFileAccess,
   shouldUseCopilot,
 } from './services/copilot/copilot-auth';
+import { AVA_CAPABILITIES_REPLY, isAskingCapabilities, isAskingForTime } from './intents';
 
 type CopilotGateKind = 'signin' | 'workspace' | 'tools' | 'photo';
 
@@ -214,6 +215,19 @@ export class App {
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('workspaceShell') private workspaceShellEl?: ElementRef<HTMLDivElement>;
+  private photoStageEl?: ElementRef<HTMLElement>;
+  private photoViewerWheelUnbind: (() => void) | null = null;
+  private readonly viewerPointers = new Map<number, { x: number; y: number }>();
+  private viewerDragLast = { x: 0, y: 0 };
+  private viewerDidDrag = false;
+  private pinchStartDist = 0;
+  private pinchStartZoom = 1;
+  @ViewChild('photoStage')
+  protected set photoStage(el: ElementRef<HTMLElement> | undefined) {
+    this.unbindPhotoViewerWheel();
+    this.photoStageEl = el;
+    if (el) this.bindPhotoViewerWheel(el.nativeElement);
+  }
 
   // Gardens
   protected readonly gardens = this.gardensService.gardens;
@@ -247,6 +261,17 @@ export class App {
   protected readonly workspaceDraft = signal('');
   protected readonly pendingImages = signal<GeneratedImage[]>([]);
   protected readonly viewerImage = signal<GeneratedImage | null>(null);
+  protected readonly viewerZoom = signal(1);
+  protected readonly viewerPanX = signal(0);
+  protected readonly viewerPanY = signal(0);
+  protected readonly viewerPanning = signal(false);
+  protected readonly viewerInteracting = signal(false);
+  protected readonly viewerZoomLabel = computed(() => `${Math.round(this.viewerZoom() * 100)}%`);
+  protected readonly photoViewerTransform = computed(
+    () => `translate(${this.viewerPanX()}px, ${this.viewerPanY()}px) scale(${this.viewerZoom()})`,
+  );
+  protected readonly photoZoomMin = 1;
+  protected readonly photoZoomMax = 6;
   protected readonly copilotSignedIn = this.copilotAuth.signedIn;
   protected readonly copilotPending = this.copilotAuth.loginPending;
   protected readonly copilotDevice = this.copilotAuth.deviceLogin;
@@ -469,7 +494,7 @@ export class App {
     this.pendingPhotoEdit = null;
     this.pendingImageSave = null;
     this.pendingImages.set([]);
-    this.viewerImage.set(null);
+    this.closePhotoViewer();
     this.chats.createChat(gardenId);
     this.currentTranscript.set('');
     this.manualPrompt.set('');
@@ -507,9 +532,26 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && this.viewerImage()) {
-      this.closePhotoViewer();
-      return;
+    if (this.viewerImage()) {
+      if (event.key === 'Escape') {
+        this.closePhotoViewer();
+        return;
+      }
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        this.nudgePhotoViewerZoom(1);
+        return;
+      }
+      if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        this.nudgePhotoViewerZoom(-1);
+        return;
+      }
+      if (event.key === '0') {
+        event.preventDefault();
+        this.resetPhotoViewerZoom();
+        return;
+      }
     }
 
     if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen())) {
@@ -521,7 +563,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings() || this.showOnboarding()) return;
+    if (this.showSettings() || this.showOnboarding() || this.viewerImage()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -702,11 +744,159 @@ export class App {
   }
 
   protected openPhotoViewer(image: GeneratedImage) {
+    this.resetPhotoViewerZoom();
     this.viewerImage.set(image);
   }
 
   protected closePhotoViewer() {
+    this.unbindPhotoViewerWheel();
+    this.viewerPointers.clear();
+    this.viewerPanning.set(false);
+    this.viewerInteracting.set(false);
+    this.viewerDidDrag = false;
     this.viewerImage.set(null);
+    this.resetPhotoViewerZoom();
+  }
+
+  protected resetPhotoViewerZoom() {
+    this.viewerZoom.set(1);
+    this.viewerPanX.set(0);
+    this.viewerPanY.set(0);
+  }
+
+  protected nudgePhotoViewerZoom(direction: 1 | -1) {
+    const el = this.photoStageEl?.nativeElement;
+    const rect = el?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    this.zoomPhotoViewerAt(x, y, this.viewerZoom() * (direction > 0 ? 1.25 : 0.8));
+  }
+
+  protected onPhotoViewerBackdrop() {
+    if (this.viewerDidDrag) {
+      this.viewerDidDrag = false;
+      return;
+    }
+    if (this.viewerZoom() > 1) {
+      this.resetPhotoViewerZoom();
+      return;
+    }
+    this.closePhotoViewer();
+  }
+
+  protected onPhotoViewerStageClick(event: MouseEvent) {
+    event.stopPropagation();
+    if (this.viewerDidDrag) {
+      this.viewerDidDrag = false;
+      return;
+    }
+    if ((event.target as HTMLElement | null)?.tagName === 'IMG') return;
+    if (this.viewerZoom() > 1) {
+      this.resetPhotoViewerZoom();
+      return;
+    }
+    this.closePhotoViewer();
+  }
+
+  protected onPhotoViewerDoubleClick(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.viewerZoom() > 1) {
+      this.resetPhotoViewerZoom();
+      return;
+    }
+    this.zoomPhotoViewerAt(event.clientX, event.clientY, 2.5);
+  }
+
+  protected onPhotoViewerPointerDown(event: PointerEvent) {
+    if (event.button !== 0) return;
+    this.viewerPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    if (this.viewerPointers.size === 2) {
+      const [a, b] = [...this.viewerPointers.values()];
+      this.pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
+      this.pinchStartZoom = this.viewerZoom();
+      this.viewerPanning.set(false);
+      return;
+    }
+    this.viewerDragLast = { x: event.clientX, y: event.clientY };
+    this.viewerDidDrag = false;
+    this.viewerInteracting.set(true);
+    this.viewerPanning.set(this.viewerZoom() > 1);
+  }
+
+  protected onPhotoViewerPointerMove(event: PointerEvent) {
+    if (!this.viewerPointers.has(event.pointerId)) return;
+    this.viewerPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (this.viewerPointers.size === 2 && this.pinchStartDist > 0) {
+      const [a, b] = [...this.viewerPointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      this.zoomPhotoViewerAt(
+        (a.x + b.x) / 2,
+        (a.y + b.y) / 2,
+        this.pinchStartZoom * (dist / this.pinchStartDist),
+      );
+      this.viewerDidDrag = true;
+      return;
+    }
+    if (!this.viewerPanning()) return;
+    const dx = event.clientX - this.viewerDragLast.x;
+    const dy = event.clientY - this.viewerDragLast.y;
+    if (Math.abs(dx) + Math.abs(dy) > 2) this.viewerDidDrag = true;
+    this.viewerPanX.update(x => x + dx);
+    this.viewerPanY.update(y => y + dy);
+    this.viewerDragLast = { x: event.clientX, y: event.clientY };
+  }
+
+  protected onPhotoViewerPointerUp(event: PointerEvent) {
+    this.viewerPointers.delete(event.pointerId);
+    if (this.viewerPointers.size < 2) this.pinchStartDist = 0;
+    if (this.viewerPointers.size === 0) {
+      this.viewerPanning.set(false);
+      this.viewerInteracting.set(false);
+    }
+  }
+
+  private zoomPhotoViewerAt(clientX: number, clientY: number, nextScale: number) {
+    const prev = this.viewerZoom();
+    const scale = Math.min(this.photoZoomMax, Math.max(this.photoZoomMin, nextScale));
+    if (scale === prev) {
+      if (scale <= this.photoZoomMin) {
+        this.viewerPanX.set(0);
+        this.viewerPanY.set(0);
+      }
+      return;
+    }
+    const el = this.photoStageEl?.nativeElement;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const cx = clientX - rect.left - rect.width / 2;
+      const cy = clientY - rect.top - rect.height / 2;
+      const ratio = scale / prev;
+      this.viewerPanX.update(x => cx - (cx - x) * ratio);
+      this.viewerPanY.update(y => cy - (cy - y) * ratio);
+    }
+    this.viewerZoom.set(scale);
+    if (scale <= this.photoZoomMin) {
+      this.viewerPanX.set(0);
+      this.viewerPanY.set(0);
+    }
+  }
+
+  private bindPhotoViewerWheel(el: HTMLElement) {
+    const handler = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      this.zoomPhotoViewerAt(event.clientX, event.clientY, this.viewerZoom() * Math.exp(-delta * 0.0016));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    this.photoViewerWheelUnbind = () => el.removeEventListener('wheel', handler);
+  }
+
+  private unbindPhotoViewerWheel() {
+    this.photoViewerWheelUnbind?.();
+    this.photoViewerWheelUnbind = null;
   }
 
   protected removePendingImage(dataUrl: string) {
@@ -2931,6 +3121,12 @@ export class App {
   private generateAvaResponse(input: string): string | null {
     const lower = input.toLowerCase().trim();
 
+    if (isAskingForTime(input)) {
+      return `It is ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+    }
+    if (isAskingCapabilities(input)) {
+      return AVA_CAPABILITIES_REPLY;
+    }
     if (lower.includes('hello') || lower.includes('hi ') || lower === 'hi') {
       return 'Hello. It is good to be with you.';
     }
@@ -2939,9 +3135,6 @@ export class App {
     }
     if (lower.includes('name')) {
       return 'I am Ava. Your conscious companion.';
-    }
-    if (lower.includes('time')) {
-      return `It is ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
     }
     if (lower.includes('remember') || lower.includes('garden')) {
       return 'I keep our conversations with care. We can build gardens of memory together.';
@@ -2960,6 +3153,7 @@ export class App {
       'Hello Ava',
       'How are you today',
       'What time is it',
+      'What can you do',
       'I feel a bit tired',
       'Tell me something calm'
     ];
