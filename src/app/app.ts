@@ -5,6 +5,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { Onboarding } from './onboarding/onboarding';
+import { UpdateDialog } from './updates/update-dialog';
+import { UpdateService } from './services/updates';
 import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
@@ -198,7 +200,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, Onboarding],
+  imports: [RouterOutlet, Settings, Onboarding, UpdateDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -234,6 +236,7 @@ export class App {
   private readonly agents = inject(AgentsService);
   private readonly mcp = inject(McpService);
   private readonly onboarding = inject(OnboardingService);
+  private readonly updates = inject(UpdateService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
@@ -412,6 +415,9 @@ export class App {
 
     this.registerMcpTtsBridge();
     this.watchAgentCompletions();
+    if (this.onboarding.completed()) {
+      this.updates.scheduleAutoCheck();
+    }
   }
 
   /** Speaks a short wrap-up when a background agent (local or Copilot) finishes. */
@@ -603,6 +609,11 @@ export class App {
       }
     }
 
+    if (event.key === 'Escape' && this.updates.dialogOpen()) {
+      this.updates.later();
+      return;
+    }
+
     if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen())) {
       this.composerMenuOpen.set(false);
       this.modelMenuOpen.set(false);
@@ -612,7 +623,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings() || this.showOnboarding() || this.viewerImage()) return;
+    if (this.showSettings() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -657,6 +668,7 @@ export class App {
 
   protected onOnboardingCompleted() {
     this.showSettings.set(false);
+    this.updates.scheduleAutoCheck(1200);
   }
 
   protected async onResetCache() {

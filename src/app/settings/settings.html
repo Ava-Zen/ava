@@ -723,6 +723,37 @@
     </div>
   </section>
 
+  <section class="section about-section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">About</p>
+        <h3>Updates</h3>
+      </div>
+      @if (appVersion()) {
+        <span class="version-badge">{{ appVersion() }}</span>
+      }
+    </div>
+    <p class="hint">{{ updateStatus() }}</p>
+    @if (updatesSupported()) {
+      <div class="auth-row">
+        <button
+          class="save-btn"
+          type="button"
+          (click)="checkForUpdates()"
+          [disabled]="updatePhase() === 'checking' || updatePhase() === 'downloading' || updatePhase() === 'installing'"
+        >
+          @if (updatePhase() === 'checking') {
+            Checking…
+          } @else if (updateAvailable()) {
+            Review update
+          } @else {
+            Check for updates
+          }
+        </button>
+      </div>
+    }
+  </section>
+
   <section class="section danger-zone">
     <div>
       <p class="overline">Fresh start</p>

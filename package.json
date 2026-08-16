@@ -20,7 +20,8 @@
     "tauri:ios:init": "tauri ios init",
     "tauri:ios:dev": "tauri ios dev",
     "tauri:ios:build": "tauri ios build",
-    "version:patch": "npm version patch --no-git-tag-version && node -e \"const fs=require('fs');const pkg=require('./package.json');const conf=JSON.parse(fs.readFileSync('./src-tauri/tauri.conf.json','utf8'));conf.version=pkg.version;fs.writeFileSync('./src-tauri/tauri.conf.json',JSON.stringify(conf,null,2)+'\\n');console.log('Version bumped to', pkg.version, 'and synced to tauri.conf.json');\""
+    "version:patch": "npm version patch --no-git-tag-version && node -e \"const fs=require('fs');const pkg=require('./package.json');const conf=JSON.parse(fs.readFileSync('./src-tauri/tauri.conf.json','utf8'));conf.version=pkg.version;fs.writeFileSync('./src-tauri/tauri.conf.json',JSON.stringify(conf,null,2)+'\\n');console.log('Version bumped to', pkg.version, 'and synced to tauri.conf.json');\"",
+    "updater:manifest": "node scripts/generate-latest-json.js"
   },
   "private": true,
   "dependencies": {
@@ -35,6 +36,8 @@
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-http": "^2.5.9",
     "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "kokoro-js": "^1.2.1",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"

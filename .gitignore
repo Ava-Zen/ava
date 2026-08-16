@@ -9,6 +9,8 @@
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/.updater.key
+src-tauri/.updater.key.pub
 
 # Node
 /node_modules

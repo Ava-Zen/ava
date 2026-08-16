@@ -103,6 +103,13 @@ h3 {
   color: #9fe0d5;
   font-weight: 850;
 }
+.section-heading .version-badge {
+  min-width: 0;
+  height: auto;
+  padding: 8px 12px;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
 
 .hint {
   max-width: 58ch;

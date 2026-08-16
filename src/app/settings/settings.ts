@@ -11,6 +11,7 @@ import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 import { XaiAuthService } from '../services/xai/xai-auth';
 import { CopilotAuthService } from '../services/copilot/copilot-auth';
+import { UpdateService } from '../services/updates';
 
 interface ModelFileInfo {
   name: string;
@@ -38,6 +39,7 @@ export class Settings {
   private readonly hardwareDiagnostics = inject(HardwareDiagnosticsService);
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
+  private readonly updates = inject(UpdateService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
@@ -245,6 +247,34 @@ export class Settings {
   protected readonly copilotHost = this.copilotAuth.host;
   protected readonly ghCliAvailable = this.copilotAuth.ghCliAvailable;
   protected readonly agentRuntime = this.agentsService.runtime;
+  protected readonly updatesSupported = this.updates.supported;
+  protected readonly updatePhase = this.updates.phase;
+  protected readonly updateAvailable = this.updates.available;
+  protected readonly updateError = this.updates.error;
+  protected readonly appVersion = this.updates.currentVersion;
+  protected readonly updateStatus = computed(() => {
+    const available = this.updateAvailable();
+    switch (this.updatePhase()) {
+      case 'checking':
+        return 'Checking GitHub for a newer desktop build…';
+      case 'available':
+        return available ? `Version ${available.version} is ready to install.` : 'An update is available.';
+      case 'up-to-date':
+        return 'You are on the latest published desktop build.';
+      case 'downloading':
+        return 'Downloading the update…';
+      case 'installing':
+        return 'Installing the update. Ava will restart.';
+      case 'error':
+        return this.updateError() || 'Could not check for updates.';
+      case 'unsupported':
+        return 'Desktop updates are available in the installed Ava app.';
+      default:
+        return this.updatesSupported()
+          ? 'Ava checks GitHub Releases for new desktop builds.'
+          : 'Install the desktop app to receive updates from GitHub Releases.';
+    }
+  });
   protected readonly copilotWorkspace = this.agentsService.workspace;
   protected readonly copilotAllowWrites = this.agentsService.allowWrites;
   protected readonly copilotModel = this.agentsService.copilotModel;
@@ -610,5 +640,13 @@ export class Settings {
     if (confirm('Reset Ava from scratch? This deletes downloaded models, settings, gardens, and local databases.')) {
       this.resetCache.emit();
     }
+  }
+
+  async checkForUpdates() {
+    if (this.updates.available()) {
+      this.updates.dialogOpen.set(true);
+      return;
+    }
+    await this.updates.check({ silent: false });
   }
 }

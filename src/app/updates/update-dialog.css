@@ -1,0 +1,224 @@
+:host {
+  display: contents;
+}
+
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 3vw, 28px);
+  background:
+    radial-gradient(90% 80% at 18% 8%, rgba(85, 199, 184, 0.22), transparent 54%),
+    radial-gradient(80% 76% at 86% 92%, rgba(216, 194, 135, 0.16), transparent 52%),
+    rgba(3, 7, 9, 0.72);
+  -webkit-backdrop-filter: blur(26px) saturate(1.25);
+  backdrop-filter: blur(26px) saturate(1.25);
+  animation: fade 0.22s ease both;
+}
+
+.update-card {
+  width: min(520px, 100%);
+  padding: clamp(22px, 4vw, 34px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 30px;
+  display: grid;
+  gap: 16px;
+  color: #f8fbf5;
+  background:
+    linear-gradient(150deg, rgba(245, 252, 239, 0.14), rgba(255, 255, 255, 0.04)),
+    rgba(10, 22, 21, 0.94);
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.58),
+    inset 0 1px rgba(255, 255, 255, 0.14);
+  animation: rise 0.28s ease both;
+}
+
+.overline {
+  margin: 0;
+  color: #9fcfc6;
+  font-size: 0.78rem;
+  font-weight: 830;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h2 {
+  margin: 0;
+  max-width: 12ch;
+  font-size: clamp(2.2rem, 6vw, 3.4rem);
+  line-height: 0.96;
+}
+
+.lead {
+  margin: 0;
+  max-width: 38ch;
+  color: #c6d4ca;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid rgba(85, 199, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(85, 199, 184, 0.1);
+  color: #dcebd2;
+  font-weight: 760;
+}
+
+.version-row strong {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #06110f;
+  background: linear-gradient(135deg, #55c7b8, #bdd7a6);
+}
+
+.version-row svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.notes {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.notes-label {
+  margin: 0;
+  color: #9fcfc6;
+  font-size: 0.78rem;
+  font-weight: 830;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.notes p:last-child {
+  margin: 0;
+  max-height: 8.5rem;
+  overflow: auto;
+  color: #d5e0d8;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.progress-block {
+  display: grid;
+  gap: 8px;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #dcebd2;
+  font-weight: 760;
+}
+
+.progress-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #55c7b8, #bdd7a6, #d8c287);
+  transition: width 0.2s ease;
+}
+
+.progress-block small {
+  color: #9fb0c5;
+}
+
+.update-error {
+  margin: 0;
+  color: #ffb4c0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.ghost-btn,
+.save-btn {
+  min-height: 52px;
+  min-width: 118px;
+  border-radius: 16px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f6f8fb;
+  font: inherit;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.save-btn {
+  background: linear-gradient(135deg, rgba(85, 199, 184, 0.42), rgba(189, 215, 166, 0.3));
+  border-color: rgba(85, 199, 184, 0.4);
+  box-shadow: 0 14px 34px rgba(85, 199, 184, 0.16);
+}
+
+.ghost-btn {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@media (max-width: 540px) {
+  .update-card {
+    border-radius: 24px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ghost-btn,
+  .save-btn {
+    min-width: 0;
+    width: 100%;
+  }
+}

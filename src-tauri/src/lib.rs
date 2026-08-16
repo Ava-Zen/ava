@@ -158,6 +158,9 @@ pub fn run() {
       // On Windows/Linux this also enables the scheme during development.
       #[cfg(desktop)]
       {
+        app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+        app.handle().plugin(tauri_plugin_process::init())?;
+
         use tauri_plugin_deep_link::DeepLinkExt;
         let _ = app.deep_link().register_all();
 

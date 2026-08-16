@@ -719,6 +719,8 @@
     <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
   }
 
+  <app-update-dialog />
+
   @if (viewerImage(); as image) {
     <div class="photo-viewer" (click)="onPhotoViewerBackdrop()" role="dialog" aria-modal="true" aria-label="Photo viewer">
       <div

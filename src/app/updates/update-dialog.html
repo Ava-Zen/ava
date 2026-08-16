@@ -1,0 +1,63 @@
+@if (open() && available(); as update) {
+  <div
+    class="update-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="update-title"
+    (click)="busy() ? $event.stopPropagation() : later()"
+  >
+    <div class="update-card" (click)="$event.stopPropagation()">
+      <p class="overline">Ava</p>
+      <h2 id="update-title">A new version is ready</h2>
+      <p class="lead">
+        You're on {{ update.currentVersion || 'this build' }}. Version {{ update.version }} can be installed now.
+      </p>
+
+      <div class="version-row" aria-hidden="true">
+        <span>{{ update.currentVersion || 'current' }}</span>
+        <svg viewBox="0 0 24 24">
+          <path d="M5 12h14"></path>
+          <path d="m13 6 6 6-6 6"></path>
+        </svg>
+        <strong>{{ update.version }}</strong>
+      </div>
+
+      <div class="notes">
+        <p class="notes-label">What’s new</p>
+        <p>{{ update.notes }}</p>
+      </div>
+
+      @if (phase() === 'downloading' || phase() === 'installing') {
+        <div class="progress-block" aria-live="polite">
+          <div class="progress-meta">
+            <span>{{ phase() === 'installing' ? 'Installing update' : 'Downloading update' }}</span>
+            <strong>{{ percent() }}%</strong>
+          </div>
+          <div class="progress-track">
+            <span [style.width.%]="percent()"></span>
+          </div>
+          <small>{{ progressLabel() }}</small>
+        </div>
+      }
+
+      @if (error()) {
+        <p class="update-error">{{ error() }}</p>
+      }
+
+      <div class="actions">
+        <button class="ghost-btn" type="button" (click)="later()" [disabled]="busy()">Later</button>
+        <button class="save-btn" type="button" (click)="install()" [disabled]="busy()">
+          @if (phase() === 'downloading') {
+            Downloading…
+          } @else if (phase() === 'installing') {
+            Restarting…
+          } @else if (error()) {
+            Try again
+          } @else {
+            Update now
+          }
+        </button>
+      </div>
+    </div>
+  </div>
+}

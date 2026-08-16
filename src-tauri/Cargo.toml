@@ -34,6 +34,8 @@ encoding_rs = { version = "0.8", optional = true }
 github-copilot-sdk = "1.0"
 tokio = { version = "1", features = ["macros", "time", "sync"] }
 rfd = "0.15"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

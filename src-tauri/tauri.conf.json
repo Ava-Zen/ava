@@ -39,6 +39,15 @@
           "ava"
         ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk3NUVEQTkwQURCMEZEQQpSV1RhRDlzS3FlMTFDZDNaTG5HMExQa1pScHFoSkRITXIwRzA4RWU1YVlmSlF4a3U1c0drUVV2Lwo=",
+      "endpoints": [
+        "https://github.com/Ava-Zen/ava/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
