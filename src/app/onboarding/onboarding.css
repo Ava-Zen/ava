@@ -260,6 +260,10 @@ span,
   gap: 12px;
 }
 
+.onboarding-actions.single {
+  justify-content: flex-end;
+}
+
 .continue-btn,
 .secondary-btn {
   min-width: 132px;
@@ -308,5 +312,13 @@ button:not(:disabled):hover {
   .onboarding-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .onboarding-actions.single {
+    display: flex;
+  }
+
+  .onboarding-actions.single .continue-btn {
+    width: 100%;
   }
 }

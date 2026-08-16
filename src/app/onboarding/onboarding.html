@@ -109,8 +109,10 @@
       }
     </div>
 
-    <footer class="onboarding-actions">
-      <button type="button" class="secondary-btn" (click)="back()" [disabled]="step() === 0">Back</button>
+    <footer class="onboarding-actions" [class.single]="step() === 0">
+      @if (step() > 0) {
+        <button type="button" class="secondary-btn" (click)="back()">Back</button>
+      }
       <button type="button" class="continue-btn" (click)="next()" [disabled]="!canContinue()">
         {{ step() === totalSteps() - 1 ? 'Start Ava' : 'Continue' }}
       </button>
