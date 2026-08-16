@@ -1,0 +1,120 @@
+:host {
+  display: contents;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 3vw, 28px);
+  background:
+    radial-gradient(90% 80% at 18% 8%, rgba(85, 199, 184, 0.16), transparent 54%),
+    radial-gradient(80% 76% at 86% 92%, rgba(216, 194, 135, 0.1), transparent 52%),
+    rgba(3, 7, 9, 0.86);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: blur(18px) saturate(1.15);
+  animation: fade 0.22s ease both;
+}
+
+.confirm-card {
+  width: min(480px, 100%);
+  padding: clamp(22px, 4vw, 32px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 28px;
+  display: grid;
+  gap: 16px;
+  color: #f8fbf5;
+  background:
+    linear-gradient(150deg, rgba(245, 252, 239, 0.1), transparent 46%),
+    #101e1c;
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.62),
+    inset 0 1px rgba(255, 255, 255, 0.14);
+  animation: rise 0.28s ease both;
+}
+
+h2 {
+  margin: 0;
+  max-width: 16ch;
+  font-size: clamp(1.8rem, 5vw, 2.7rem);
+  line-height: 1.05;
+}
+
+.lead {
+  margin: 0;
+  max-width: 40ch;
+  color: #c6d4ca;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.ghost-btn,
+.save-btn {
+  min-height: 52px;
+  min-width: 118px;
+  border-radius: 16px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f6f8fb;
+  font: inherit;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.save-btn {
+  background: linear-gradient(135deg, rgba(85, 199, 184, 0.42), rgba(189, 215, 166, 0.3));
+  border-color: rgba(85, 199, 184, 0.4);
+  box-shadow: 0 14px 34px rgba(85, 199, 184, 0.16);
+}
+
+.save-btn.danger {
+  color: #ffd7d2;
+  border-color: rgba(255, 122, 110, 0.5);
+  background: rgba(255, 99, 88, 0.22);
+  box-shadow: 0 14px 34px rgba(255, 99, 88, 0.12);
+}
+
+.ghost-btn {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+@media (max-width: 540px) {
+  .confirm-card {
+    border-radius: 24px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ghost-btn,
+  .save-btn {
+    min-width: 0;
+    width: 100%;
+  }
+}

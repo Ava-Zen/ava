@@ -6,7 +6,9 @@ import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { Onboarding } from './onboarding/onboarding';
 import { UpdateDialog } from './updates/update-dialog';
+import { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 import { UpdateService } from './services/updates';
+import { ConfirmDialogService } from './services/confirm-dialog';
 import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
@@ -200,7 +202,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, Onboarding, UpdateDialog],
+  imports: [RouterOutlet, Settings, Onboarding, UpdateDialog, ConfirmDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -237,6 +239,7 @@ export class App {
   private readonly mcp = inject(McpService);
   private readonly onboarding = inject(OnboardingService);
   private readonly updates = inject(UpdateService);
+  private readonly confirm = inject(ConfirmDialogService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
@@ -609,6 +612,11 @@ export class App {
       }
     }
 
+    if (event.key === 'Escape' && this.confirm.open()) {
+      this.confirm.cancel();
+      return;
+    }
+
     if (event.key === 'Escape' && this.updates.dialogOpen()) {
       this.updates.later();
       return;
@@ -623,7 +631,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen()) return;
+    if (this.showSettings() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {

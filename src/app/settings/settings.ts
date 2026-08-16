@@ -12,6 +12,7 @@ import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 import { XaiAuthService } from '../services/xai/xai-auth';
 import { CopilotAuthService } from '../services/copilot/copilot-auth';
 import { UpdateService } from '../services/updates';
+import { ConfirmDialogService } from '../services/confirm-dialog';
 
 interface ModelFileInfo {
   name: string;
@@ -40,6 +41,7 @@ export class Settings {
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
   private readonly updates = inject(UpdateService);
+  private readonly confirm = inject(ConfirmDialogService);
   protected readonly gardenList = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
@@ -190,10 +192,14 @@ export class Settings {
     this.mcp.disconnect(id);
   }
 
-  removeMcp(id: string) {
-    if (confirm('Remove this MCP server?')) {
-      this.mcp.removeServer(id);
-    }
+  async removeMcp(id: string) {
+    const ok = await this.confirm.ask({
+      title: 'Remove this MCP server?',
+      message: 'Ava will disconnect and forget this server.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (ok) this.mcp.removeServer(id);
   }
 
   // Text-to-speech configuration
@@ -339,7 +345,13 @@ export class Settings {
   }
 
   protected async deleteModelFile(name: string): Promise<void> {
-    if (!confirm(`Delete ${name}? It will be re-downloaded if the model is selected again.`)) return;
+    const ok = await this.confirm.ask({
+      title: `Delete ${name}?`,
+      message: 'It will be re-downloaded if the model is selected again.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await invoke('llm_delete_model', { name });
     } catch {
@@ -630,16 +642,24 @@ export class Settings {
     this.editDescription = '';
   }
 
-  remove(id: string) {
-    if (confirm('Delete this garden? Its conversation history will be lost.')) {
-      this.deleteGarden.emit(id);
-    }
+  async remove(id: string) {
+    const ok = await this.confirm.ask({
+      title: 'Delete this garden?',
+      message: 'Its conversation history will be lost.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (ok) this.deleteGarden.emit(id);
   }
 
-  resetEverything() {
-    if (confirm('Reset Ava from scratch? This deletes downloaded models, settings, gardens, and local databases.')) {
-      this.resetCache.emit();
-    }
+  async resetEverything() {
+    const ok = await this.confirm.ask({
+      title: 'Reset Ava from scratch?',
+      message: 'This deletes downloaded models, settings, gardens, and local databases.',
+      confirmLabel: 'Reset cache',
+      danger: true,
+    });
+    if (ok) this.resetCache.emit();
   }
 
   async checkForUpdates() {

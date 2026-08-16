@@ -22,8 +22,7 @@
 }
 
 .onboarding-shell {
-  width: min(860px, 100%);
-  min-height: min(720px, calc(100dvh - 24px));
+  width: min(720px, 100%);
   max-height: calc(100dvh - 24px);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 28px;
@@ -45,7 +44,7 @@
 
 .onboarding-header {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .brand-lockup {
@@ -64,7 +63,7 @@
 }
 
 .step-meter {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.08);
@@ -81,88 +80,33 @@
 .onboarding-body {
   min-height: 0;
   overflow-y: auto;
-  padding: 0 clamp(18px, 4vw, 48px) 12px;
+  padding: 0 clamp(18px, 4vw, 40px) 8px;
 }
 
 .onboarding-step {
-  min-height: 100%;
   display: grid;
-  align-content: center;
-  gap: clamp(16px, 2.4vw, 22px);
-}
-
-.overline {
-  margin: 0;
-  color: #9fcfc6;
-  font-size: 0.82rem;
-  font-weight: 830;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  align-content: start;
+  gap: clamp(16px, 2.2vw, 22px);
 }
 
 h1 {
-  max-width: 12ch;
+  max-width: 16ch;
   margin: 0;
-  font-size: clamp(2.6rem, 7vw, 5.8rem);
-  line-height: 0.98;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1.05;
   letter-spacing: 0;
 }
 
-.lead {
-  max-width: 64ch;
-  margin: 0;
-  color: #c6d4ca;
-  font-size: clamp(1.08rem, 2vw, 1.28rem);
-  line-height: 1.55;
-}
-
-.capability-grid,
-.option-list,
-.device-readiness,
-.device-grid {
+.option-list {
   display: grid;
   gap: 10px;
 }
 
-.capability-grid {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.capability-grid div,
-.readiness-card,
-.device-grid div,
 .download-panel,
 .option-item {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.065);
-}
-
-.capability-grid div,
-.readiness-card,
-.device-grid div {
-  min-height: 144px;
-  padding: 16px;
-  display: grid;
-  align-content: space-between;
-  gap: 16px;
-}
-
-.device-readiness {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.readiness-card:first-child {
-  border-color: rgba(85, 199, 184, 0.32);
-  background: rgba(85, 199, 184, 0.12);
-}
-
-.device-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.device-grid div {
-  min-height: 112px;
 }
 
 strong {
@@ -211,7 +155,7 @@ span,
 .consent-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 12px;
   padding: 16px;
   border: 1px solid rgba(85, 199, 184, 0.28);
@@ -223,12 +167,7 @@ span,
 .consent-row input {
   width: 22px;
   height: 22px;
-  margin-top: 2px;
   accent-color: #55c7b8;
-}
-
-.option-list {
-  grid-template-columns: repeat(3, 1fr);
 }
 
 .intelligence-options {
@@ -275,7 +214,7 @@ span,
 }
 
 .option-item {
-  min-height: 142px;
+  min-height: 128px;
   padding: 16px;
   display: grid;
   align-content: space-between;
@@ -290,18 +229,6 @@ span,
   background: linear-gradient(135deg, rgba(85, 199, 184, 0.2), rgba(189, 215, 166, 0.12));
 }
 
-.segmented {
-  width: fit-content;
-  max-width: 100%;
-  padding: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 18px;
-  display: flex;
-  gap: 5px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.segmented button,
 .continue-btn,
 .secondary-btn {
   min-height: 46px;
@@ -315,7 +242,6 @@ span,
   cursor: pointer;
 }
 
-.segmented button.active,
 .continue-btn {
   color: #06110f;
   border-color: transparent;
@@ -340,6 +266,18 @@ span,
   min-height: 54px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
@@ -356,20 +294,13 @@ button:not(:disabled):hover {
   }
 
   h1 {
-    max-width: 11ch;
+    max-width: 12ch;
   }
 
-  .capability-grid,
-  .option-list,
-  .intelligence-options,
-  .device-readiness,
-  .device-grid {
+  .intelligence-options {
     grid-template-columns: 1fr;
   }
 
-  .capability-grid div,
-  .readiness-card,
-  .device-grid div,
   .option-item {
     min-height: 108px;
   }

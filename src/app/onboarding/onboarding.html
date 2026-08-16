@@ -12,36 +12,10 @@
 
     <div class="onboarding-body">
       @if (step() === 0) {
-        <section class="onboarding-step intro">
-          <p class="overline">First run</p>
-          <h1 id="onboarding-title">Set up Ava on this device.</h1>
-          <p class="lead">
-            Ava is a voice companion. She can stay fully local on this device, or you can sign in
-            with a Grok subscription and use cloud Grok models, Grok Voice, and Imagine.
-          </p>
-          <div class="capability-grid" aria-label="Ava capabilities">
-            <div>
-              <strong>Voice</strong>
-              <span>Speak naturally with an on-device voice or Grok Voice.</span>
-            </div>
-            <div>
-              <strong>Intelligence</strong>
-              <span>Local models, or Grok in the cloud if you prefer no downloads.</span>
-            </div>
-            <div>
-              <strong>Imagine</strong>
-              <span>Ask Grok to draw something and Ava will show the image.</span>
-            </div>
-          </div>
-        </section>
-      }
-
-      @if (step() === 1) {
         <section class="onboarding-step">
-          <p class="overline">Name</p>
           <h1 id="onboarding-title">What should Ava call you?</h1>
           <label class="field">
-            <span>Your name</span>
+            <span class="visually-hidden">Your name</span>
             <input
               #nameInput
               type="text"
@@ -51,69 +25,12 @@
               placeholder="Your name"
             />
           </label>
-
-          <label class="field">
-            <span>Pronunciation or nickname</span>
-            <input
-              type="text"
-              [value]="pronunciation()"
-              (input)="onPronunciationInput($event)"
-              placeholder="Optional"
-            />
-          </label>
-
-          <p class="fine-print">
-            Device account names are only a best guess. If Ava filled this incorrectly, just type
-            the name or pronunciation you want saved locally.
-          </p>
         </section>
       }
 
-      @if (step() === 2) {
+      @if (step() === 1) {
         <section class="onboarding-step">
-          <p class="overline">This device</p>
-          <h1 id="onboarding-title">Check local AI readiness.</h1>
-          <p class="lead">{{ hardwareReadinessDetails() }}</p>
-
-          <div class="device-readiness">
-            <div class="readiness-card">
-              <span>Status</span>
-              <strong>{{ hardwareReadinessLabel() }}</strong>
-            </div>
-            <div class="readiness-card">
-              <span>Runtime path</span>
-              <strong>{{ hardware()?.hasWebNN ? 'WebNN NPU/GPU available' : hardware()?.supportsLlmWebGPU ? 'WebGPU available' : 'WASM / CPU' }}</strong>
-            </div>
-          </div>
-
-          <div class="device-grid" aria-label="Device hardware details">
-            <div>
-              <strong>{{ hardware()?.os || 'Checking' }} · {{ hardware()?.browser || 'Checking' }}</strong>
-              <span>{{ hardware()?.androidWebView ? 'Android WebView compatibility mode' : hardware()?.platform || 'Platform unknown' }}</span>
-            </div>
-            <div>
-              <strong>{{ hardware()?.cores || 'Unknown' }} CPU cores</strong>
-              <span>{{ formatMemory(hardware()?.memoryGb) }}</span>
-            </div>
-            <div>
-              <strong>{{ hardware()?.hasWebNN ? 'WebNN detected' : hardware()?.hasWebGPU ? 'WebGPU detected' : 'No accelerator exposed' }}</strong>
-              <span>{{ hardware()?.hasWebNN ? 'Ava can try NPU/GPU-backed chat' : hardware()?.supportsLlmWebGPU ? 'Ava can try GPU-backed chat' : 'Ava will use smaller CPU-backed models' }}</span>
-            </div>
-          </div>
-
-          <p class="fine-print">
-            You can stay fully local, or sign in with SuperGrok or X Premium+ on the next screen.
-          </p>
-        </section>
-      }
-
-      @if (step() === 3) {
-        <section class="onboarding-step">
-          <p class="overline">Intelligence</p>
           <h1 id="onboarding-title">How should Ava think?</h1>
-          <p class="lead">
-            Local keeps everything on this device. Grok uses your subscription in the cloud and skips the large model downloads.
-          </p>
           <div class="option-list intelligence-options">
             <button
               type="button"
@@ -121,8 +38,8 @@
               [class.active]="intelligence() === 'local'"
               (click)="setIntelligence('local')"
             >
-              <strong>Local first</strong>
-              <span>Download models and run conversation, speech, and voice on this device.</span>
+              <strong>On this device</strong>
+              <span>Private and local. Ava downloads models as you use her.</span>
             </button>
             <button
               type="button"
@@ -130,41 +47,22 @@
               [class.active]="intelligence() === 'grok'"
               (click)="setIntelligence('grok')"
             >
-              <strong>Grok cloud</strong>
-              <span>Sign in with SuperGrok or X Premium+ for Grok, Grok Voice, and Imagine.</span>
+              <strong>Grok</strong>
+              <span>Use SuperGrok or X Premium+ in the cloud.</span>
             </button>
           </div>
+          @if (intelligence() === 'local') {
+            <label class="consent-row">
+              <input type="checkbox" [checked]="downloadConsent()" (change)="setDownloadConsent($event)" />
+              <span>Download models to this device. You can delete them later in Settings.</span>
+            </label>
+          }
         </section>
       }
 
-      @if (step() === 4 && intelligence() === 'local') {
+      @if (step() === 2) {
         <section class="onboarding-step">
-          <p class="overline">Local intelligence</p>
-          <h1 id="onboarding-title">Ava needs model files to think.</h1>
-          <p class="lead">
-            During use, Ava will download gigabytes of intelligence models for speech,
-            voice, conversation, and background agent work. These files are stored on this
-            device and can be deleted later with Reset Cache in Settings.
-          </p>
-          <div class="download-panel">
-            <strong>Expect large downloads</strong>
-            <span>Conversation models are roughly 0.3-1.5 GB. Agent models can be 0.6-4 GB. Voice and speech models add more local data.</span>
-          </div>
-          <label class="consent-row">
-            <input type="checkbox" [checked]="downloadConsent()" (change)="setDownloadConsent($event)" />
-            <span>I understand Ava may download and store gigabytes of model data on this device.</span>
-          </label>
-        </section>
-      }
-
-      @if (step() === 4 && intelligence() === 'grok') {
-        <section class="onboarding-step">
-          <p class="overline">Grok</p>
           <h1 id="onboarding-title">Sign in with Grok.</h1>
-          <p class="lead">
-            Use your SuperGrok or X Premium+ subscription. Ava will open xAI in your browser
-            and wait for you to approve access. An API key from console.x.ai also works.
-          </p>
 
           @if (xaiDevice(); as device) {
             <div class="device-code-card">
@@ -183,7 +81,7 @@
           } @else if (xaiSignedIn()) {
             <div class="download-panel grok-ready">
               <strong>Connected</strong>
-              <span>Ava will use Grok for conversation, voice, and images. You can switch back to local later in Settings.</span>
+              <span>You can switch back to local later in Settings.</span>
             </div>
           } @else {
             <div class="auth-actions">
@@ -209,43 +107,12 @@
           }
         </section>
       }
-
-      @if (step() === 5) {
-        <section class="onboarding-step">
-          <p class="overline">How you will use Ava</p>
-          <h1 id="onboarding-title">Choose a starting feel.</h1>
-          <div class="option-list">
-            @for (option of useOptions; track option.id) {
-              <button
-                type="button"
-                class="option-item"
-                [class.active]="primaryUse() === option.id"
-                (click)="setPrimaryUse(option.id)"
-              >
-                <strong>{{ option.label }}</strong>
-                <span>{{ option.description }}</span>
-              </button>
-            }
-          </div>
-
-          <div class="segmented" aria-label="Preferred input mode">
-            <button type="button" [class.active]="preferredInput() === 'voice'" (click)="setPreferredInput('voice')">Voice</button>
-            <button type="button" [class.active]="preferredInput() === 'both'" (click)="setPreferredInput('both')">Both</button>
-            <button type="button" [class.active]="preferredInput() === 'text'" (click)="setPreferredInput('text')">Text</button>
-          </div>
-
-          <p class="fine-print">
-            Try commands like “summarize this,” “turn this into action items,”
-            “draft a reply,” “explain this simply,” or attach a text file from the add menu.
-          </p>
-        </section>
-      }
     </div>
 
     <footer class="onboarding-actions">
       <button type="button" class="secondary-btn" (click)="back()" [disabled]="step() === 0">Back</button>
       <button type="button" class="continue-btn" (click)="next()" [disabled]="!canContinue()">
-        {{ step() === totalSteps - 1 ? 'Start Ava' : 'Continue' }}
+        {{ step() === totalSteps() - 1 ? 'Start Ava' : 'Continue' }}
       </button>
     </footer>
   </section>
