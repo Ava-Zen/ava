@@ -2,29 +2,16 @@
   <div class="app-frame" [class.chat-active]="showChatPanel()">
     <section class="companion-grid" [class.chat-active]="showChatPanel()">
       <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
-        <button type="button" class="garden-eyebrow" (click)="openSettings()" title="Switch garden">
+        <button type="button" class="garden-eyebrow" (click)="openMemory()" title="What Ava remembers">
           <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
-          <span>{{ currentGarden()?.name || 'Personal Garden' }}</span>
+          <span>{{ activeTopicLabel() }}</span>
         </button>
 
         <div class="voice-copy">
-          <h1 id="voice-title">
-            @if (isListening()) {
-              I am listening.
-            } @else if (isThinking()) {
-              Let me think.
-            } @else if (status() === 'speaking') {
-              @if (isPaused()) {
-                Paused.
-              } @else {
-                Speaking with you.
-              }
-            } @else if (userName()) {
-              I am here, {{ userName() }}.
-            } @else {
-              I am here.
-            }
-          </h1>
+          <h1 id="voice-title">{{ presenceLine() }}</h1>
+          @if (presenceWhisper()) {
+            <p class="presence-aside">{{ presenceWhisper() }}</p>
+          }
           @if (currentTranscript()) {
             <p class="mini-live">{{ currentTranscript() }}</p>
           }
@@ -63,7 +50,7 @@
             <small>{{ speechModelName() }} ({{ modelLoadInfo() || 'auto' }})</small>
           } @else if (isThinking()) {
             <span>Ava is reflecting</span>
-            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Working inside ' + (currentGarden()?.name || 'this garden') }}</small>
+            <small>{{ voiceEnabled() ? 'Voice resumes after this' : (activeTopicLabel() === 'Here' ? 'Holding the thread' : 'With you about ' + activeTopicLabel()) }}</small>
           } @else if (status() === 'speaking') {
             <span>{{ voiceName() }} speaking</span>
             <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
@@ -89,39 +76,18 @@
         >
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Conversation</p>
-              <h2>{{ messages().length }} moments</h2>
+              <p class="eyebrow">With you</p>
+              <h2>{{ activeTopicLabel() }}</h2>
             </div>
-            <span class="privacy-badge" [class.busy]="activityBadgeBusy()">
-              @if (activityBadgeSpinning()) {
-                <span class="badge-spinner" aria-hidden="true"></span>
-              }
-              {{ activityBadgeLabel() }}
-            </span>
-          </div>
-          <div class="chat-switcher" aria-label="Chats">
-            <div class="chat-pills">
-              @for (chat of chatsInGarden(); track chat.id) {
-                <button
-                  type="button"
-                  class="chat-pill"
-                  [class.active]="chat.id === currentChat()?.id"
-                  (click)="selectChat(chat.id)"
-                >
-                  <span>{{ chat.title }}</span>
-                  @if (chatsInGarden().length > 1 && chat.id === currentChat()?.id) {
-                    <span
-                      class="chat-close"
-                      role="button"
-                      tabindex="0"
-                      title="Close chat"
-                      (click)="closeChat($event, chat.id)"
-                    >×</span>
-                  }
-                </button>
-              }
+            <div class="panel-tools">
+              <button type="button" class="memory-open" (click)="openMemory()">Memory</button>
+              <span class="privacy-badge" [class.busy]="activityBadgeBusy()">
+                @if (activityBadgeSpinning()) {
+                  <span class="badge-spinner" aria-hidden="true"></span>
+                }
+                {{ activityBadgeLabel() }}
+              </span>
             </div>
-            <button type="button" class="chat-pill add" title="New chat" (click)="startNewChat()">+</button>
           </div>
 
           @if (isThinking() && llmThinkingTrace().length) {
@@ -134,7 +100,7 @@
 
           <div class="transcript" aria-live="polite" #transcript>
             @if (!messages().length) {
-              <p class="chat-empty">This chat is empty. Open another above, or start talking.</p>
+              <p class="chat-empty">I am listening.</p>
             }
             @for (msg of messages(); track msg.timestamp) {
               <article
@@ -216,7 +182,7 @@
                         @if (msg.gate.kind === 'tools') {
                           <div class="message-actions">
                             <button class="message-action" type="button" (click)="allowToolsOnce()">Allow once</button>
-                            <button class="message-action" type="button" (click)="allowToolsAlways()">Always in this chat</button>
+                            <button class="message-action" type="button" (click)="allowToolsAlways()">Always allow here</button>
                             <button class="message-action danger" type="button" (click)="denyTools()">Not now</button>
                           </div>
                         }
@@ -454,21 +420,11 @@
                     </svg>
                   </button>
                 </div>
-                <button
-                  class="menu-action"
-                  type="button"
-                  (click)="openFilePicker()"
-                >
-                  <strong>Add files</strong>
-                  <span>Attach a local text file. You’ll see a preview before sending.</span>
+                <button class="menu-action" type="button" (click)="openFilePicker()">
+                  Files
                 </button>
-                <button
-                  class="menu-action"
-                  type="button"
-                  (click)="openImagePicker()"
-                >
-                  <strong>Add photo</strong>
-                  <span>Attach a photo for Grok Imagine, then say what to change</span>
+                <button class="menu-action" type="button" (click)="openImagePicker()">
+                  Photo
                 </button>
                 <button
                   class="menu-action"
@@ -476,27 +432,14 @@
                   (click)="openAudioFilePicker()"
                   [disabled]="isGeneratingAudioFile()"
                 >
-                  <strong>Generate audio file</strong>
-                  <span>Upload text and download Ava speaking it as WAV</span>
+                  Audio
                 </button>
-                <button
-                  class="menu-action"
-                  type="button"
-                  (click)="setManualInputMode(!manualInputEnabled())"
-                >
-                  <strong>{{
-                    manualInputEnabled() ? 'Hide text input' : 'Type a message'
-                  }}</strong>
-                  <span>{{
-                    manualInputEnabled()
-                      ? 'Collapse the composer back to the type button'
-                      : 'Open the text field inside this card'
-                  }}</span>
+                <button class="menu-action" type="button" (click)="setManualInputMode(!manualInputEnabled())">
+                  {{ manualInputEnabled() ? 'Hide text' : 'Text' }}
                 </button>
 
                 <div class="menu-divider"></div>
 
-                <p class="menu-label">Built-in prompts</p>
                 <div class="quick-prompt-list">
                   @for (prompt of quickPrompts; track prompt.label) {
                     <button
@@ -518,8 +461,7 @@
                   role="menuitem"
                   (click)="clearConversation()"
                 >
-                  <strong>Clear conversation</strong>
-                  <span>Reset the current garden's visible chat</span>
+                  Clear
                 </button>
               </div>
             }
@@ -639,7 +581,7 @@
           [attr.aria-expanded]="modelMenuOpen()"
           aria-haspopup="menu"
           aria-label="Settings"
-          title="Manage gardens and settings · right-click for quick model switch"
+          title="Settings · right-click for a quick model switch"
         >
           <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
         </button>
@@ -704,15 +646,16 @@
           [speechLoadInfo]="modelLoadInfo()"
           [voiceBackendInfo]="voiceBackendInfo()"
           (close)="closeSettings()"
-          (selectGarden)="selectGarden($event)"
-          (createGarden)="onCreateGarden($event)"
-          (updateGarden)="onUpdateGarden($event)"
-          (deleteGarden)="onDeleteGarden($event)"
+          (openMemory)="closeSettings(); openMemory()"
           (previewVoice)="previewVoice($event)"
           (resetCache)="onResetCache()"
         ></app-settings>
       </div>
     </div>
+  }
+
+  @if (showMemory()) {
+    <app-memory (close)="closeMemory()"></app-memory>
   }
 
   @if (showOnboarding()) {

@@ -11,7 +11,7 @@
     </header>
 
     <div class="onboarding-body">
-      @if (step() === 0) {
+      @if (currentStep() === 'name') {
         <section class="onboarding-step">
           <h1 id="onboarding-title">What should Ava call you?</h1>
           <label class="field">
@@ -28,7 +28,19 @@
         </section>
       }
 
-      @if (step() === 1) {
+      @if (currentStep() === 'home') {
+        <section class="onboarding-step">
+          <h1 id="onboarding-title">Where should I keep what I learn?</h1>
+          <p class="fine-print">A folder of files on this computer. You can open it any time.</p>
+          <div class="download-panel">
+            <strong>{{ homeLabel() }}</strong>
+            <span>{{ homePath() }}</span>
+          </div>
+          <button type="button" class="secondary-btn" (click)="pickHomeFolder()">Choose another folder</button>
+        </section>
+      }
+
+      @if (currentStep() === 'intelligence') {
         <section class="onboarding-step">
           <h1 id="onboarding-title">How should Ava think?</h1>
           <div class="option-list intelligence-options">
@@ -60,7 +72,7 @@
         </section>
       }
 
-      @if (step() === 2) {
+      @if (currentStep() === 'grok') {
         <section class="onboarding-step">
           <h1 id="onboarding-title">Sign in with Grok.</h1>
 
@@ -109,7 +121,7 @@
       }
     </div>
 
-    <footer class="onboarding-actions" [class.single]="step() === 0">
+    <footer class="onboarding-actions" [class.single]="currentStep() === 'name'">
       @if (step() > 0) {
         <button type="button" class="secondary-btn" (click)="back()">Back</button>
       }

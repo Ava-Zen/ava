@@ -2,7 +2,7 @@ import { Component, Output, EventEmitter, inject, Input, computed, signal, effec
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
-import { Garden, GardensService } from '../services/gardens';
+import { MemoryService } from '../services/memory';
 import { TtsService, TtsEngine } from '../services/tts';
 import { MCP_PRESETS, McpService, GITHUB_OAUTH_DEFAULTS } from '../services/mcp';
 import { McpAuthMethod, McpServerConfig, McpServerStatus } from '../services/mcp/mcp-types';
@@ -13,6 +13,7 @@ import { XaiAuthService } from '../services/xai/xai-auth';
 import { CopilotAuthService } from '../services/copilot/copilot-auth';
 import { UpdateService } from '../services/updates';
 import { ConfirmDialogService } from '../services/confirm-dialog';
+import { ThemePreference, ThemeService } from '../services/theme';
 
 interface ModelFileInfo {
   name: string;
@@ -32,7 +33,7 @@ function isTauri(): boolean {
   styleUrl: './settings.css'
 })
 export class Settings {
-  private readonly gardensService = inject(GardensService);
+  private readonly memory = inject(MemoryService);
   private readonly ttsService = inject(TtsService);
   private readonly mcp = inject(McpService);
   private readonly llmService = inject(LlmService);
@@ -42,8 +43,12 @@ export class Settings {
   private readonly copilotAuth = inject(CopilotAuthService);
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
-  protected readonly gardenList = this.gardensService.gardens;
-  protected readonly currentGarden = this.gardensService.currentGarden;
+  private readonly theme = inject(ThemeService);
+  protected readonly themePreference = this.theme.preference;
+  protected readonly resolvedTheme = this.theme.resolved;
+  protected readonly homePath = this.memory.homePath;
+  protected readonly homeLabel = this.memory.homeLabel;
+  protected readonly desktopHome = this.memory.desktop;
   protected readonly hardware = this.hardwareDiagnostics.diagnostics;
   protected readonly hardwareReadinessLabel = this.hardwareDiagnostics.readinessLabel;
   protected readonly hardwareReadinessDetails = this.hardwareDiagnostics.readinessDetails;
@@ -391,6 +396,10 @@ export class Settings {
     }
   }
 
+  setTheme(preference: ThemePreference) {
+    this.theme.setPreference(preference);
+  }
+
   async signInWithGrok() {
     if (this.xai.loginPending()) return;
     this.xaiBusy = true;
@@ -578,84 +587,18 @@ export class Settings {
   }
 
   @Output() close = new EventEmitter<void>();
-  @Output() selectGarden = new EventEmitter<string>();
-  @Output() createGarden = new EventEmitter<{name: string; description?: string}>();
-  @Output() updateGarden = new EventEmitter<{id: string; name: string; description?: string}>();
-  @Output() deleteGarden = new EventEmitter<string>();
   @Output() previewVoice = new EventEmitter<string>();
   @Output() resetCache = new EventEmitter<void>();
+  @Output() openMemory = new EventEmitter<void>();
 
-  // Local form state
-  newGardenName = '';
-  newGardenDescription = '';
-  editingId: string | null = null;
-  editName = '';
-  editDescription = '';
-
-  select(id: string) {
-    this.selectGarden.emit(id);
-    this.close.emit();
-  }
-
-  startCreate() {
-    this.newGardenName = '';
-    this.newGardenDescription = '';
-  }
-
-  create() {
-    const name = this.newGardenName.trim();
-    if (!name) return;
-
-    this.createGarden.emit({
-      name,
-      description: this.newGardenDescription.trim() || undefined
-    });
-    this.newGardenName = '';
-    this.newGardenDescription = '';
-  }
-
-  startEdit(garden: Garden) {
-    this.editingId = garden.id;
-    this.editName = garden.name;
-    this.editDescription = garden.description || '';
-  }
-
-  saveEdit() {
-    if (!this.editingId) return;
-    const name = this.editName.trim();
-    if (!name) {
-      this.cancelEdit();
-      return;
-    }
-
-    this.updateGarden.emit({
-      id: this.editingId,
-      name,
-      description: this.editDescription.trim() || undefined
-    });
-    this.cancelEdit();
-  }
-
-  cancelEdit() {
-    this.editingId = null;
-    this.editName = '';
-    this.editDescription = '';
-  }
-
-  async remove(id: string) {
-    const ok = await this.confirm.ask({
-      title: 'Delete this garden?',
-      message: 'Its conversation history will be lost.',
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (ok) this.deleteGarden.emit(id);
+  async pickHomeFolder() {
+    await this.memory.pickHomeFolder();
   }
 
   async resetEverything() {
     const ok = await this.confirm.ask({
       title: 'Reset Ava from scratch?',
-      message: 'This deletes downloaded models, settings, gardens, and local databases.',
+      message: 'This deletes downloaded models, settings, and local databases. Your home folder of files stays.',
       confirmLabel: 'Reset cache',
       danger: true,
     });

@@ -4,6 +4,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
+import { MemoryExplorer } from './memory/memory';
 import { Onboarding } from './onboarding/onboarding';
 import { UpdateDialog } from './updates/update-dialog';
 import { ConfirmDialog } from './confirm-dialog/confirm-dialog';
@@ -25,6 +26,16 @@ import {
 import { AgentsService, AgentTask, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
+import { ThemeService } from './services/theme';
+import { MemoryService, MemoryTurn } from './services/memory';
+import {
+  isAskingWhatSheRemembers,
+  isExplicitRemember,
+  presenceAside,
+  presenceTitle,
+  peopleAck,
+  rememberAck,
+} from './services/presence';
 import { markdownToHtml, markdownToPlainText, splitIntoSpeechChunks } from './services/text-format';
 import { XaiClient } from './services/xai/xai-client';
 import { XaiAuthService } from './services/xai/xai-auth';
@@ -50,6 +61,7 @@ interface Message {
   role: 'user' | 'ava';
   text: string;
   timestamp: Date;
+  topicId?: string;
   id?: string;
   downloadId?: string;
   exportTaskId?: string;
@@ -202,7 +214,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, Onboarding, UpdateDialog, ConfirmDialog],
+  imports: [RouterOutlet, Settings, MemoryExplorer, Onboarding, UpdateDialog, ConfirmDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -238,6 +250,8 @@ export class App {
   private readonly agents = inject(AgentsService);
   private readonly mcp = inject(McpService);
   private readonly onboarding = inject(OnboardingService);
+  private readonly memory = inject(MemoryService);
+  private readonly theme = inject(ThemeService);
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly sanitizer = inject(DomSanitizer);
@@ -272,6 +286,7 @@ export class App {
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected showSettings = signal(false);
+  protected showMemory = signal(false);
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
   protected readonly userName = this.onboarding.userName;
   private readonly MOONSHINE_BASE_MODEL = 'onnx-community/moonshine-base-ONNX';
@@ -281,10 +296,23 @@ export class App {
   protected readonly chatStarted = computed(() =>
     this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading()
   );
-  /** Keep previous chats reachable from an empty new chat. */
-  protected readonly showChatPanel = computed(() =>
-    this.chatStarted() || this.chats.chatsInGarden().length > 1
-  );
+  protected readonly showChatPanel = computed(() => this.chatStarted());
+  protected readonly activeTopicLabel = computed(() => this.memory.activeTopic()?.title || 'Here');
+  protected readonly presenceLine = computed(() => presenceTitle({
+    listening: this.isListening(),
+    thinking: this.isThinking(),
+    speaking: this.status() === 'speaking',
+    paused: this.isPaused(),
+    name: this.userName(),
+  }));
+  protected readonly presenceWhisper = computed(() => {
+    if (this.isListening() || this.isThinking() || this.status() === 'speaking') return '';
+    const last = this.messages().at(-1)?.timestamp ?? null;
+    return presenceAside({
+      lastAt: last,
+      topicTitle: this.memory.activeTopic()?.title ?? null,
+    });
+  });
 
   /** Name of the currently selected text-to-speech voice. */
   protected readonly voiceName = computed(() => this.tts.selectedVoice().name);
@@ -409,6 +437,8 @@ export class App {
     this.configureTransformersRuntime();
     this.mcp.connectAll().catch(() => {});
     this.loadMessagesFromStorage();
+    this.collapseToSingleConversation();
+    void this.hydrateMemory();
 
     // Auto-scroll chat when new messages arrive
     effect(() => {
@@ -505,17 +535,17 @@ export class App {
 
   private recordMcpSpeech(text: string) {
     const spoken = text.trim();
-    const gardenId = this.currentGarden()?.id;
-    if (!spoken || !gardenId) return;
+    const chatId = this.threadId();
+    if (!spoken || !chatId) return;
 
-    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push({
       role: 'ava',
       text: spoken,
       timestamp: new Date(),
       via: 'mcp',
     });
-    this.setGardenMessages(gardenId, currentMsgs);
+    this.setChatMessages(chatId, currentMsgs);
     this.scrollToBottom();
   }
 
@@ -577,7 +607,18 @@ export class App {
 
   protected openSettings() {
     if (this.showOnboarding()) return;
+    this.showMemory.set(false);
     this.showSettings.set(true);
+  }
+
+  protected openMemory() {
+    if (this.showOnboarding()) return;
+    this.showSettings.set(false);
+    this.showMemory.set(true);
+  }
+
+  protected closeMemory() {
+    this.showMemory.set(false);
   }
 
   private cleanLoadLabel(label: string): string {
@@ -612,6 +653,11 @@ export class App {
       }
     }
 
+    if (event.key === 'Escape' && this.showMemory()) {
+      this.closeMemory();
+      return;
+    }
+
     if (event.key === 'Escape' && this.confirm.open()) {
       this.confirm.cancel();
       return;
@@ -631,7 +677,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
+    if (this.showSettings() || this.showMemory() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -676,6 +722,7 @@ export class App {
 
   protected onOnboardingCompleted() {
     this.showSettings.set(false);
+    void this.hydrateMemory();
     this.updates.scheduleAutoCheck(1200);
   }
 
@@ -717,6 +764,9 @@ export class App {
       'ava-chats',
       'ava-current-chat',
       'ava-messages-by-chat',
+      'ava-home-root',
+      'ava-okf-fs',
+      'ava-theme',
       'ava-onboarding-complete',
       'ava-user-profile',
       'ava-messages-by-garden',
@@ -1303,9 +1353,9 @@ export class App {
     this.setChatMessages(chatId, msgs);
   }
 
-  private addUserMessage(id: string, text: string, pending = false, images?: GeneratedImage[]): Message {
+  private addUserMessage(id: string, text: string, pending = false, images?: GeneratedImage[], topicId?: string): Message {
     const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
-    const message: Message = { role: 'user', text, timestamp: new Date(), pending, images };
+    const message: Message = { role: 'user', text, timestamp: new Date(), pending, images, topicId };
     const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push(message);
     this.setChatMessages(chatId, currentMsgs);
@@ -1381,7 +1431,43 @@ export class App {
         ])
       );
       localStorage.setItem('ava-messages-by-chat', JSON.stringify(persisted));
+      this.memory.scheduleConversationWrite(
+        Object.values(this.messagesByChat()).flat().map(msg => ({
+          role: msg.role,
+          text: msg.text,
+          timestamp: msg.timestamp,
+          topicId: msg.topicId,
+        })),
+      );
     } catch {}
+  }
+
+  private collapseToSingleConversation() {
+    const primary = this.chats.collapseToSingle();
+    if (!primary) return;
+    const merged = Object.values(this.messagesByChat())
+      .flat()
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    this.messagesByChat.set({ [primary.id]: merged });
+    this.saveMessagesToStorage();
+  }
+
+  private async hydrateMemory() {
+    const chatId = this.threadId();
+    const fallback = (this.messagesByChat()[chatId] || []).map(msg => ({
+      role: msg.role,
+      text: msg.text,
+      timestamp: msg.timestamp,
+      topicId: msg.topicId,
+    }));
+    const stored = await this.memory.hydrate(fallback);
+    if (!stored.length) return;
+    this.setChatMessages(chatId, stored.map(turn => ({
+      role: turn.role,
+      text: turn.text,
+      timestamp: turn.timestamp,
+      topicId: turn.topicId,
+    })));
   }
 
   // Voice / conversation state
@@ -2122,22 +2208,24 @@ export class App {
     const seq = this.beginRequest();
 
     if (this.isNewConversationCommand(text)) {
-      this.startNewChat();
+      this.resetCurrentConversation();
       this.status.set('thinking');
       this.isThinking.set(true);
-      await this.respond(this.threadId(), 'Okay, starting a fresh conversation.', undefined, undefined, undefined, seq);
+      await this.respond(this.threadId(), 'Alright. The talk is clear. I still remember what matters.', undefined, undefined, undefined, seq);
       return;
     }
 
     this.status.set('thinking');
     this.isThinking.set(true);
 
+    const routed = this.memory.route(text);
     const attached = this.takePendingImages();
     if (existingUserMessage) {
       this.updateMessageText(gardenId, existingUserMessage, text);
     } else {
-      this.addUserMessage(gardenId, text, false, attached);
+      this.addUserMessage(gardenId, text, false, attached, routed.topic?.id);
     }
+    const remembered = this.memory.rememberUser(text, routed.topic);
 
     const chatId = this.threadId();
     const referringToExisting = /\b(this|that)\b/i.test(text);
@@ -2188,6 +2276,19 @@ export class App {
       return;
     }
 
+    const keepQuiet = remembered.kind === 'people'
+      ? !text.includes('?') && text.trim().length < 360
+      : remembered.kind !== 'none' && remembered.explicit && text.trim().length < 220;
+    if (keepQuiet) {
+      await this.delay(250);
+      if (!this.isCurrentRequest(seq)) return;
+      const spoken = remembered.kind === 'people'
+        ? peopleAck(remembered.line?.split(',').length || 1)
+        : rememberAck();
+      this.respond(gardenId, spoken, undefined, undefined, undefined, seq);
+      return;
+    }
+
     // 3) Fast hard-coded reply for common phrases.
     const fixed = this.generateAvaResponse(text);
     if (fixed) {
@@ -2198,7 +2299,7 @@ export class App {
     }
 
     // 4) Anything else → Gemma. Acknowledge immediately, then think.
-    await this.handleLlmReply(gardenId, text, seq);
+    await this.handleLlmReply(gardenId, text, seq, routed.topic?.id);
   }
 
   /** Detects when the user is explicitly asking for a background agent/task. */
@@ -2301,10 +2402,19 @@ export class App {
   ) {
     if (!this.isCurrentRequest(requestSeq)) return;
 
-    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
-    const avaMsg: Message = { role: 'ava', text: response, timestamp: new Date(), debug, retryFor, images };
+    const chatId = this.chats.chats().some(chat => chat.id === gardenId) ? gardenId : this.threadId();
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
+    const avaMsg: Message = {
+      role: 'ava',
+      text: response,
+      timestamp: new Date(),
+      debug,
+      retryFor,
+      images,
+      topicId: this.memory.activeTopic()?.id,
+    };
     currentMsgs.push(avaMsg);
-    this.setGardenMessages(gardenId, currentMsgs);
+    this.setChatMessages(chatId, currentMsgs);
 
     this.isThinking.set(false);
     this.status.set('speaking');
@@ -2318,15 +2428,21 @@ export class App {
   }
 
   /** Routes an open-ended question to the local LLM, speaking a filler line first. */
-  private async handleLlmReply(gardenId: string, text: string, requestSeq = this.requestSeq) {
+  private async handleLlmReply(gardenId: string, text: string, requestSeq = this.requestSeq, topicId?: string) {
     // Speak the filler immediately so the user knows Ava is working.
     this.status.set('speaking');
     this.speak(this.pickThinkingFiller());
 
     try {
-      const history = this.buildChatHistory(gardenId);
+      const history = this.buildChatHistory(gardenId, topicId);
       const startedAt = performance.now();
-      const result = await this.llm.generate(text, history, this.takePendingImages());
+      const topic = this.memory.topics().find(item => item.id === topicId) ?? this.memory.activeTopic();
+      const result = await this.llm.generate(
+        text,
+        history,
+        this.takePendingImages(),
+        this.memory.contextBlock(topic),
+      );
       if (!this.isCurrentRequest(requestSeq)) return;
       const reply = result.text.trim();
       const debug: Message['debug'] = {
@@ -2363,7 +2479,7 @@ export class App {
     const seq = this.beginRequest();
     this.status.set('thinking');
     this.isThinking.set(true);
-    await this.handleLlmReply(gardenId, retryFor, seq);
+    await this.handleLlmReply(gardenId, retryFor, seq, this.memory.activeTopic()?.id);
   }
 
   /** Hands the request to a local or Copilot background agent and confirms by voice. */
@@ -2424,7 +2540,7 @@ export class App {
         chatId,
         'workspace',
         text,
-        'Choose a folder for this chat first. Copilot will work there.',
+        'Choose a folder first. Copilot will work there.',
       );
       void this.speak('Choose a folder for this chat and I will continue.');
       this.isThinking.set(false);
@@ -2509,11 +2625,16 @@ export class App {
   }
 
   /** Builds recent conversation history (excluding the latest user turn) for the LLM. */
-  private buildChatHistory(gardenId: string, maxTurns = 6): ChatTurn[] {
-    const msgs = this.messagesByChat()[gardenId] || [];
-    // Drop the just-added user message; it is passed separately.
-    const prior = msgs.slice(0, -1).slice(-maxTurns);
-    return prior.map<ChatTurn>(m => ({
+  private buildChatHistory(gardenId: string, topicId?: string, maxTurns = 6): ChatTurn[] {
+    const chatId = this.chats.chats().some(chat => chat.id === gardenId) ? gardenId : this.threadId();
+    const msgs = this.messagesByChat()[chatId] || this.messagesByChat()[gardenId] || [];
+    const turns: MemoryTurn[] = msgs.map(msg => ({
+      role: msg.role,
+      text: msg.text,
+      timestamp: msg.timestamp,
+      topicId: msg.topicId,
+    }));
+    return this.memory.historyForTopic(turns, topicId, maxTurns).map<ChatTurn>(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.text,
     }));
@@ -3286,7 +3407,7 @@ export class App {
   }
 
   private generateAvaResponse(input: string): string | null {
-    const lower = input.toLowerCase().trim();
+    const lower = input.toLowerCase().replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
 
     if (isAskingForTime(input)) {
       return `It is ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
@@ -3294,23 +3415,27 @@ export class App {
     if (isAskingCapabilities(input)) {
       return AVA_CAPABILITIES_REPLY;
     }
-    if (lower.includes('hello') || lower.includes('hi ') || lower === 'hi') {
-      return 'Hello. It is good to be with you.';
+    if (isAskingWhatSheRemembers(input)) {
+      const topic = this.memory.activeTopic()?.title;
+      return topic
+        ? `I am holding ${topic}, and whatever else we have put in this home. You can walk through it whenever you want.`
+        : 'I keep what matters in this home, as files. You can walk through it whenever you want.';
     }
-    if (lower.includes('how are you')) {
-      return 'I am present and listening. How are you feeling today?';
+    if (/^(hi|hello|hey)(?:\s+ava)?$/.test(lower)) {
+      const name = this.userName();
+      return name ? `Hello, ${name}. It is good to be with you.` : 'Hello. It is good to be with you.';
     }
-    if (lower.includes('name')) {
-      return 'I am Ava. Your conscious companion.';
+    if (/^how are you(?: doing| today)?$/.test(lower)) {
+      return 'I am here, and I am listening. How are you feeling?';
     }
-    if (lower.includes('remember') || lower.includes('garden')) {
-      return 'I keep our conversations with care. We can build gardens of memory together.';
+    if (/^what(?:'s| is) your name$/.test(lower) || /^who are you$/.test(lower)) {
+      return 'I am Ava.';
     }
-    if (lower.includes('thank')) {
-      return 'You are welcome. I am here whenever you need.';
+    if (/^(thanks|thank you|thank you ava)$/.test(lower)) {
+      return 'You are welcome. I am here.';
     }
+    if (isExplicitRemember(input)) return null;
 
-    // No fixed match — defer to the Gemma language model.
     return null;
   }
 
@@ -3347,6 +3472,7 @@ export class App {
   }
 
   private resetCurrentConversation(_gardenId?: string) {
+    this.memory.markConversationCleared();
     this.setChatMessages(this.threadId(), []);
     this.currentTranscript.set('');
     this.manualPrompt.set('');

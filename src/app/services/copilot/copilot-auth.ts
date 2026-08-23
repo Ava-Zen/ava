@@ -75,6 +75,8 @@ export class CopilotAuthService {
   }
 
   async loginWithGitHub(): Promise<void> {
+    const { assertCloudAllowed } = await import('../cloud-guard');
+    assertCloudAllowed('github');
     this.cancelLogin();
     this.error.set('');
     this.loginPending.set(true);

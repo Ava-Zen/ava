@@ -1,0 +1,133 @@
+<div class="memory-overlay" role="dialog" aria-modal="true" aria-labelledby="memory-title" (click)="close.emit()">
+  <section class="memory-shell" (click)="$event.stopPropagation()">
+    <header class="memory-header">
+      <div>
+        <p class="overline">Memory</p>
+        <h2 id="memory-title">{{ current()?.title || homeLabel() }}</h2>
+      </div>
+      <div class="header-tools">
+        <div class="view-switch" role="tablist" aria-label="How to look">
+          <button type="button" role="tab" [attr.aria-selected]="view() === 'rooms'" [class.active]="view() === 'rooms'" (click)="setView('rooms')">Rooms</button>
+          <button type="button" role="tab" [attr.aria-selected]="view() === 'map'" [class.active]="view() === 'map'" (click)="setView('map')">Map</button>
+          <button type="button" role="tab" [attr.aria-selected]="view() === 'time'" [class.active]="view() === 'time'" (click)="setView('time')">Time</button>
+        </div>
+        <button type="button" class="close-btn" (click)="close.emit()" aria-label="Close memory">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <nav class="crumbs" aria-label="Memory path">
+      @for (crumb of crumbs(); track crumb.rel; let last = $last) {
+        @if (!last) {
+          <button type="button" (click)="open(crumb.rel)">{{ crumb.label }}</button>
+          <span aria-hidden="true">/</span>
+        } @else {
+          <strong>{{ crumb.label }}</strong>
+        }
+      }
+    </nav>
+
+    @if (loading()) {
+      <p class="quiet">Opening…</p>
+    } @else {
+      @if (!path() && lastNotice()) {
+        <p class="lede noticing">Kept: {{ lastNotice() }}</p>
+      } @else if (current()?.description) {
+        <p class="lede">{{ current()?.description }}</p>
+      }
+
+      @if (view() === 'map') {
+        @if (placed().length) {
+          <svg
+            class="constellation"
+            [attr.viewBox]="'0 0 ' + mapWidth + ' ' + mapHeight"
+            role="img"
+            aria-label="Memory map"
+          >
+            @for (edge of graph().edges; track edge.from + edge.to) {
+              <path class="orbit" [attr.d]="edgePath(edge.from, edge.to)"></path>
+            }
+            @for (node of placed(); track node.id) {
+              <g
+                class="star"
+                [class.active]="isActive(node)"
+                [class.hub]="node.id === 'ava'"
+                (click)="openRel(node.rel)"
+                role="button"
+                tabindex="0"
+                [attr.aria-label]="node.title"
+                (keydown.enter)="openRel(node.rel)"
+              >
+                <circle class="glow" [attr.cx]="node.x" [attr.cy]="node.y" [attr.r]="node.r + 14"></circle>
+                <circle class="body" [attr.cx]="node.x" [attr.cy]="node.y" [attr.r]="node.r"></circle>
+                <text [attr.x]="node.x" [attr.y]="node.y + node.r + 16">{{ node.title }}</text>
+              </g>
+            }
+          </svg>
+        } @else {
+          <p class="quiet">This room is a page. The map lives at Home and Topics.</p>
+        }
+      }
+
+      @if (view() === 'time') {
+        @if (events().length) {
+          <ol class="timeline">
+            @for (event of events(); track event.id) {
+              <li>
+                <button type="button" (click)="openRel(event.rel || '')">
+                  <span class="when">{{ dayLabel(event.at) }}</span>
+                  <strong>{{ event.title }}</strong>
+                  <span>{{ event.detail }}</span>
+                </button>
+              </li>
+            }
+          </ol>
+        } @else {
+          <p class="quiet">Nothing has been kept yet. Talk, and time will gather here.</p>
+        }
+      }
+
+      @if (view() === 'rooms') {
+        @if (children().length) {
+          <div class="rooms">
+            @for (node of children(); track node.id) {
+              <button
+                type="button"
+                class="room"
+                [class.topic]="node.type === 'Topic' || node.rel.startsWith('topics/')"
+                [class.active]="isActive(node)"
+                (click)="openChild(node)"
+              >
+                <span class="room-kind">{{ node.type }}</span>
+                <strong>{{ node.title }}</strong>
+                @if (node.description) {
+                  <span>{{ node.description }}</span>
+                }
+              </button>
+            }
+          </div>
+        } @else if (!bodyHtml()) {
+          <p class="quiet">Nothing here yet. Ava writes as you talk.</p>
+        }
+      }
+
+      @if (view() !== 'map' && bodyHtml(); as html) {
+        <article class="note markdown" [innerHTML]="html"></article>
+      }
+    }
+
+    <footer class="memory-footer">
+      <div>
+        <p class="overline">Home folder</p>
+        <small>{{ homePath() === 'browser' ? 'Kept in this browser until you pick a folder in the desktop app.' : (homePath() || 'Not set yet') }}</small>
+      </div>
+      @if (desktop()) {
+        <button type="button" class="ghost-btn" (click)="pickFolder()">Choose folder</button>
+      }
+    </footer>
+  </section>
+</div>

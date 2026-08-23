@@ -15,6 +15,22 @@
   <section class="section">
     <div class="section-heading">
       <div>
+        <p class="overline">Look</p>
+        <h3>Appearance</h3>
+      </div>
+    </div>
+    <p class="hint">Light is the warm room from Her. Dark is the same palette, after sunset. Auto follows this device.</p>
+    <div class="segmented intelligence-toggle" aria-label="Appearance">
+      <button type="button" [class.active]="themePreference() === 'light'" (click)="setTheme('light')">Light</button>
+      <button type="button" [class.active]="themePreference() === 'dark'" (click)="setTheme('dark')">Dark</button>
+      <button type="button" [class.active]="themePreference() === 'auto'" (click)="setTheme('auto')">Auto</button>
+    </div>
+    <p class="hint">Now using {{ resolvedTheme() }}.</p>
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
         <p class="overline">xAI</p>
         <h3>Grok</h3>
       </div>
@@ -156,7 +172,7 @@
         <button type="button" [class.active]="agentRuntime() === 'copilot'" (click)="setAgentRuntime('copilot')">Copilot</button>
       </div>
       <label>
-        <span>Workspace for {{ currentGarden()?.name || 'this garden' }}</span>
+        <span>Workspace folder</span>
         <input
           [(ngModel)]="workspaceDraft"
           placeholder="C:\src\my-project"
@@ -178,11 +194,10 @@
           [checked]="copilotAllowWrites()"
           (change)="setCopilotAllowWrites($any($event.target).checked)"
         />
-        <span>Allow Copilot to edit files and run commands in this garden</span>
+        <span>Allow Copilot to edit files and run commands in this folder</span>
       </label>
       <p class="hint">
-        Defaults for new chats in this garden. Each chat can pick its own folder when a task needs one.
-        Off by default: Copilot may still use GitHub tools to read issues and pull requests.
+        Used when a task needs local files. Off by default: Copilot may still use GitHub tools to read issues and pull requests.
       </p>
     }
   </section>
@@ -190,91 +205,25 @@
   <section class="section">
     <div class="section-heading">
       <div>
-        <p class="overline">Memory spaces</p>
-        <h3>Gardens</h3>
+        <p class="overline">Memory</p>
+        <h3>Home folder</h3>
       </div>
-      <span>{{ gardenList().length }}</span>
     </div>
-    <p class="hint">Separate contexts for work, private thoughts, creative ideas, and anything else Ava should hold with care.</p>
-
-    <div class="garden-list">
-      @for (garden of gardenList(); track garden.id) {
-        <article class="garden-item" [class.active]="garden.id === currentGarden()?.id" [class.editing]="editingId === garden.id">
-          @if (editingId !== garden.id) {
-            <button class="garden-info" (click)="select(garden.id)">
-              <span class="garden-mark" aria-hidden="true"></span>
-              <span>
-                <strong>{{ garden.name }}</strong>
-                @if (garden.description) {
-                  <small>{{ garden.description }}</small>
-                } @else {
-                  <small>No description yet</small>
-                }
-              </span>
-            </button>
-
-            <div class="garden-actions">
-              <button class="icon-btn" (click)="startEdit(garden)" title="Edit garden" aria-label="Edit garden">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m16.5 3.5 4 4L8 20H4v-4L16.5 3.5Z"></path>
-                  <path d="m14 6 4 4"></path>
-                </svg>
-              </button>
-              @if (gardenList().length > 1) {
-                <button class="icon-btn danger" (click)="remove(garden.id)" title="Delete garden" aria-label="Delete garden">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 6h18"></path>
-                    <path d="M8 6V4h8v2"></path>
-                    <path d="M19 6l-1 14H6L5 6"></path>
-                    <path d="M10 11v5"></path>
-                    <path d="M14 11v5"></path>
-                  </svg>
-                </button>
-              }
-            </div>
-          } @else {
-            <div class="edit-form">
-              <label>
-                <span>Name</span>
-                <input [(ngModel)]="editName" placeholder="Garden name" (keyup.enter)="saveEdit()" />
-              </label>
-              <label>
-                <span>Description</span>
-                <input [(ngModel)]="editDescription" placeholder="What belongs here?" (keyup.enter)="saveEdit()" />
-              </label>
-              <div class="edit-buttons">
-                <button class="save-btn" (click)="saveEdit()">Save</button>
-                <button class="ghost-btn" (click)="cancelEdit()">Cancel</button>
-              </div>
-            </div>
-          }
-        </article>
-      }
+    <p class="hint">
+      Ava keeps what she learns as files you can open. Subjects stay apart on their own — you stay in one talk.
+    </p>
+    <div class="grok-status">
+      <div>
+        <strong>{{ homeLabel() }}</strong>
+        <small>{{ homePath() === 'browser' ? 'This browser' : (homePath() || 'Not set yet') }}</small>
+      </div>
+      <button class="ghost-btn" type="button" (click)="openMemory.emit()">Open</button>
     </div>
-  </section>
-
-  <section class="section create-section">
-    <div>
-      <p class="overline">New garden</p>
-      <h3>Create a space</h3>
-    </div>
-    <div class="create-garden">
-      <label>
-        <span>Name</span>
-        <input [(ngModel)]="newGardenName" placeholder="Creative Garden" (keyup.enter)="create()" />
-      </label>
-      <label>
-        <span>Description</span>
-        <input [(ngModel)]="newGardenDescription" placeholder="Notes, plans, and ideas" (keyup.enter)="create()" />
-      </label>
-      <button class="create-btn" (click)="create()" [disabled]="!newGardenName.trim()">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 5v14"></path>
-          <path d="M5 12h14"></path>
-        </svg>
-        <span>Create</span>
-      </button>
-    </div>
+    @if (desktopHome()) {
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="pickHomeFolder()">Choose folder</button>
+      </div>
+    }
   </section>
 
   <section class="section">
@@ -620,7 +569,7 @@
     <div class="setting-item">
       <span>Storage</span>
       <strong>{{ cloudExclusive() ? 'Grok cloud' : 'Local first' }}</strong>
-      <small>{{ cloudExclusive() ? 'Conversation and voice via xAI' : 'Gardens in this device' }}</small>
+      <small>{{ cloudExclusive() ? 'Conversation and voice via xAI' : 'Files on this device' }}</small>
     </div>
     <div class="setting-item">
       <span>Voice runtime</span>

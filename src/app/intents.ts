@@ -47,4 +47,4 @@ export function isAskingCapabilities(text: string): boolean {
 }
 
 export const AVA_CAPABILITIES_REPLY =
-  'I can talk with you by voice or text. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply or explain something simply. I can also generate or edit images with Grok, and work on files or GitHub in the background.';
+  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, and work on files or GitHub in the background.';

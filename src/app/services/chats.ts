@@ -115,6 +115,21 @@ export class ChatsService {
     this.chats.update(list => list.filter(chat => chat.gardenId !== gardenId));
   }
 
+  collapseToSingle(): ChatThread | null {
+    const gardenId = this.gardens.currentGarden()?.id;
+    const existing = this.chats();
+    if (!existing.length) {
+      return gardenId ? this.createChat(gardenId) : null;
+    }
+    const primary = [...existing].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    if (existing.length > 1) {
+      this.chats.set([primary]);
+    }
+    this.currentChatId.set(primary.id);
+    if (primary.gardenId) this.gardens.selectGarden(primary.gardenId);
+    return primary;
+  }
+
   ensureChatForGarden(gardenId: string): ChatThread {
     const existing = this.chats()
       .filter(chat => chat.gardenId === gardenId)

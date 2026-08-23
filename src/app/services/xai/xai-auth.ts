@@ -77,6 +77,8 @@ export class XaiAuthService {
   }
 
   async loginWithGrok(): Promise<void> {
+    const { assertCloudAllowed } = await import('../cloud-guard');
+    assertCloudAllowed('grok');
     this.cancelLogin();
     this.error.set('');
     this.loginPending.set(true);

@@ -1,10 +1,97 @@
-/* Global styles for Ava – calm, voice-first experience */
+/* Ava color language from Her (2013): peach, salmon, cream, a little red, almost no blue. */
+
+:root,
+html[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3ddd0;
+  --bg-deep: #e8cbb8;
+  --bg-hi: #f7e6d8;
+  --panel: rgba(255, 247, 240, 0.78);
+  --panel-strong: #f7e4d6;
+  --surface: rgba(255, 255, 255, 0.58);
+  --surface-strong: rgba(255, 255, 255, 0.78);
+  --line: rgba(154, 74, 58, 0.16);
+  --line-strong: rgba(154, 74, 58, 0.28);
+  --text: #3a241c;
+  --muted: #7a4e40;
+  --soft: #a36b58;
+  --coral: #c45c4e;
+  --salmon: #e07a5f;
+  --peach: #f0a07a;
+  --cream: #fff6ee;
+  --rust: #9c3d2e;
+  --amber: #c48a3a;
+  --sage: #6f8a68;
+  --gold: #c45c4e;
+  --teal: #c45c4e;
+  --green: #e8b48a;
+  --deep-teal: #9c3d2e;
+  --rose: #e07a5f;
+  --violet: #c4a494;
+  --input-bg: rgba(255, 255, 255, 0.82);
+  --input-text: #3a241c;
+  --on-accent: #fff6ee;
+  --glow-a: rgba(232, 130, 96, 0.42);
+  --glow-b: rgba(196, 92, 78, 0.2);
+  --glow-c: rgba(212, 160, 86, 0.16);
+  --shadow: rgba(92, 36, 24, 0.14);
+  --wash: rgba(196, 92, 78, 0.12);
+  --wash-strong: rgba(196, 92, 78, 0.22);
+  --danger: #9c3d2e;
+  --ok: #3f6b3a;
+  --bubble: #fff8f2;
+  --bubble-user: #f3d0c4;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1a100e;
+  --bg-deep: #120c0a;
+  --bg-hi: #2a1814;
+  --panel: rgba(42, 24, 20, 0.82);
+  --panel-strong: #2a1a16;
+  --surface: rgba(255, 232, 214, 0.07);
+  --surface-strong: rgba(255, 232, 214, 0.12);
+  --line: rgba(246, 214, 196, 0.16);
+  --line-strong: rgba(246, 214, 196, 0.28);
+  --text: #f6e8dc;
+  --muted: #c9a89a;
+  --soft: #a07a6c;
+  --coral: #e07a5f;
+  --salmon: #e8a07a;
+  --peach: #f0b496;
+  --cream: #2a1a16;
+  --rust: #f0a07a;
+  --amber: #e0b46a;
+  --sage: #8faf88;
+  --gold: #e07a5f;
+  --teal: #e07a5f;
+  --green: #e8b48a;
+  --deep-teal: #c45c4e;
+  --rose: #e8a07a;
+  --violet: #c4a494;
+  --input-bg: rgba(12, 8, 7, 0.55);
+  --input-text: #f6e8dc;
+  --on-accent: #1a100e;
+  --glow-a: rgba(196, 92, 78, 0.38);
+  --glow-b: rgba(224, 122, 95, 0.18);
+  --glow-c: rgba(212, 160, 86, 0.1);
+  --shadow: rgba(0, 0, 0, 0.42);
+  --wash: rgba(224, 122, 95, 0.14);
+  --wash-strong: rgba(224, 122, 95, 0.24);
+  --danger: #ff9b8a;
+  --ok: #9be37c;
+  --bubble: #3f2a24;
+  --bubble-user: #5c342c;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #06110f;
+  background: var(--bg);
+  color: var(--text);
   overscroll-behavior: none;
   font-family:
     Inter,
@@ -38,18 +125,19 @@ a {
 }
 
 .transcript::-webkit-scrollbar,
-.settings-modal::-webkit-scrollbar {
+.settings-modal::-webkit-scrollbar,
+.memory-shell::-webkit-scrollbar {
   width: 10px;
 }
 
-.settings-modal::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+.settings-modal::-webkit-scrollbar-thumb,
+.memory-shell::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 
-/* Auto-hidden scrollbar: invisible until you hover the conversation */
 .transcript::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
@@ -58,5 +146,5 @@ a {
   transition: background 0.3s ease;
 }
 .transcript:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--line-strong);
 }

@@ -3,6 +3,7 @@ use std::{env, fs, io, path::Path};
 use tauri::Manager;
 
 mod copilot;
+mod home;
 mod llm;
 mod mcp;
 mod voice_session;
@@ -175,6 +176,12 @@ pub fn run() {
       xai_read_grok_cli_auth,
       write_file_bytes,
       reset_app_cache,
+      home::home_pick_folder,
+      home::home_suggested_path,
+      home::home_ensure,
+      home::home_read_text,
+      home::home_write_text,
+      home::home_list,
       mcp_tts_complete,
       mcp_server_info,
       copilot::copilot_status,

@@ -1,3 +1,4 @@
+import { CLOUD_BLOCKED_MESSAGE, isCloudBlocked, isCloudUrl } from '../cloud-guard';
 import { mcpFetch } from '../mcp/mcp-http';
 
 export const XAI_API_BASE = 'https://api.x.ai/v1';
@@ -18,6 +19,9 @@ export function resolveXaiBaseUrl(method: 'oauth' | 'api-key' | null | undefined
 
 /** CORS-safe fetch: Tauri HTTP plugin in the desktop shell, window.fetch in the browser. */
 export function xaiFetch(input: string, init?: RequestInit): Promise<Response> {
+  if (isCloudBlocked() && isCloudUrl(input)) {
+    return Promise.reject(new Error(CLOUD_BLOCKED_MESSAGE));
+  }
   return mcpFetch(input, init);
 }
 

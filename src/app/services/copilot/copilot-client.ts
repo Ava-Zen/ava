@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { assertCloudAllowed } from '../cloud-guard';
 import { CopilotAuthService } from './copilot-auth';
 
 export interface CopilotRunOptions {
@@ -32,6 +33,7 @@ export class CopilotRuntimeService {
   readonly lastError = signal('');
 
   async runTask(options: CopilotRunOptions): Promise<string> {
+    assertCloudAllowed('github');
     if (!isTauri()) {
       throw new Error('GitHub Copilot agents need the Ava desktop app.');
     }

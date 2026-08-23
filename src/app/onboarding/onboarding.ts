@@ -3,6 +3,8 @@ import { OnboardingService } from '../services/onboarding';
 import { XaiAuthService } from '../services/xai/xai-auth';
 import { LlmService } from '../services/llm';
 import { TtsService } from '../services/tts';
+import { MemoryService } from '../services/memory';
+import { isTauriDesktop } from '../services/updates';
 
 @Component({
   selector: 'app-onboarding',
@@ -15,6 +17,7 @@ export class Onboarding {
   private readonly xai = inject(XaiAuthService);
   private readonly llm = inject(LlmService);
   private readonly tts = inject(TtsService);
+  private readonly memory = inject(MemoryService);
   private nameInputElement?: ElementRef<HTMLInputElement>;
 
   @Output() completed = new EventEmitter<void>();
@@ -32,12 +35,25 @@ export class Onboarding {
   protected readonly xaiDevice = this.xai.deviceLogin;
   protected readonly grokCliAvailable = this.xai.grokCliAvailable;
 
-  protected readonly totalSteps = computed(() => (this.intelligence() === 'grok' ? 3 : 2));
+  protected readonly desktop = signal(isTauriDesktop());
+  protected readonly homePath = this.memory.homePath;
+  protected readonly homeLabel = this.memory.homeLabel;
+  protected readonly steps = computed<Array<'name' | 'home' | 'intelligence' | 'grok'>>(() => {
+    const list: Array<'name' | 'home' | 'intelligence' | 'grok'> = ['name'];
+    if (this.desktop()) list.push('home');
+    list.push('intelligence');
+    if (this.intelligence() === 'grok') list.push('grok');
+    return list;
+  });
+  protected readonly currentStep = computed(() => this.steps()[this.step()] ?? 'name');
+  protected readonly totalSteps = computed(() => this.steps().length);
   protected readonly progress = computed(() => `${((this.step() + 1) / this.totalSteps()) * 100}%`);
   protected readonly canContinue = computed(() => {
-    if (this.step() === 0) return this.name().trim().length > 0;
-    if (this.step() === 1 && this.intelligence() === 'local') return this.downloadConsent();
-    if (this.step() === 2) return this.xai.signedIn();
+    const current = this.currentStep();
+    if (current === 'name') return this.name().trim().length > 0;
+    if (current === 'home') return !!this.homePath();
+    if (current === 'intelligence' && this.intelligence() === 'local') return this.downloadConsent();
+    if (current === 'grok') return this.xai.signedIn();
     return true;
   });
 
@@ -136,7 +152,12 @@ export class Onboarding {
       modelDownloadConsent: this.intelligence() === 'local' ? this.downloadConsent() : true,
       intelligenceMode: this.intelligence(),
     });
+    void this.memory.ensureBundle(this.name());
     this.completed.emit();
+  }
+
+  protected async pickHomeFolder(): Promise<void> {
+    await this.memory.pickHomeFolder();
   }
 
   protected back(): void {

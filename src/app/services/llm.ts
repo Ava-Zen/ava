@@ -15,6 +15,7 @@ import {
   NATIVE_FALLBACK_MODEL,
 } from './llm/native-llama-backend';
 import { GrokChatBackend, GROK_CHAT_MODELS, GROK_DEFAULT_MODEL, GROK_SYSTEM_PROMPT } from './llm/grok-chat-backend';
+import { isCloudBlocked } from './cloud-guard';
 import { XaiAuthService } from './xai/xai-auth';
 
 // Re-exported for existing consumers (AgentsService, components, specs).
@@ -96,9 +97,11 @@ const UNCENSORED_CHAT_MODEL: LlmModelOption = {
 
 const SYSTEM_PROMPT =
   'You are Ava, a calm, warm and concise voice companion. ' +
+  'You are one presence, not a set of bots or modes. ' +
   'Answer in a natural, spoken style. Keep replies short — usually one or two ' +
   'sentences — unless the user explicitly asks for detail. Never use markdown, ' +
-  'lists or emojis, because your reply will be spoken aloud.';
+  'lists or emojis, because your reply will be spoken aloud. ' +
+  'If they change subject, follow them. Do not ask them to pick a chat, a bot, or a workspace for ordinary talk.';
 
 const INTELLIGENCE_KEY = 'ava-intelligence-mode';
 
@@ -122,7 +125,7 @@ export class LlmService {
   private readonly nativeEngine = signal(false);
   readonly intelligenceMode = signal<IntelligenceMode>(this.loadIntelligenceMode());
   readonly isCloudExclusive = computed(
-    () => this.intelligenceMode() === 'grok' && this.xai.signedIn()
+    () => this.intelligenceMode() === 'grok' && this.xai.signedIn() && !isCloudBlocked()
   );
 
   /**
@@ -156,7 +159,7 @@ export class LlmService {
   private generationAbort: AbortController | null = null;
 
   constructor() {
-    if (this.intelligenceMode() === 'grok' && !this.xai.signedIn()) {
+    if (this.intelligenceMode() === 'grok' && (!this.xai.signedIn() || isCloudBlocked())) {
       this.intelligenceMode.set('local');
     }
     // Probe the host early so Settings shows the right catalogue before the
@@ -312,10 +315,11 @@ export class LlmService {
     userText: string,
     history: ChatTurn[] = [],
     images?: GeneratedImage[],
+    memoryContext?: string,
   ): Promise<ChatResult> {
     const signal = this.beginGeneration();
     this.thinkingTrace.set([
-      'Preparing context',
+      memoryContext ? 'Gathering what I remember' : 'Preparing context',
       this.isCloudExclusive() ? 'Talking to Grok' : 'Building local prompt',
     ]);
 
@@ -330,7 +334,10 @@ export class LlmService {
       const isWebQwen =
         backend.kind === 'transformers-js' &&
         /qwen/i.test(`${active?.repoId ?? ''} ${active?.id ?? ''}`);
-      const system = backend.kind === 'grok' ? GROK_SYSTEM_PROMPT : SYSTEM_PROMPT;
+      const system = [
+        backend.kind === 'grok' ? GROK_SYSTEM_PROMPT : SYSTEM_PROMPT,
+        memoryContext?.trim(),
+      ].filter(Boolean).join('\n\n');
       const messages: ChatTurn[] = [
         { role: 'system', content: system },
         ...history,

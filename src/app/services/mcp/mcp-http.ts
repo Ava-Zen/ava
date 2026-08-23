@@ -14,6 +14,10 @@ export function isTauri(): boolean {
 
 /** A `fetch` that bypasses CORS when running under Tauri. */
 export async function mcpFetch(input: string, init?: RequestInit): Promise<Response> {
+  const { CLOUD_BLOCKED_MESSAGE, isCloudBlocked, isCloudUrl } = await import('../cloud-guard');
+  if (isCloudBlocked() && isCloudUrl(input)) {
+    throw new Error(CLOUD_BLOCKED_MESSAGE);
+  }
   if (isTauri()) {
     const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
     return tauriFetch(input, init);
