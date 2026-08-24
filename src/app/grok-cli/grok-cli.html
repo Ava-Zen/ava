@@ -1,0 +1,151 @@
+<div class="grok-overlay" (click)="dismiss()">
+  <div class="grok-shell" (click)="$event.stopPropagation()" role="dialog" aria-labelledby="grok-title">
+    <header class="grok-header">
+      <div>
+        <p class="overline">Grok</p>
+        <h2 id="grok-title">Sessions</h2>
+      </div>
+      <div class="header-tools">
+        @if (phase() === 'ready' && !showRoster()) {
+          <button type="button" class="ghost-btn" (click)="backToRoster()">All sessions</button>
+        }
+        <button type="button" class="close-btn" (click)="dismiss()" aria-label="Close Grok sessions">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    @if (error()) {
+      <p class="grok-error">{{ error() }}</p>
+    }
+
+    @if (phase() === 'boot') {
+      <p class="hint">Looking for Grok…</p>
+    }
+
+    @if (phase() === 'setup') {
+      <p class="hint">Ava can install the official Grok CLI and use the same sessions as the terminal.</p>
+      @if (installLog()) {
+        <p class="hint">{{ installLog() }}</p>
+      }
+      <button type="button" class="save-btn" (click)="install()" [disabled]="busy()">
+        {{ busy() ? 'Installing…' : 'Install Grok' }}
+      </button>
+    }
+
+    @if (phase() === 'signed-out') {
+      <p class="hint">Sign in with the Grok CLI so Ava can open your existing sessions.</p>
+      @if (busy()) {
+        <p class="hint">Approve Grok in your browser.</p>
+        <button type="button" class="ghost-btn" (click)="cancelLogin()">Cancel</button>
+      } @else {
+        <button type="button" class="save-btn" (click)="login()">Continue with Grok</button>
+      }
+    }
+
+    @if (phase() === 'ready' && showRoster()) {
+      <div class="roster-bar">
+        <button type="button" class="save-btn" (click)="newSession()">New session</button>
+        @if (auth()?.email || auth()?.name) {
+          <span class="account">{{ auth()?.name || auth()?.email }}</span>
+        }
+        <button type="button" class="ghost-btn" (click)="logout()">Sign out</button>
+      </div>
+      @if (!roster().length) {
+        <p class="hint">No sessions yet. Start one in a project folder.</p>
+      }
+      <div class="roster">
+        @for (row of roster(); track row.sessionId) {
+          <div class="roster-row">
+            <button type="button" class="roster-open" (click)="openRow(row)">
+              <span class="dot" [style.background]="row.color"></span>
+              <span class="roster-copy">
+                <strong>{{ row.title }}</strong>
+                <small>{{ row.preview || row.cwd }}</small>
+              </span>
+              @if (isRunning(row.sessionId)) {
+                <em>Working</em>
+              }
+            </button>
+            <button type="button" class="ghost-btn row-delete" (click)="deleteRow(row, $event)">Delete</button>
+          </div>
+        }
+      </div>
+    }
+
+    @if (phase() === 'ready' && !showRoster()) {
+      <div class="thread-meta">
+        <div>
+          <strong>{{ activeRow()?.title || 'New session' }}</strong>
+          <small>{{ folderLabel() }}</small>
+        </div>
+        <div class="thread-actions">
+          <button type="button" class="ghost-btn" (click)="pickFolder()">Folder</button>
+          <div class="segmented" aria-label="Permission mode">
+            <button type="button" [class.active]="mode() === 'ask'" (click)="setMode('ask')">Ask</button>
+            <button type="button" [class.active]="mode() === 'plan'" (click)="setMode('plan')">Plan</button>
+            <button type="button" [class.active]="mode() === 'full'" (click)="setMode('full')">Always</button>
+          </div>
+        </div>
+      </div>
+
+      @if (hydrating()) {
+        <p class="hint">Opening the thread…</p>
+      }
+
+      <div class="thread" aria-live="polite">
+        @if (!items().length && !hydrating()) {
+          <p class="hint">Ask Grok to work in this folder.</p>
+        }
+        @for (item of items(); track $index) {
+          <article class="item" [class.user]="item.kind === 'user'" [class.work]="item.kind === 'work'" [class.thought]="item.kind === 'thought'">
+            <span class="item-kind">
+              @if (item.kind === 'user') { You }
+              @if (item.kind === 'agent') { Grok }
+              @if (item.kind === 'thought') { Thinking }
+              @if (item.kind === 'work') { {{ item.title || 'Work' }} }
+            </span>
+            @if (item.kind === 'agent') {
+              <div class="item-body markdown" [innerHTML]="html(item)"></div>
+            } @else {
+              <p class="item-body">{{ item.text }}</p>
+            }
+          </article>
+        }
+      </div>
+
+      @if (hitl(); as request) {
+        <div class="hitl-card">
+          <p>{{ request.questions[0]?.question || request.method }}</p>
+          @if (request.questions[0]?.header) {
+            <small>{{ request.questions[0]?.header }}</small>
+          }
+          <div class="hitl-actions">
+            @for (option of (request.questions[0]?.options || request.options); track option.optionId) {
+              <button type="button" class="save-btn" (click)="answer(option.optionId)">{{ option.name }}</button>
+            }
+            <button type="button" class="ghost-btn" (click)="dismissHitl()">Not now</button>
+          </div>
+        </div>
+      }
+
+      <div class="composer">
+        <textarea
+          rows="2"
+          [ngModel]="prompt()"
+          (ngModelChange)="prompt.set($event)"
+          (keydown)="onPromptKey($event)"
+          [placeholder]="'Ask Grok in ' + folderLabel()"
+        ></textarea>
+        @if (working()) {
+          <button type="button" class="ghost-btn" (click)="cancelTurn()">Stop</button>
+        } @else {
+          <button type="button" class="save-btn" (click)="send()" [disabled]="!prompt().trim()">Send</button>
+        }
+      </div>
+    }
+  </div>
+</div>

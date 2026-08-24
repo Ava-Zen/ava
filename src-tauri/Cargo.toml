@@ -36,6 +36,20 @@ tokio = { version = "1", features = ["macros", "time", "sync"] }
 rfd = "0.15"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+dirs = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

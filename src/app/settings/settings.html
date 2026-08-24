@@ -98,6 +98,28 @@
     }
   </section>
 
+  @if (grokBuildDesktop()) {
+    <section class="section">
+      <div class="section-heading">
+        <div>
+          <p class="overline">Desktop</p>
+          <h3>Grok CLI</h3>
+        </div>
+      </div>
+      <p class="hint">
+        Open the same Grok Build sessions as the official CLI. Cloud Grok above is for spoken chat and Imagine.
+      </p>
+      @if (grokBuildInfo(); as info) {
+        <p class="hint">{{ info.version }} · {{ info.path }}</p>
+      } @else if (grokBuildPhase() === 'setup') {
+        <p class="hint">Grok is not installed yet. Ava can install it from the sessions overlay.</p>
+      }
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="openGrokSessions()">Open Grok sessions</button>
+      </div>
+    </section>
+  }
+
   <section class="section">
     <div class="section-heading">
       <div>

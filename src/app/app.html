@@ -474,6 +474,11 @@
                 <button class="menu-action" type="button" (click)="setManualInputMode(!manualInputEnabled())">
                   {{ manualInputEnabled() ? 'Hide text' : 'Text' }}
                 </button>
+                @if (grokCliDesktop()) {
+                  <button class="menu-action" type="button" (click)="composerMenuOpen.set(false); openGrokCli()">
+                    Grok sessions
+                  </button>
+                }
 
                 <div class="menu-divider"></div>
 
@@ -684,6 +689,7 @@
           [voiceBackendInfo]="voiceBackendInfo()"
           (close)="closeSettings()"
           (openMemory)="closeSettings(); openMemory()"
+          (openGrokCli)="closeSettings(); openGrokCli()"
           (previewVoice)="previewVoice($event)"
           (resetCache)="onResetCache()"
           (gardenChanged)="onGardenChanged()"
@@ -695,6 +701,10 @@
 
   @if (showMemory()) {
     <app-memory (close)="closeMemory()"></app-memory>
+  }
+
+  @if (showGrokCli()) {
+    <app-grok-cli (close)="closeGrokCli()"></app-grok-cli>
   }
 
   @if (showStartup()) {

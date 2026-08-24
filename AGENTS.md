@@ -25,9 +25,10 @@ On Windows, Tauri scripts go through `scripts/with-windows-clang.js`. Rust **sta
 src/app/                 Angular UI
   onboarding/            first-run flow
   settings/              settings sheet
+  grok-cli/              desktop Grok CLI / Build overlay
   updates/               in-app update dialog
   confirm-dialog/        in-app confirm / destructive prompts
-  services/              shared state and backends (llm, tts, mcp, xai, …)
+  services/              shared state and backends (llm, tts, mcp, xai, grok CLI, …)
 src-tauri/src/           Rust commands, MCP, voice session, native LLM
 docs/                    product / technical specs — do not treat as current implementation
 ```

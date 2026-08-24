@@ -5,12 +5,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { MemoryExplorer } from './memory/memory';
+import { GrokCliOverlay } from './grok-cli/grok-cli';
 import { Onboarding } from './onboarding/onboarding';
 import { Startup } from './startup/startup';
 import { UpdateDialog } from './updates/update-dialog';
 import { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 import { UpdateService } from './services/updates';
 import { ConfirmDialogService } from './services/confirm-dialog';
+import { GrokCliService } from './services/grok-cli';
 import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
@@ -215,7 +217,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, MemoryExplorer, Onboarding, Startup, UpdateDialog, ConfirmDialog],
+  imports: [RouterOutlet, Settings, MemoryExplorer, GrokCliOverlay, Onboarding, Startup, UpdateDialog, ConfirmDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -255,6 +257,7 @@ export class App {
   private readonly theme = inject(ThemeService);
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
+  private readonly grokCli = inject(GrokCliService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
@@ -290,6 +293,8 @@ export class App {
   protected readonly desktopHome = this.memory.desktop;
   protected showSettings = signal(false);
   protected showMemory = signal(false);
+  protected showGrokCli = signal(false);
+  protected readonly grokCliDesktop = this.grokCli.desktop;
   protected readonly showStartup = signal(true);
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
   protected readonly userName = this.onboarding.userName;
@@ -661,17 +666,30 @@ export class App {
   protected openSettings() {
     if (this.showOnboarding()) return;
     this.showMemory.set(false);
+    this.showGrokCli.set(false);
     this.showSettings.set(true);
   }
 
   protected openMemory() {
     if (this.showOnboarding()) return;
     this.showSettings.set(false);
+    this.showGrokCli.set(false);
     this.showMemory.set(true);
   }
 
   protected closeMemory() {
     this.showMemory.set(false);
+  }
+
+  protected openGrokCli() {
+    if (this.showOnboarding() || !this.grokCli.desktop()) return;
+    this.showSettings.set(false);
+    this.showMemory.set(false);
+    this.showGrokCli.set(true);
+  }
+
+  protected closeGrokCli() {
+    this.showGrokCli.set(false);
   }
 
   private cleanLoadLabel(label: string): string {
@@ -732,7 +750,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
+    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showGrokCli() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -2280,6 +2298,15 @@ export class App {
       this.status.set('thinking');
       this.isThinking.set(true);
       await this.respond(this.threadId(), 'Alright. The talk is clear. I still remember what matters.', undefined, undefined, undefined, seq);
+      return;
+    }
+
+    if (this.showGrokCli() && this.grokCli.canTakeSpeech()) {
+      this.status.set('thinking');
+      this.isThinking.set(true);
+      await this.grokCli.send(text);
+      this.isThinking.set(false);
+      this.status.set('idle');
       return;
     }
 

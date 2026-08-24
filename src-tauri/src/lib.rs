@@ -8,6 +8,9 @@ mod llm;
 mod mcp;
 mod voice_session;
 
+#[cfg(desktop)]
+mod grok;
+
 #[tauri::command]
 fn mcp_tts_complete(bridge: tauri::State<mcp::McpBridge>, id: u64, ok: bool) {
   bridge.complete(id, ok);
@@ -140,12 +143,17 @@ fn title_case_name_part(part: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let builder = tauri::Builder::default()
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_deep_link::init())
     .manage(llm::NativeLlm::default())
-    .manage(copilot::CopilotHost::default())
+    .manage(copilot::CopilotHost::default());
+
+  #[cfg(desktop)]
+  let builder = builder.manage(std::sync::Mutex::new(grok::GrokAppState::default()));
+
+  let builder = builder
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -159,6 +167,7 @@ pub fn run() {
       // On Windows/Linux this also enables the scheme during development.
       #[cfg(desktop)]
       {
+        grok::platform::init();
         app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
         app.handle().plugin(tauri_plugin_process::init())?;
 
@@ -170,36 +179,105 @@ pub fn run() {
       }
 
       Ok(())
-    })
-    .invoke_handler(tauri::generate_handler![
-      suggested_user_name,
-      xai_read_grok_cli_auth,
-      write_file_bytes,
-      reset_app_cache,
-      home::home_pick_folder,
-      home::home_suggested_path,
-      home::home_ensure,
-      home::home_read_text,
-      home::home_write_text,
-      home::home_list,
-      mcp_tts_complete,
-      mcp_server_info,
-      copilot::copilot_status,
-      copilot::copilot_read_gh_auth,
-      copilot::copilot_pick_folder,
-      copilot::copilot_run_task,
-      copilot::copilot_abort,
-      llm::llm_native_status,
-      llm::llm_load_model,
-      llm::llm_generate,
-      llm::llm_cancel,
-      llm::llm_list_models,
-      llm::llm_open_models_dir,
-      llm::llm_delete_model,
-      llm::web_model_cache_ensure,
-      voice_session::voice_session_start,
-      voice_session::voice_session_stop
-    ])
+    });
+
+  #[cfg(desktop)]
+  let builder = builder.invoke_handler(tauri::generate_handler![
+    suggested_user_name,
+    xai_read_grok_cli_auth,
+    write_file_bytes,
+    reset_app_cache,
+    home::home_pick_folder,
+    home::home_suggested_path,
+    home::home_ensure,
+    home::home_read_text,
+    home::home_write_text,
+    home::home_list,
+    mcp_tts_complete,
+    mcp_server_info,
+    copilot::copilot_status,
+    copilot::copilot_read_gh_auth,
+    copilot::copilot_pick_folder,
+    copilot::copilot_run_task,
+    copilot::copilot_abort,
+    llm::llm_native_status,
+    llm::llm_load_model,
+    llm::llm_generate,
+    llm::llm_cancel,
+    llm::llm_list_models,
+    llm::llm_open_models_dir,
+    llm::llm_delete_model,
+    llm::web_model_cache_ensure,
+    voice_session::voice_session_start,
+    voice_session::voice_session_stop,
+    grok::which_grok,
+    grok::install_grok,
+    grok::check_grok_update,
+    grok::update_grok,
+    grok::grok_auth_status,
+    grok::grok_login,
+    grok::grok_logout,
+    grok::grok_cancel_login,
+    grok::list_roster,
+    grok::open_replay,
+    grok::mark_session_read,
+    grok::rename_session,
+    grok::delete_session,
+    grok::duplicate_session,
+    grok::agent_host::start_agent,
+    grok::agent_host::stop_agent,
+    grok::agent_host::take_over_session,
+    grok::agent_host::send_prompt,
+    grok::agent_host::queue_control,
+    grok::agent_host::cancel_turn,
+    grok::agent_host::respond_agent_request,
+    grok::agent_host::agent_caps,
+    grok::grok_pick_folder,
+    grok::grok_project_prefs,
+    grok::grok_remember_project,
+    grok::agent_host::new_session,
+    grok::pin_session,
+    grok::agent_host::set_session_model,
+    grok::agent_host::set_session_mode,
+    grok::grok_session_mode,
+    grok::grok_default_mode,
+    grok::grok_set_default_mode,
+    grok::grok_last_session,
+    grok::grok_remember_session
+  ]);
+
+  #[cfg(not(desktop))]
+  let builder = builder.invoke_handler(tauri::generate_handler![
+    suggested_user_name,
+    xai_read_grok_cli_auth,
+    write_file_bytes,
+    reset_app_cache,
+    home::home_pick_folder,
+    home::home_suggested_path,
+    home::home_ensure,
+    home::home_read_text,
+    home::home_write_text,
+    home::home_list,
+    mcp_tts_complete,
+    mcp_server_info,
+    copilot::copilot_status,
+    copilot::copilot_read_gh_auth,
+    copilot::copilot_pick_folder,
+    copilot::copilot_run_task,
+    copilot::copilot_abort,
+    llm::llm_native_status,
+    llm::llm_load_model,
+    llm::llm_generate,
+    llm::llm_cancel,
+    llm::llm_list_models,
+    llm::llm_open_models_dir,
+    llm::llm_delete_model,
+    llm::web_model_cache_ensure,
+    voice_session::voice_session_start,
+    voice_session::voice_session_stop
+  ]);
+
+  builder
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

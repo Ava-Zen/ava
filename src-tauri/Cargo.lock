@@ -79,9 +79,12 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "dirs 6.0.0",
  "encoding_rs",
  "github-copilot-sdk",
  "jni 0.21.1",
+ "libc",
  "llama-cpp-2",
  "log",
  "ndk-context",
@@ -98,6 +101,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tiny_http",
  "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

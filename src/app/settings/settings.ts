@@ -15,6 +15,7 @@ import { UpdateService } from '../services/updates';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { ThemePreference, ThemeService } from '../services/theme';
 import { GardensService } from '../services/gardens';
+import { GrokCliService } from '../services/grok-cli';
 
 interface ModelFileInfo {
   name: string;
@@ -46,6 +47,7 @@ export class Settings {
   private readonly confirm = inject(ConfirmDialogService);
   private readonly theme = inject(ThemeService);
   private readonly gardensService = inject(GardensService);
+  private readonly grokBuild = inject(GrokCliService);
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected gardenError = '';
@@ -88,6 +90,7 @@ export class Settings {
     void this.loadMcpServerInfo();
     void this.refreshModelFiles();
     if (this.xai.signedIn()) void this.ttsService.refreshGrokVoices();
+    if (this.grokBuild.desktop()) void this.grokBuild.boot();
     effect(() => {
       this.workspaceDraft = this.agentsService.workspace();
     });
@@ -253,6 +256,9 @@ export class Settings {
   protected readonly xaiPending = this.xai.loginPending;
   protected readonly xaiDevice = this.xai.deviceLogin;
   protected readonly grokCliAvailable = this.xai.grokCliAvailable;
+  protected readonly grokBuildDesktop = this.grokBuild.desktop;
+  protected readonly grokBuildInfo = this.grokBuild.grokInfo;
+  protected readonly grokBuildPhase = this.grokBuild.phase;
   protected readonly intelligenceMode = this.llmService.intelligenceMode;
   protected readonly cloudExclusive = this.llmService.isCloudExclusive;
   protected readonly copilotSignedIn = this.copilotAuth.signedIn;
@@ -391,6 +397,10 @@ export class Settings {
   selectGrokVoice(id: string) {
     this.ttsService.setGrokVoice(id);
     this.previewVoice.emit(id);
+  }
+
+  openGrokSessions() {
+    this.openGrokCli.emit();
   }
 
   setIntelligenceMode(mode: 'local' | 'grok') {
@@ -596,6 +606,7 @@ export class Settings {
   @Output() previewVoice = new EventEmitter<string>();
   @Output() resetCache = new EventEmitter<void>();
   @Output() openMemory = new EventEmitter<void>();
+  @Output() openGrokCli = new EventEmitter<void>();
   @Output() gardenChanged = new EventEmitter<void>();
   @Output() deleteGarden = new EventEmitter<string>();
 
