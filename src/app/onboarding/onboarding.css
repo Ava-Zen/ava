@@ -50,7 +50,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #dcebd2;
+  color: var(--muted);
   font-weight: 850;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -103,11 +103,10 @@ h1 {
   gap: 10px;
 }
 
-.download-panel,
-.option-item {
-  border: 1px solid rgba(196, 92, 78, 0.14);
+.download-panel {
+  border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-strong);
 }
 
 strong {
@@ -116,14 +115,14 @@ strong {
 
 span,
 .fine-print {
-  color: #8a5a4a;
+  color: var(--muted);
   line-height: 1.45;
 }
 
 .field {
   display: grid;
   gap: 8px;
-  color: #8a5a4a;
+  color: var(--muted);
   font-weight: 760;
 }
 
@@ -163,16 +162,40 @@ span,
   align-items: center;
   gap: 12px;
   padding: 16px;
-  border: 1px solid rgba(196, 92, 78, 0.28);
-  border-radius: 18px;
-  background: rgba(196, 92, 78, 0.1);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--wash);
+  color: var(--text);
   cursor: pointer;
 }
 
+.consent-row span {
+  color: var(--text);
+}
+
 .consent-row input {
+  appearance: none;
   width: 22px;
   height: 22px;
-  accent-color: #c45c4e;
+  margin: 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  flex-shrink: 0;
+}
+
+.consent-row input:checked {
+  border-color: var(--coral);
+  background-color: var(--coral);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff6ee' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' d='M3.2 8.2 6.4 11.4 12.8 4.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px;
+}
+
+.consent-row input:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
 }
 
 .intelligence-options {
@@ -220,28 +243,71 @@ span,
 
 .option-item {
   min-height: 128px;
-  padding: 16px;
+  padding: 18px;
   display: grid;
   align-content: space-between;
-  gap: 12px;
-  color: inherit;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.option-item strong {
+  color: var(--text);
+  font-size: 1.12rem;
+  font-weight: 750;
+}
+
+.option-item span {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.option-item:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-strong);
+}
+
+.option-item:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
 }
 
 .option-item.active {
-  border-color: rgba(196, 92, 78, 0.5);
-  background: linear-gradient(135deg, rgba(196, 92, 78, 0.2), rgba(232, 180, 138), 0.12));
+  border-color: var(--coral);
+  background:
+    linear-gradient(135deg, var(--wash-strong), var(--wash));
+  box-shadow:
+    inset 3px 0 0 var(--coral),
+    inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.option-item.active:hover {
+  border-color: var(--coral);
+  background:
+    linear-gradient(135deg, var(--wash-strong), var(--wash));
+}
+
+.option-item.active span {
+  color: var(--text);
 }
 
 .continue-btn,
 .secondary-btn {
   min-height: 46px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
   padding: 0 18px;
-  color: #3a241c;
-  background: rgba(255, 255, 255, 0.55);
+  color: var(--text);
+  background: var(--surface-strong);
   font: inherit;
   font-weight: 820;
   cursor: pointer;

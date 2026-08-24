@@ -1,0 +1,73 @@
+:host {
+  display: contents;
+}
+
+.startup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: grid;
+  place-items: center;
+  background: #000;
+  outline: 0;
+  cursor: pointer;
+  animation: startupIn 0.5s ease both;
+}
+
+.startup-overlay.fading {
+  animation: startupOut 0.72s ease both;
+  pointer-events: none;
+}
+
+.startup-glow {
+  position: absolute;
+  width: min(70vmin, 520px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 130, 96, 0.28), transparent 68%);
+  filter: blur(28px);
+  pointer-events: none;
+}
+
+.startup-stage {
+  position: relative;
+  z-index: 1;
+  width: min(86vmin, 640px);
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.startup-reel {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #000;
+  pointer-events: none;
+}
+
+.startup-reel::-webkit-media-controls {
+  display: none !important;
+}
+
+@keyframes startupIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes startupOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-overlay,
+  .startup-overlay.fading {
+    animation: none;
+  }
+}

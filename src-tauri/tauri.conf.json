@@ -5,7 +5,7 @@
   "identifier": "com.ava-zen.ava",
   "build": {
     "frontendDist": "../dist/ava/browser",
-    "devUrl": "http://localhost:4200",
+    "devUrl": "http://localhost:4222",
     "beforeDevCommand": "npm run start",
     "beforeBuildCommand": "npm run build"
   },

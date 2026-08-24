@@ -48,6 +48,7 @@
               type="button"
               class="option-item"
               [class.active]="intelligence() === 'local'"
+              [attr.aria-pressed]="intelligence() === 'local'"
               (click)="setIntelligence('local')"
             >
               <strong>On this device</strong>
@@ -57,6 +58,7 @@
               type="button"
               class="option-item"
               [class.active]="intelligence() === 'grok'"
+              [attr.aria-pressed]="intelligence() === 'grok'"
               (click)="setIntelligence('grok')"
             >
               <strong>Grok</strong>

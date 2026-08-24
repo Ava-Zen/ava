@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { MemoryExplorer } from './memory/memory';
 import { Onboarding } from './onboarding/onboarding';
+import { Startup } from './startup/startup';
 import { UpdateDialog } from './updates/update-dialog';
 import { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 import { UpdateService } from './services/updates';
@@ -214,7 +215,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, MemoryExplorer, Onboarding, UpdateDialog, ConfirmDialog],
+  imports: [RouterOutlet, Settings, MemoryExplorer, Onboarding, Startup, UpdateDialog, ConfirmDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -287,6 +288,7 @@ export class App {
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected showSettings = signal(false);
   protected showMemory = signal(false);
+  protected readonly showStartup = signal(true);
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
   protected readonly userName = this.onboarding.userName;
   private readonly MOONSHINE_BASE_MODEL = 'onnx-community/moonshine-base-ONNX';
@@ -677,7 +679,7 @@ export class App {
     }
 
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showSettings() || this.showMemory() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
+    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -718,6 +720,21 @@ export class App {
 
   protected closeSettings() {
     this.showSettings.set(false);
+  }
+
+  protected onStartupFinished() {
+    this.showStartup.set(false);
+  }
+
+  protected playAvaFace(event: Event): void {
+    const video = event.target as HTMLVideoElement | null;
+    if (!video) return;
+    video.muted = true;
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      video.pause();
+      return;
+    }
+    void video.play().catch(() => {});
   }
 
   protected onOnboardingCompleted() {
@@ -1647,7 +1664,7 @@ export class App {
   }
 
   private resumeVoiceCaptureIfEnabled() {
-    if (!this.voiceEnabled() || this.manualInputEnabled() || this.showOnboarding() || this.showSettings()) return;
+    if (!this.voiceEnabled() || this.manualInputEnabled() || this.showStartup() || this.showOnboarding() || this.showSettings()) return;
     if (this.isListening() || this.isThinking() || this.status() === 'speaking') return;
     this.startMoonshineListening().catch(() => {});
   }

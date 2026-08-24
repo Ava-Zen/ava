@@ -1,5 +1,5 @@
 <main class="ava-root">
-  <div class="app-frame" [class.chat-active]="showChatPanel()">
+  <div class="app-frame" [class.chat-active]="showChatPanel()" [attr.inert]="showStartup() ? '' : null">
     <section class="companion-grid" [class.chat-active]="showChatPanel()">
       <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
         <button type="button" class="garden-eyebrow" (click)="openMemory()" title="What Ava remembers">
@@ -32,12 +32,18 @@
             [class.speaking]="status() === 'speaking'"
             [class.loading]="isLoadingModel()"
           >
-            <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-              <path d="M5 11a7 7 0 0 0 14 0"></path>
-              <path d="M12 18v4"></path>
-              <path d="M8 22h8"></path>
-            </svg>
+            <video
+              class="ava-face"
+              src="video/loop.mp4"
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="auto"
+              disablepictureinpicture
+              aria-hidden="true"
+              (canplay)="playAvaFace($event)"
+            ></video>
           </span>
         </button>
 
@@ -658,7 +664,11 @@
     <app-memory (close)="closeMemory()"></app-memory>
   }
 
-  @if (showOnboarding()) {
+  @if (showStartup()) {
+    <app-startup (finished)="onStartupFinished()"></app-startup>
+  }
+
+  @if (!showStartup() && showOnboarding()) {
     <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
   }
 

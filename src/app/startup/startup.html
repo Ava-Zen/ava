@@ -1,0 +1,24 @@
+<div
+  class="startup-overlay"
+  [class.fading]="fading()"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Ava"
+  tabindex="-1"
+  (click)="onSkip()"
+>
+  <div class="startup-glow" aria-hidden="true"></div>
+  <div class="startup-stage">
+    <video
+      #reel
+      class="startup-reel"
+      src="video/startup.mp4"
+      playsinline
+      preload="auto"
+      disablepictureinpicture
+      aria-hidden="true"
+      (ended)="onEnded()"
+      (error)="onError()"
+    ></video>
+  </div>
+</div>
