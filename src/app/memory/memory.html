@@ -124,6 +124,9 @@
       <div>
         <p class="overline">Home folder</p>
         <small>{{ homePath() === 'browser' ? 'Kept in this browser until you pick a folder in the desktop app.' : (homePath() || 'Not set yet') }}</small>
+        @if (homeError()) {
+          <small class="memory-home-error">{{ homeError() }}</small>
+        }
       </div>
       @if (desktop()) {
         <button type="button" class="ghost-btn" (click)="pickFolder()">Choose folder</button>

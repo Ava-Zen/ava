@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HomeService } from './home';
+import { GardensService } from './gardens';
 import { OnboardingService } from './onboarding';
 import { compactNote, durableFact, identityFact, isExplicitRemember, peopleFromText, type PersonMention } from './presence';
 import {
@@ -101,6 +102,7 @@ const GREETING =
 @Injectable({ providedIn: 'root' })
 export class MemoryService {
   private readonly home = inject(HomeService);
+  private readonly gardens = inject(GardensService);
   private readonly onboarding = inject(OnboardingService);
 
   readonly topics = signal<MemoryTopic[]>([]);
@@ -113,6 +115,7 @@ export class MemoryService {
   readonly homePath = this.home.root;
   readonly desktop = this.home.desktop;
   readonly lastNotice = signal('');
+  readonly homeError = signal('');
   readonly identityNotes = signal('');
   readonly people = signal<MemoryPerson[]>([]);
 
@@ -122,6 +125,7 @@ export class MemoryService {
 
   async hydrate(fallback: MemoryTurn[] = []): Promise<MemoryTurn[]> {
     await this.home.whenReady();
+    this.activeTopicId.set(null);
     await this.ensureBundle();
     await this.reloadTopics();
     await this.loadClearedAfter();
@@ -474,9 +478,14 @@ export class MemoryService {
   }
 
   async pickHomeFolder(): Promise<string | null> {
-    const path = await this.home.pickFolder();
-    if (path) await this.ensureBundle();
-    return path;
+    const result = await this.gardens.pickHomeFor();
+    if (!result.ok) {
+      this.homeError.set(result.error || '');
+      return null;
+    }
+    this.homeError.set('');
+    await this.ensureBundle();
+    return result.path;
   }
 
   async useSuggestedHome(): Promise<string | null> {

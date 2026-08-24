@@ -2,10 +2,41 @@
   <div class="app-frame" [class.chat-active]="showChatPanel()" [attr.inert]="showStartup() ? '' : null">
     <section class="companion-grid" [class.chat-active]="showChatPanel()">
       <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
-        <button type="button" class="garden-eyebrow" (click)="openMemory()" title="What Ava remembers">
-          <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
-          <span>{{ activeTopicLabel() }}</span>
-        </button>
+        <div class="garden-switcher" #gardenShell>
+          <button
+            type="button"
+            class="garden-eyebrow"
+            (click)="toggleGardenMenu($event)"
+            title="Switch garden"
+            [attr.aria-expanded]="gardenMenuOpen()"
+          >
+            <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
+            <span>{{ currentGarden()?.name || 'Ava' }}</span>
+          </button>
+          @if (gardenMenuOpen()) {
+            <div class="garden-menu" role="menu" aria-label="Gardens">
+              <p>Gardens</p>
+              @for (garden of gardens(); track garden.id) {
+                <button
+                  type="button"
+                  role="menuitem"
+                  [class.active]="garden.id === currentGarden()?.id"
+                  (click)="selectGarden(garden.id)"
+                >
+                  <strong>{{ garden.name }}</strong>
+                  <small>{{ gardenHomeLabel(garden) }}</small>
+                </button>
+              }
+              <button type="button" role="menuitem" (click)="createGardenFromUi()">
+                <strong>New garden</strong>
+                <small>{{ desktopHome() ? 'A separate Ava in another folder' : 'A separate Ava in this browser' }}</small>
+              </button>
+              @if (gardenMenuError()) {
+                <p class="garden-menu-error">{{ gardenMenuError() }}</p>
+              }
+            </div>
+          }
+        </div>
 
         <div class="voice-copy">
           <h1 id="voice-title">{{ presenceLine() }}</h1>
@@ -655,6 +686,8 @@
           (openMemory)="closeSettings(); openMemory()"
           (previewVoice)="previewVoice($event)"
           (resetCache)="onResetCache()"
+          (gardenChanged)="onGardenChanged()"
+          (deleteGarden)="onDeleteGarden($event)"
         ></app-settings>
       </div>
     </div>

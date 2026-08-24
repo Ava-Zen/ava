@@ -41,18 +41,22 @@ export class HomeService {
     }
   }
 
-  async pickFolder(): Promise<string | null> {
+  async chooseFolder(): Promise<string | null> {
     if (!this.desktop()) return null;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const path = await invoke<string | null>('home_pick_folder');
-      const trimmed = path?.trim();
-      if (!trimmed) return null;
-      await this.setRoot(trimmed);
-      return trimmed;
+      return path?.trim() || null;
     } catch {
       return null;
     }
+  }
+
+  async pickFolder(): Promise<string | null> {
+    const path = await this.chooseFolder();
+    if (!path) return null;
+    await this.setRoot(path);
+    return path;
   }
 
   async useSuggested(): Promise<string | null> {
@@ -65,7 +69,11 @@ export class HomeService {
   async setRoot(path: string): Promise<void> {
     const trimmed = path.trim();
     if (!trimmed) return;
-    if (this.desktop() && trimmed !== BROWSER_HOME) {
+    const previous = this.root();
+    if (previous && isBrowserHome(previous) && previous !== trimmed) {
+      this.persistBrowserFs(previous);
+    }
+    if (this.desktop() && !isBrowserHome(trimmed)) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('home_ensure', { root: trimmed });
@@ -73,12 +81,15 @@ export class HomeService {
         console.warn('Could not create home folder', error);
       }
     }
+    if (isBrowserHome(trimmed)) {
+      this.browserFs = this.loadBrowserFs(trimmed);
+    }
     this.root.set(trimmed);
     this.persistRoot(trimmed);
   }
 
   folderLabel(path: string | null | undefined): string {
-    if (!path || path === BROWSER_HOME) return 'This browser';
+    if (!path || isBrowserHome(path)) return 'This browser';
     const trimmed = path.replace(/[\\/]+$/, '');
     const parts = trimmed.split(/[\\/]/).filter(Boolean);
     return parts.at(-1) || trimmed;
@@ -87,7 +98,7 @@ export class HomeService {
   async readText(rel: string): Promise<string | null> {
     const root = this.root();
     if (!root) return null;
-    if (!this.desktop() || root === BROWSER_HOME) {
+    if (!this.desktop() || isBrowserHome(root)) {
       return this.browserFs[normalizeRel(rel)] ?? null;
     }
     try {
@@ -102,9 +113,9 @@ export class HomeService {
     const root = this.root();
     if (!root) return;
     const path = normalizeRel(rel);
-    if (!this.desktop() || root === BROWSER_HOME) {
+    if (!this.desktop() || isBrowserHome(root)) {
       this.browserFs[path] = contents;
-      this.persistBrowserFs();
+      this.persistBrowserFs(root);
       return;
     }
     const { invoke } = await import('@tauri-apps/api/core');
@@ -115,7 +126,7 @@ export class HomeService {
     const root = this.root();
     if (!root) return [];
     const prefix = normalizeRel(rel);
-    if (!this.desktop() || root === BROWSER_HOME) {
+    if (!this.desktop() || isBrowserHome(root)) {
       return this.listBrowser(prefix);
     }
     try {
@@ -134,7 +145,7 @@ export class HomeService {
     try {
       if (this.desktop()) {
         const stored = this.root();
-        if (!stored || stored === BROWSER_HOME) {
+        if (!stored || isBrowserHome(stored)) {
           const suggested = await this.suggestedPath();
           if (suggested) await this.setRoot(suggested);
         } else {
@@ -186,9 +197,9 @@ export class HomeService {
     }
   }
 
-  private loadBrowserFs(): Record<string, string> {
+  private loadBrowserFs(root = BROWSER_HOME): Record<string, string> {
     try {
-      const raw = localStorage.getItem(BROWSER_FS_KEY);
+      const raw = localStorage.getItem(browserFsKey(root));
       if (!raw) return {};
       const parsed = JSON.parse(raw) as Record<string, string>;
       return parsed && typeof parsed === 'object' ? parsed : {};
@@ -197,13 +208,24 @@ export class HomeService {
     }
   }
 
-  private persistBrowserFs(): void {
+  private persistBrowserFs(root = this.root() || BROWSER_HOME): void {
     try {
-      localStorage.setItem(BROWSER_FS_KEY, JSON.stringify(this.browserFs));
+      localStorage.setItem(browserFsKey(root), JSON.stringify(this.browserFs));
     } catch {
       // ignore quota
     }
   }
+}
+
+export function isBrowserHome(path: string | null | undefined): boolean {
+  if (!path) return true;
+  return path === BROWSER_HOME || path.startsWith(`${BROWSER_HOME}:`);
+}
+
+function browserFsKey(root: string): string {
+  if (!root || root === BROWSER_HOME) return BROWSER_FS_KEY;
+  if (root.startsWith(`${BROWSER_HOME}:`)) return `${BROWSER_FS_KEY}:${root.slice(BROWSER_HOME.length + 1)}`;
+  return BROWSER_FS_KEY;
 }
 
 function normalizeRel(rel: string): string {

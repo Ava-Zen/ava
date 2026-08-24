@@ -14,6 +14,7 @@ import { CopilotAuthService } from '../services/copilot/copilot-auth';
 import { UpdateService } from '../services/updates';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { ThemePreference, ThemeService } from '../services/theme';
+import { GardensService } from '../services/gardens';
 
 interface ModelFileInfo {
   name: string;
@@ -44,6 +45,11 @@ export class Settings {
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly theme = inject(ThemeService);
+  private readonly gardensService = inject(GardensService);
+  protected readonly gardens = this.gardensService.gardens;
+  protected readonly currentGarden = this.gardensService.currentGarden;
+  protected gardenError = '';
+  protected newGardenName = '';
   protected readonly themePreference = this.theme.preference;
   protected readonly resolvedTheme = this.theme.resolved;
   protected readonly homePath = this.memory.homePath;
@@ -590,9 +596,59 @@ export class Settings {
   @Output() previewVoice = new EventEmitter<string>();
   @Output() resetCache = new EventEmitter<void>();
   @Output() openMemory = new EventEmitter<void>();
+  @Output() gardenChanged = new EventEmitter<void>();
+  @Output() deleteGarden = new EventEmitter<string>();
+
+  gardenHomeLabel(id: string): string {
+    const garden = this.gardens().find(item => item.id === id);
+    return this.gardensService.homeLabel(garden);
+  }
+
+  async selectGarden(id: string) {
+    if (id === this.currentGarden()?.id) return;
+    this.gardenError = '';
+    await this.gardensService.useGarden(id);
+    this.gardenChanged.emit();
+  }
+
+  async createGarden() {
+    const name = this.newGardenName.trim();
+    if (!name) return;
+    const result = await this.gardensService.createNamedGarden(name);
+    if (!result.ok) {
+      this.gardenError = result.error || '';
+      return;
+    }
+    this.newGardenName = '';
+    this.gardenError = '';
+    this.gardenChanged.emit();
+  }
+
+  async pickGardenFolder(id: string) {
+    const result = await this.gardensService.pickHomeFor(id);
+    if (!result.ok) {
+      this.gardenError = result.error || '';
+      return;
+    }
+    this.gardenError = '';
+    if (id === this.currentGarden()?.id) this.gardenChanged.emit();
+  }
+
+  async removeGarden(id: string) {
+    const garden = this.gardens().find(item => item.id === id);
+    if (!garden || this.gardens().length <= 1) return;
+    const ok = await this.confirm.ask({
+      title: `Remove ${garden.name}?`,
+      message: 'Her files stay in that folder. This only forgets the garden in the app.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
+    this.deleteGarden.emit(id);
+  }
 
   async pickHomeFolder() {
-    await this.memory.pickHomeFolder();
+    await this.pickGardenFolder(this.currentGarden()?.id || '');
   }
 
   async resetEverything() {

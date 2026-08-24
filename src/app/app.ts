@@ -269,6 +269,7 @@ export class App {
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('workspaceShell') private workspaceShellEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('gardenShell') private gardenShellEl?: ElementRef<HTMLDivElement>;
   private photoStageEl?: ElementRef<HTMLElement>;
   private photoViewerWheelUnbind: (() => void) | null = null;
   private readonly viewerPointers = new Map<number, { x: number; y: number }>();
@@ -286,6 +287,7 @@ export class App {
   // Gardens
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
+  protected readonly desktopHome = this.memory.desktop;
   protected showSettings = signal(false);
   protected showMemory = signal(false);
   protected readonly showStartup = signal(true);
@@ -325,6 +327,8 @@ export class App {
   });
   protected readonly manualInputEnabled = signal(false);
   protected readonly composerMenuOpen = signal(false);
+  protected readonly gardenMenuOpen = signal(false);
+  protected readonly gardenMenuError = signal('');
   protected readonly workspaceMenuOpen = signal(false);
   protected readonly workspaceDraftOpen = signal(false);
   protected readonly workspaceDraft = signal('');
@@ -563,10 +567,57 @@ export class App {
     this.tts.setKokoroVoice(id);
   }
 
-  protected selectGarden(id: string) {
-    this.gardensService.selectGarden(id);
-    this.chats.ensureChatForGarden(id);
+  protected async selectGarden(id: string) {
+    if (id === this.gardensService.currentGardenId()) {
+      this.gardenMenuOpen.set(false);
+      return;
+    }
+    await this.gardensService.useGarden(id);
+    this.gardenMenuOpen.set(false);
+    this.gardenMenuError.set('');
+    await this.afterGardenChange();
+  }
+
+  protected toggleGardenMenu(event?: Event) {
+    event?.stopPropagation();
+    this.gardenMenuOpen.update(open => !open);
+    if (!this.gardenMenuOpen()) this.gardenMenuError.set('');
+  }
+
+  protected gardenHomeLabel(garden: Garden): string {
+    return this.gardensService.homeLabel(garden);
+  }
+
+  protected async createGardenFromUi() {
+    const result = await this.gardensService.createGardenFromFolder();
+    if (!result.ok) {
+      if (result.error) this.gardenMenuError.set(result.error);
+      return;
+    }
+    this.gardenMenuOpen.set(false);
+    this.gardenMenuError.set('');
+    await this.afterGardenChange();
+  }
+
+  protected async onGardenChanged() {
+    await this.afterGardenChange();
+  }
+
+  private async afterGardenChange() {
+    const id = this.gardensService.currentGardenId();
+    if (id) this.chats.ensureChatForGarden(id);
     this.currentTranscript.set('');
+    await this.hydrateMemory();
+  }
+
+  private closeGardenMenuIfOutside(target: EventTarget | null) {
+    if (!this.gardenMenuOpen()) return;
+    const shell = this.gardenShellEl?.nativeElement;
+    const node = target as Node | null;
+    if (shell && node && !shell.contains(node)) {
+      this.gardenMenuOpen.set(false);
+      this.gardenMenuError.set('');
+    }
   }
 
   protected selectChat(id: string) {
@@ -670,11 +721,13 @@ export class App {
       return;
     }
 
-    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen())) {
+    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen() || this.gardenMenuOpen())) {
       this.composerMenuOpen.set(false);
       this.modelMenuOpen.set(false);
       this.workspaceMenuOpen.set(false);
       this.workspaceDraftOpen.set(false);
+      this.gardenMenuOpen.set(false);
+      this.gardenMenuError.set('');
       return;
     }
 
@@ -696,6 +749,7 @@ export class App {
     this.closeComposerMenuIfOutside(event.target);
     this.closeModelMenuIfOutside(event.target);
     this.closeWorkspaceMenuIfOutside(event.target);
+    this.closeGardenMenuIfOutside(event.target);
   }
 
   @HostListener('document:touchstart', ['$event'])
@@ -703,6 +757,7 @@ export class App {
     this.closeComposerMenuIfOutside(event.target);
     this.closeModelMenuIfOutside(event.target);
     this.closeWorkspaceMenuIfOutside(event.target);
+    this.closeGardenMenuIfOutside(event.target);
   }
 
   /** Right-clicking the Settings button opens the model quick-select menu. */
@@ -1327,17 +1382,11 @@ export class App {
   }
 
   // Garden management handlers (called from Settings component)
-  protected onCreateGarden(data: { name: string; description?: string }) {
-    const garden = this.gardensService.createGarden(data.name, data.description);
-    const chat = this.chats.createChat(garden.id, 'New chat');
-    this.setChatMessages(chat.id, []);
-  }
-
   protected onUpdateGarden(data: { id: string; name: string; description?: string }) {
     this.gardensService.updateGarden(data.id, { name: data.name, description: data.description });
   }
 
-  protected onDeleteGarden(id: string) {
+  protected async onDeleteGarden(id: string) {
     const chatIds = this.chats.chats().filter(chat => chat.gardenId === id).map(chat => chat.id);
     this.gardensService.deleteGarden(id);
     this.chats.deleteForGarden(id);
@@ -1347,6 +1396,8 @@ export class App {
       return copy;
     });
     this.saveMessagesToStorage();
+    await this.gardensService.useGarden(this.gardensService.currentGardenId());
+    await this.afterGardenChange();
   }
 
   private threadId(): string {

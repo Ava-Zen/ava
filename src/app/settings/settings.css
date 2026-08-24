@@ -156,6 +156,8 @@ h3 {
   color: inherit;
   cursor: pointer;
   padding: 8px;
+  font: inherit;
+  width: 100%;
 }
 .garden-info > span:last-child {
   min-width: 0;

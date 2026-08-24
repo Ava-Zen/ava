@@ -205,25 +205,61 @@
   <section class="section">
     <div class="section-heading">
       <div>
-        <p class="overline">Memory</p>
-        <h3>Home folder</h3>
+        <p class="overline">Gardens</p>
+        <h3>Separate Avas</h3>
       </div>
     </div>
     <p class="hint">
-      Ava keeps what she learns as files you can open. Subjects stay apart on their own — you stay in one talk.
+      Each garden is its own Ava, with her own folder of files. Two gardens cannot share a folder.
     </p>
-    <div class="grok-status">
-      <div>
-        <strong>{{ homeLabel() }}</strong>
-        <small>{{ homePath() === 'browser' ? 'This browser' : (homePath() || 'Not set yet') }}</small>
-      </div>
-      <button class="ghost-btn" type="button" (click)="openMemory.emit()">Open</button>
+    <div class="garden-list">
+      @for (garden of gardens(); track garden.id) {
+        <div class="garden-item" [class.active]="garden.id === currentGarden()?.id">
+          <button type="button" class="garden-info" (click)="selectGarden(garden.id)">
+            <span class="garden-mark" aria-hidden="true"></span>
+            <span>
+              <strong>{{ garden.name }}</strong>
+              <small>{{ gardenHomeLabel(garden.id) }}</small>
+            </span>
+          </button>
+          @if (desktopHome() || gardens().length > 1) {
+            <div class="garden-actions">
+              @if (desktopHome()) {
+                <button class="ghost-btn" type="button" (click)="pickGardenFolder(garden.id)">Folder</button>
+              }
+              @if (gardens().length > 1) {
+                <button class="icon-btn danger" type="button" (click)="removeGarden(garden.id)" title="Remove garden" aria-label="Remove garden">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="M19 6l-1 14H6L5 6"></path>
+                  </svg>
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
     </div>
-    @if (desktopHome()) {
-      <div class="auth-row">
-        <button class="save-btn" type="button" (click)="pickHomeFolder()">Choose folder</button>
-      </div>
+    <div class="create-garden">
+      <label>
+        <span>New garden</span>
+        <input [(ngModel)]="newGardenName" placeholder="Work, home, a project…" (keyup.enter)="createGarden()" />
+      </label>
+      <button class="create-btn" type="button" (click)="createGarden()" [disabled]="!newGardenName.trim()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>{{ desktopHome() ? 'Choose folder' : 'Create garden' }}</span>
+      </button>
+    </div>
+    @if (gardenError) {
+      <p class="mcp-error">{{ gardenError }}</p>
     }
+    <div class="auth-row">
+      <button class="ghost-btn" type="button" (click)="openMemory.emit()">Open current memory</button>
+    </div>
   </section>
 
   <section class="section">

@@ -41,6 +41,7 @@ export class MemoryExplorer {
   protected readonly desktop = this.memory.desktop;
   protected readonly activeTopic = this.memory.activeTopic;
   protected readonly lastNotice = this.memory.lastNotice;
+  protected readonly homeError = this.memory.homeError;
   protected readonly crumbs = computed(() => crumbTrail(this.path()));
   protected readonly bodyHtml = computed<SafeHtml | null>(() => {
     const node = this.current();
