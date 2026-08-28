@@ -147,12 +147,45 @@ export function addPendingUser(items: TranscriptItem[], text: string): Transcrip
   return [...items, { kind: 'user', text: trimmed, pending: true }];
 }
 
+const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const PATHISH = /(?:[A-Za-z]:[\\/]|\\\\|\.{0,2}\/)[^\s,;:?!)'"`]+/;
+
+export function shortFileLabel(value: string): string {
+  const trimmed = value.trim().replace(/^[`'"]+|[`'"]+$/g, '').replace(/[\\/]+$/, '');
+  if (!trimmed) return '';
+  const base = (trimmed.split(/[\\/]/).pop() || trimmed).replace(/^[`'"]+|[`'"]+$/g, '');
+  if (!base || GUID.test(base) || /^[0-9a-f]{32}$/i.test(base)) return '';
+  if (base.length > 48) return `${base.slice(0, 42)}…`;
+  return base;
+}
+
+function looksLikePath(value: string): boolean {
+  return /[\\/]/.test(value) || /\.\w{1,8}$/.test(value) || GUID.test(value);
+}
+
+/** A short spoken line: file names, no full paths, GUIDs, or code. */
+export function speakableLine(text: string): string {
+  if (!text.trim()) return '';
+  let s = text.replace(/```[\s\S]*?```/g, ' ');
+  s = s.replace(/['"`]([^'"`]{1,800})['"`]/g, (_m, inner: string) => {
+    if (looksLikePath(inner) || GUID.test(inner)) return shortFileLabel(inner) || 'this file';
+    return inner;
+  });
+  s = s.replace(new RegExp(PATHISH.source, 'g'), m => shortFileLabel(m) || 'this file');
+  s = s.replace(new RegExp(GUID.source, 'gi'), '');
+  s = s.replace(/\b[0-9a-f]{32}\b/gi, '');
+  s = s.replace(/[`*_#>]+/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  const sentence = s.split(/(?<=[.!?])\s+/)[0] || s;
+  let line = sentence.slice(0, 160).trim();
+  if (/^edit\b/i.test(line) && !/[.!?]$/.test(line)) line += '?';
+  return line;
+}
+
 export function spokenRecap(items: TranscriptItem[]): string {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     if (items[i].kind === 'agent' && items[i].text.trim()) {
-      const plain = items[i].text.replace(/[`*_#>-]/g, ' ').replace(/\s+/g, ' ').trim();
-      const sentence = plain.split(/(?<=[.!?])\s+/)[0] || plain;
-      return sentence.slice(0, 220);
+      return speakableLine(items[i].text);
     }
   }
   return '';

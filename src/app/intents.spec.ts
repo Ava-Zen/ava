@@ -1,4 +1,14 @@
-import { AVA_CAPABILITIES_REPLY, isAskingCapabilities, isAskingForTime } from './intents';
+import {
+  AVA_CAPABILITIES_REPLY,
+  extractProjectHint,
+  isAskingCapabilities,
+  isAskingForGrokWork,
+  isAskingForTime,
+  isAskingToPickFolder,
+  isAskingToStopGrokTurn,
+  isAskingToStopListening,
+  isLeavingGrokWork,
+} from './intents';
 
 describe('isAskingForTime', () => {
   it('matches genuine current-time questions', () => {
@@ -49,5 +59,64 @@ describe('isAskingCapabilities', () => {
     expect(isAskingCapabilities('what can you do about this error')).toBeFalse();
     expect(isAskingCapabilities('I can do this')).toBeFalse();
     expect(isAskingCapabilities('what do you do with the files')).toBeFalse();
+  });
+});
+
+describe('isAskingForGrokWork', () => {
+  it('matches spoken project work', () => {
+    expect(isAskingForGrokWork('I want to do some work on my Nostria project')).toBeTrue();
+    expect(extractProjectHint('I want to do some work on my Nostria project')).toBe('Nostria');
+    expect(extractProjectHint("Let's work on the Nostria repo")).toBe('Nostria');
+    expect(extractProjectHint('Hey Ava, work on my Nostria project')).toBe('Nostria');
+    expect(isAskingForGrokWork('open grok')).toBeTrue();
+    expect(isAskingForGrokWork('start a grok session')).toBeTrue();
+    expect(isAskingForGrokWork('I want to start a grok session')).toBeTrue();
+    expect(isAskingForGrokWork('help me code')).toBeTrue();
+  });
+
+  it('ignores casual mentions of work', () => {
+    expect(isAskingForGrokWork('I work on Tuesdays')).toBeFalse();
+    expect(isAskingForGrokWork('work on this')).toBeFalse();
+    expect(isAskingForGrokWork('work on that')).toBeFalse();
+    expect(isAskingForGrokWork('what time is it')).toBeFalse();
+    expect(extractProjectHint('open grok')).toBeNull();
+  });
+});
+
+describe('isLeavingGrokWork', () => {
+  it('matches leaving the Grok session', () => {
+    expect(isLeavingGrokWork('close grok')).toBeTrue();
+    expect(isLeavingGrokWork('back to chat')).toBeTrue();
+    expect(isLeavingGrokWork('stop')).toBeFalse();
+    expect(isLeavingGrokWork('stop listening')).toBeFalse();
+    expect(isLeavingGrokWork('stop working')).toBeFalse();
+    expect(isLeavingGrokWork('fix the login')).toBeFalse();
+  });
+});
+
+describe('isAskingToStopListening', () => {
+  it('matches mic-off phrases, including a bare stop', () => {
+    expect(isAskingToStopListening('stop')).toBeTrue();
+    expect(isAskingToStopListening('stop listening')).toBeTrue();
+    expect(isAskingToStopListening('mic off')).toBeTrue();
+    expect(isAskingToStopListening('stop grok')).toBeFalse();
+  });
+});
+
+describe('isAskingToStopGrokTurn', () => {
+  it('cancels the running turn without closing the session', () => {
+    expect(isAskingToStopGrokTurn('stop grok')).toBeTrue();
+    expect(isAskingToStopGrokTurn('cancel that')).toBeTrue();
+    expect(isAskingToStopGrokTurn('stop working')).toBeTrue();
+    expect(isAskingToStopGrokTurn('stop listening')).toBeFalse();
+    expect(isAskingToStopGrokTurn('close grok')).toBeFalse();
+  });
+});
+
+describe('isAskingToPickFolder', () => {
+  it('matches folder-picker asks', () => {
+    expect(isAskingToPickFolder('choose a folder')).toBeTrue();
+    expect(isAskingToPickFolder('pick the git folder')).toBeTrue();
+    expect(isAskingToPickFolder('work on nostria')).toBeFalse();
   });
 });

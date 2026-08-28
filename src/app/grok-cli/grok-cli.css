@@ -2,6 +2,14 @@
   color: var(--text, #3a241c);
 }
 
+:host.embedded {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -21,6 +29,22 @@
   backdrop-filter: blur(22px) saturate(1.1);
 }
 
+.grok-overlay.in-panel {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  display: flex;
+  flex: 1;
+  width: 100%;
+  place-items: stretch;
+  padding: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  height: 100%;
+  min-height: 0;
+}
+
 .grok-shell {
   width: min(920px, 100%);
   max-height: min(880px, 92dvh);
@@ -36,6 +60,23 @@
   box-shadow:
     0 40px 90px var(--shadow),
     inset 0 1px color-mix(in srgb, var(--cream) 50%, transparent);
+}
+
+.grok-shell.in-panel {
+  width: 100%;
+  max-height: none;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-content: stretch;
+  gap: 14px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .grok-header,
@@ -61,6 +102,7 @@
 .hitl-actions {
   gap: 10px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .overline {
@@ -193,6 +235,71 @@ small {
   padding-right: 4px;
 }
 
+.in-panel .thread,
+.in-panel .folder-pick,
+.in-panel .roster {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+.folder-pick {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.folder-pick .dot {
+  background: var(--gold, #d4a017);
+}
+
+.gate-path input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 14px;
+  font: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.in-panel .close-btn {
+  width: 42px;
+  height: 42px;
+}
+
+.in-panel .grok-header h2 {
+  font-size: clamp(1.8rem, 2.6vw, 2.3rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.in-panel .overline {
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0.14em;
+}
+
 .item {
   display: grid;
   gap: 4px;
@@ -261,6 +368,14 @@ small {
   align-items: stretch;
 }
 
+.in-panel .grok-header,
+.in-panel .thread-meta,
+.in-panel .composer,
+.in-panel .hitl-card,
+.in-panel .roster-bar {
+  flex: 0 0 auto;
+}
+
 .composer textarea {
   flex: 1;
   min-height: 64px;
@@ -274,7 +389,7 @@ small {
 }
 
 @media (max-width: 520px) {
-  .grok-shell {
+  .grok-shell:not(.in-panel) {
     border-radius: 24px;
     padding: 18px;
   }

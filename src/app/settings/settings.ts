@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
 import { MemoryService } from '../services/memory';
-import { TtsService, TtsEngine } from '../services/tts';
+import { TtsService, TtsEngine, ListenMode } from '../services/tts';
 import { MCP_PRESETS, McpService, GITHUB_OAUTH_DEFAULTS } from '../services/mcp';
 import { McpAuthMethod, McpServerConfig, McpServerStatus } from '../services/mcp/mcp-types';
 import { LlmService } from '../services/llm';
@@ -386,6 +386,12 @@ export class Settings {
     if (bytes >= gb) return `${(bytes / gb).toFixed(2)} GB`;
     if (bytes >= mb) return `${Math.round(bytes / mb)} MB`;
     return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  protected readonly listenMode = this.ttsService.listenMode;
+
+  setListenMode(mode: ListenMode) {
+    this.ttsService.setListenMode(mode);
   }
 
   selectVoice(id: TtsEngine) {

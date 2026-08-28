@@ -50,10 +50,13 @@
 
         <button
           class="orb-container"
-          (click)="toggleVoice()"
+          (click)="onOrbClick($event)"
+          (pointerdown)="onPushTalkPointerDown($event)"
+          (pointerup)="onPushTalkPointerUp($event)"
+          (pointercancel)="onPushTalkPointerUp($event)"
           (keydown.enter)="toggleVoice()"
-          title="Toggle listening (Space)"
-          [attr.aria-label]="voiceEnabled() ? 'Turn off Ava voice channel' : 'Start speaking with Ava'"
+          [title]="micTitle()"
+          [attr.aria-label]="micAriaLabel()"
         >
           <span class="orb-ring"></span>
           <span
@@ -83,14 +86,17 @@
             <span>{{ chatModelLoading() ? 'Loading chat model' : 'Loading ' + speechModelName() }}</span>
             <small>{{ chatModelLoading() ? (chatModelLoadStatus() || modelLoadInfo() || 'please wait') : (modelDownloadStatus() || modelLoadInfo() || 'preparing local model') }}</small>
           } @else if (isListening()) {
-            <span>Voice channel open</span>
-            <small>{{ speechModelName() }} ({{ modelLoadInfo() || 'auto' }})</small>
+            <span>{{ pushToTalk() ? 'Listening' : 'Voice channel open' }}</span>
+            <small>{{ pushToTalk() ? 'Release to send' : speechModelName() + ' (' + (modelLoadInfo() || 'auto') + ')' }}</small>
           } @else if (isThinking()) {
             <span>Ava is reflecting</span>
-            <small>{{ voiceEnabled() ? 'Voice resumes after this' : (activeTopicLabel() === 'Here' ? 'Holding the thread' : 'With you about ' + activeTopicLabel()) }}</small>
+            <small>{{ voiceEnabled() && !pushToTalk() ? 'Voice resumes after this' : (activeTopicLabel() === 'Here' ? 'Holding the thread' : 'With you about ' + activeTopicLabel()) }}</small>
           } @else if (status() === 'speaking') {
             <span>{{ voiceName() }} speaking</span>
-            <small>{{ voiceEnabled() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
+            <small>{{ voiceEnabled() && !pushToTalk() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
+          } @else if (pushToTalk()) {
+            <span>Hold to talk</span>
+            <small>Hold Space or the mic, then release to send</small>
           } @else if (voiceEnabled()) {
             <span>Voice channel on</span>
             <small>Ready to listen</small>
@@ -108,9 +114,19 @@
       @if (showChatPanel()) {
         <section
           class="history-panel"
-          aria-label="Conversation history"
+          [class.grok-session]="showGrokCli()"
+          [attr.aria-label]="showGrokCli() ? 'Grok session' : 'Conversation history'"
           animate.leave="panel-leave"
         >
+          @if (showGrokCli()) {
+            <app-grok-cli
+              [embedded]="true"
+              [listenMode]="grokListenMode()"
+              (close)="closeGrokCli()"
+              (readyToWork)="onGrokReadyToWork()"
+              (listenModeChange)="onGrokListenMode($event)"
+            ></app-grok-cli>
+          } @else {
           <div class="panel-header">
             <div>
               <p class="eyebrow">With you</p>
@@ -376,6 +392,7 @@
               </article>
             }
           </div>
+          }
         </section>
       }
     </section>
@@ -536,7 +553,7 @@
                 [value]="manualPrompt()"
                 (input)="onManualPromptInput($event)"
                 (keydown)="onManualPromptKeydown($event)"
-                placeholder="Ask anything"
+                [placeholder]="showGrokCli() ? 'Ask Grok' : 'Ask anything'"
               ></textarea>
             </label>
           }
@@ -561,16 +578,40 @@
               </button>
             }
 
+            @if (grokWorking()) {
+              <button
+                class="stop-grok-btn"
+                type="button"
+                (click)="stopGrokTurn()"
+                aria-label="Stop Grok"
+                title="Stop Grok"
+              >
+                Stop Grok
+              </button>
+            }
+
             @if (canAbortRequest()) {
               <button
                 class="send-circle stop-circle"
                 type="button"
                 (click)="stopCurrentRequest()"
-                aria-label="Stop current request"
-                title="Stop"
+                aria-label="Stop Ava"
+                title="Stop Ava"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+                </svg>
+              </button>
+            } @else if (!pushTalkHeld() && (isListening() || (voiceEnabled() && !pushToTalk()))) {
+              <button
+                class="send-circle stop-circle"
+                type="button"
+                (click)="stopListening()"
+                aria-label="Stop listening"
+                title="Stop listening"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
                 </svg>
               </button>
             } @else if (manualInputEnabled() || canSubmitManualPrompt()) {
@@ -591,19 +632,18 @@
               <button
                 class="send-circle speak-circle"
                 type="button"
-                [attr.aria-label]="voiceEnabled() ? 'Turn off voice' : 'Start speaking'"
-                [title]="voiceButtonLabel()"
+                [attr.aria-label]="micAriaLabel()"
+                [title]="micTitle()"
                 (click)="onPrimaryActionClick()"
+                (pointerdown)="onPushTalkPointerDown($event)"
+                (pointerup)="onPushTalkPointerUp($event)"
+                (pointercancel)="onPushTalkPointerUp($event)"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  @if (voiceEnabled()) {
-                    <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
-                  } @else {
-                    <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-                    <path d="M5 11a7 7 0 0 0 14 0"></path>
-                    <path d="M12 18v4"></path>
-                    <path d="M8 22h8"></path>
-                  }
+                  <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                  <path d="M5 11a7 7 0 0 0 14 0"></path>
+                  <path d="M12 18v4"></path>
+                  <path d="M8 22h8"></path>
                 </svg>
               </button>
             }
@@ -702,10 +742,6 @@
 
   @if (showMemory()) {
     <app-memory (close)="closeMemory()"></app-memory>
-  }
-
-  @if (showGrokCli()) {
-    <app-grok-cli (close)="closeGrokCli()"></app-grok-cli>
   }
 
   @if (showDebugOverlay()) {

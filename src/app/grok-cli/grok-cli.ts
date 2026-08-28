@@ -1,10 +1,12 @@
-import { Component, EventEmitter, Output, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, Output, ViewChild, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { GardensService } from '../services/gardens';
-import { GrokCliService, RosterItem, TranscriptItem } from '../services/grok-cli';
+import { GrokCliService, RosterItem, TranscriptItem, folderName } from '../services/grok-cli';
+import { speakableLine, shortFileLabel } from '../services/grok-cli/transcript';
 import { markdownToHtml } from '../services/text-format';
+import { ListenMode } from '../services/tts';
 
 @Component({
   selector: 'app-grok-cli',
@@ -12,6 +14,7 @@ import { markdownToHtml } from '../services/text-format';
   imports: [FormsModule],
   templateUrl: './grok-cli.html',
   styleUrl: './grok-cli.css',
+  host: { '[class.embedded]': 'embedded' },
 })
 export class GrokCliOverlay {
   private readonly grok = inject(GrokCliService);
@@ -19,35 +22,79 @@ export class GrokCliOverlay {
   private readonly confirm = inject(ConfirmDialogService);
   private readonly sanitizer = inject(DomSanitizer);
 
+  @Input() embedded = false;
+  @Input() listenMode: ListenMode = 'push';
   @Output() readonly close = new EventEmitter<void>();
+  @Output() readonly readyToWork = new EventEmitter<void>();
+  @Output() readonly listenModeChange = new EventEmitter<ListenMode>();
+  @ViewChild('thread') private threadEl?: ElementRef<HTMLElement>;
 
-  protected readonly desktop = this.grok.desktop;
   protected readonly phase = this.grok.phase;
-  protected readonly grokInfo = this.grok.grokInfo;
   protected readonly auth = this.grok.auth;
   protected readonly installLog = this.grok.installLog;
   protected readonly error = this.grok.error;
   protected readonly busy = this.grok.busy;
   protected readonly roster = this.grok.roster;
   protected readonly runningIds = this.grok.runningIds;
-  protected readonly activeId = this.grok.activeId;
   protected readonly cwd = this.grok.cwd;
   protected readonly items = this.grok.items;
-  protected readonly turn = this.grok.turn;
   protected readonly hitl = this.grok.hitl;
   protected readonly hydrating = this.grok.hydrating;
   protected readonly prompt = this.grok.prompt;
   protected readonly mode = this.grok.mode;
   protected readonly working = this.grok.working;
   protected readonly activeRow = this.grok.activeRow;
-  protected readonly projects = this.grok.projects;
+  protected readonly view = this.grok.view;
+  protected readonly projectHint = this.grok.projectHint;
+  protected readonly needsFolder = this.grok.needsFolder;
+  protected readonly folderChoices = this.grok.folderChoices;
   protected readonly folderLabel = computed(() => folderName(this.cwd()) || 'Choose a folder');
-
-  protected readonly showRoster = signal(true);
+  protected readonly heading = computed(() => {
+    if (this.phase() !== 'ready') return 'Grok';
+    if (this.view() === 'roster') return 'Sessions';
+    if (!this.cwd().trim()) return 'New session';
+    return this.activeRow()?.title || this.folderLabel();
+  });
+  protected readonly gardenWorkspace = computed(() => this.gardens.currentGarden()?.workspace || '');
+  protected readonly gardenLabel = computed(() => this.gardens.currentGarden()?.name || 'Garden folder');
+  protected readonly draftPath = signal('');
+  protected readonly hitlQuestion = computed(() => {
+    const request = this.hitl();
+    const raw = request?.questions[0]?.question || request?.method || '';
+    const spoken = speakableLine(raw);
+    return { raw, spoken: spoken || 'Grok needs a decision.' };
+  });
 
   constructor() {
     void this.grok.boot();
-    if (!this.activeId()) this.showRoster.set(true);
+    effect(() => {
+      this.items();
+      this.hitl();
+      this.hydrating();
+      this.working();
+      queueMicrotask(() => this.scrollThread());
+    });
+  }
+
+  protected displayText(item: TranscriptItem): string {
+    if (item.kind !== 'work' || !item.text) return item.text;
+    return this.displayPath(item.text);
+  }
+
+  protected displayPath(value: string): string {
+    return shortFileLabel(value) || speakableLine(value) || value;
+  }
+
+  protected setListenMode(mode: ListenMode): void {
+    this.listenModeChange.emit(mode);
+  }
+
+  private scrollThread(): void {
+    const el = this.threadEl?.nativeElement;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: this.working() ? 'auto' : 'smooth' });
+    });
   }
 
   protected html(item: TranscriptItem): SafeHtml {
@@ -56,6 +103,10 @@ export class GrokCliOverlay {
 
   protected isRunning(id: string): boolean {
     return this.runningIds().includes(id);
+  }
+
+  protected nameOf(path: string): string {
+    return folderName(path);
   }
 
   protected async install(): Promise<void> {
@@ -82,26 +133,38 @@ export class GrokCliOverlay {
   }
 
   protected async openRow(row: RosterItem): Promise<void> {
-    this.showRoster.set(false);
     await this.grok.openSession(row.sessionId, row.cwd);
   }
 
   protected async newSession(): Promise<void> {
-    this.showRoster.set(false);
     await this.grok.startDraft();
   }
 
   protected backToRoster(): void {
-    this.showRoster.set(true);
+    this.grok.view.set('roster');
   }
 
   protected async pickFolder(): Promise<void> {
-    await this.grok.pickFolder();
+    const needed = this.needsFolder();
+    const path = await this.grok.pickFolder();
+    if (path && needed) this.readyToWork.emit();
+  }
+
+  protected async useFolder(path: string): Promise<void> {
+    const needed = this.needsFolder();
+    if (await this.grok.useFolder(path) && needed) this.readyToWork.emit();
   }
 
   protected useGardenFolder(): void {
-    const workspace = this.gardens.currentGarden()?.workspace;
-    if (workspace) this.grok.cwd.set(workspace);
+    const workspace = this.gardenWorkspace();
+    if (workspace) void this.useFolder(workspace);
+  }
+
+  protected async commitDraftPath(): Promise<void> {
+    const path = this.draftPath().trim();
+    if (!path) return;
+    this.draftPath.set('');
+    await this.useFolder(path);
   }
 
   protected async send(): Promise<void> {
@@ -146,10 +209,4 @@ export class GrokCliOverlay {
   protected dismiss(): void {
     this.close.emit();
   }
-}
-
-function folderName(path: string): string {
-  const trimmed = path.trim().replace(/[\\/]+$/, '');
-  if (!trimmed) return '';
-  return trimmed.split(/[\\/]/).pop() || trimmed;
 }

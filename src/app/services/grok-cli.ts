@@ -1,5 +1,11 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { extractProjectHint, isAskingToPickFolder } from '../intents';
 import { GardensService } from './gardens';
+import {
+  FolderChoice,
+  matchFolderByHint,
+  uniqueFolders,
+} from './grok-cli/folders';
 import { openExternal } from './mcp/mcp-http';
 import { isTauriDesktop } from './updates';
 import {
@@ -33,8 +39,12 @@ export type {
   TranscriptItem,
   TurnLife,
 } from './grok-cli/types';
+export type { FolderChoice } from './grok-cli/folders';
+export { folderName, matchFolderByHint } from './grok-cli/folders';
 
 const DRAFT_ID = 'draft';
+export type GrokView = 'roster' | 'session';
+export type GrokWorkResult = 'setup' | 'signed-out' | 'folder' | 'ready';
 
 @Injectable({ providedIn: 'root' })
 export class GrokCliService {
@@ -62,12 +72,28 @@ export class GrokCliService {
   readonly prompt = signal('');
   readonly mode = signal('ask');
   readonly projects = signal<ProjectPrefs>({ lastProject: '', recentProjects: [] });
+  readonly view = signal<GrokView>('roster');
+  readonly projectHint = signal('');
 
   readonly signedIn = computed(() => !!this.auth()?.signedIn);
   readonly working = computed(() => this.turn() === 'sending' || this.turn() === 'live');
+  readonly needsFolder = computed(
+    () => this.phase() === 'ready' && this.view() === 'session' && !this.cwd().trim(),
+  );
   readonly activeRow = computed(() => {
     const id = this.activeId();
     return this.roster().find(row => row.sessionId === id) ?? null;
+  });
+  readonly folderChoices = computed((): FolderChoice[] => {
+    const choices: FolderChoice[] = [];
+    const prefs = this.projects();
+    if (prefs.lastProject) choices.push({ path: prefs.lastProject });
+    for (const path of prefs.recentProjects) choices.push({ path });
+    for (const row of this.roster()) choices.push({ path: row.cwd, name: row.title });
+    for (const garden of this.gardens.gardens()) {
+      if (garden.workspace) choices.push({ path: garden.workspace, name: garden.name });
+    }
+    return uniqueFolders(choices);
   });
 
   async boot(): Promise<void> {
@@ -177,15 +203,67 @@ export class GrokCliService {
     if (!this.desktop()) return null;
     const start = this.cwd() || this.projects().lastProject || this.gardens.currentGarden()?.workspace || null;
     const path = await invoke<string | null>('grok_pick_folder', { cwd: start });
-    if (path) {
-      this.cwd.set(path);
-      this.projects.set(await invoke<ProjectPrefs>('grok_remember_project', { path }));
-    }
+    if (path) await this.useFolder(path);
     return path;
+  }
+
+  async useFolder(path: string): Promise<boolean> {
+    const folder = path.trim();
+    if (!folder) return false;
+    this.cwd.set(folder);
+    if (this.view() !== 'session') this.view.set('session');
+    if (!this.activeId()) this.activeId.set(DRAFT_ID);
+    try {
+      this.projects.set(await invoke<ProjectPrefs>('grok_remember_project', { path: folder }));
+    } catch {
+      // Keep the folder even if prefs could not be written.
+    }
+    return true;
+  }
+
+  async openRoster(): Promise<void> {
+    await this.boot();
+    this.view.set('roster');
+  }
+
+  async openForWork(hint?: string | null): Promise<GrokWorkResult> {
+    const project = hint?.trim() || '';
+    this.projectHint.set(project);
+    this.view.set('session');
+    await this.boot();
+    if (this.phase() === 'setup') return 'setup';
+    if (this.phase() !== 'ready') return 'signed-out';
+    const matched = project ? matchFolderByHint(project, this.folderChoices()) : null;
+    if (matched) {
+      this.beginSelection(DRAFT_ID, matched);
+      this.items.set([]);
+      await this.useFolder(matched);
+      return 'ready';
+    }
+    this.beginSelection(DRAFT_ID, '');
+    this.items.set([]);
+    return 'folder';
+  }
+
+  async handleFolderSpeech(text: string): Promise<boolean> {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (isAskingToPickFolder(trimmed)) {
+      return !!(await this.pickFolder());
+    }
+    if (/^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('/')) {
+      return this.useFolder(trimmed);
+    }
+    const hint = extractProjectHint(trimmed) || trimmed;
+    const matched = matchFolderByHint(hint, this.folderChoices());
+    if (!matched) return false;
+    return this.useFolder(matched);
   }
 
   async openSession(sessionId: string, cwd: string): Promise<void> {
     if (!this.desktop()) return;
+    this.view.set('session');
+    this.projectHint.set('');
     const token = this.beginSelection(sessionId, cwd);
     this.hydrating.set(true);
     this.hitl.set(null);
@@ -211,14 +289,9 @@ export class GrokCliService {
   }
 
   async startDraft(cwd?: string): Promise<void> {
-    const folder = cwd?.trim() || this.cwd() || this.projects().lastProject || this.gardens.currentGarden()?.workspace || '';
-    if (!folder) {
-      const picked = await this.pickFolder();
-      if (!picked) return;
-      this.beginSelection(DRAFT_ID, picked);
-      this.items.set([]);
-      return;
-    }
+    const folder = cwd?.trim() || '';
+    this.view.set('session');
+    this.projectHint.set('');
     this.beginSelection(DRAFT_ID, folder);
     this.items.set([]);
   }
@@ -310,7 +383,7 @@ export class GrokCliService {
   }
 
   canTakeSpeech(): boolean {
-    return this.desktop() && this.phase() === 'ready' && !!this.activeId();
+    return this.desktop() && this.phase() === 'ready' && this.view() === 'session' && !!this.activeId() && !!this.cwd().trim();
   }
 
   private beginSelection(sessionId: string, cwd: string): number {

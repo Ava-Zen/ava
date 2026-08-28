@@ -1,15 +1,31 @@
-<div class="grok-overlay" (click)="dismiss()">
-  <div class="grok-shell" (click)="$event.stopPropagation()" role="dialog" aria-labelledby="grok-title">
+<div
+  class="grok-overlay"
+  [class.in-panel]="embedded"
+  (click)="embedded ? null : dismiss()"
+>
+  <div
+    class="grok-shell"
+    [class.in-panel]="embedded"
+    (click)="$event.stopPropagation()"
+    [attr.role]="embedded ? 'region' : 'dialog'"
+    aria-labelledby="grok-title"
+  >
     <header class="grok-header">
       <div>
         <p class="overline">Grok</p>
-        <h2 id="grok-title">Sessions</h2>
+        <h2 id="grok-title">{{ heading() }}</h2>
       </div>
       <div class="header-tools">
-        @if (phase() === 'ready' && !showRoster()) {
+        @if (phase() === 'ready' && view() === 'session' && !needsFolder()) {
+          <div class="segmented" aria-label="Microphone">
+            <button type="button" [class.active]="listenMode === 'push'" (click)="setListenMode('push')">Hold to talk</button>
+            <button type="button" [class.active]="listenMode === 'open'" (click)="setListenMode('open')">Mic on</button>
+          </div>
+        }
+        @if (phase() === 'ready' && view() === 'session') {
           <button type="button" class="ghost-btn" (click)="backToRoster()">All sessions</button>
         }
-        <button type="button" class="close-btn" (click)="dismiss()" aria-label="Close Grok sessions">
+        <button type="button" class="close-btn" (click)="dismiss()" aria-label="Close Grok session">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18 6 6 18"></path>
             <path d="m6 6 12 12"></path>
@@ -46,7 +62,7 @@
       }
     }
 
-    @if (phase() === 'ready' && showRoster()) {
+    @if (phase() === 'ready' && view() === 'roster') {
       <div class="roster-bar">
         <button type="button" class="save-btn" (click)="newSession()">New session</button>
         @if (auth()?.email || auth()?.name) {
@@ -76,7 +92,48 @@
       </div>
     }
 
-    @if (phase() === 'ready' && !showRoster()) {
+    @if (phase() === 'ready' && view() === 'session' && needsFolder()) {
+      <div class="folder-pick">
+        <p class="hint">
+          @if (projectHint()) {
+            Choose the git folder for {{ projectHint() }}.
+          } @else {
+            Choose the git folder we should work in.
+          }
+        </p>
+        <div class="folder-actions">
+          <button type="button" class="save-btn" (click)="pickFolder()">Choose folder</button>
+          @if (gardenWorkspace()) {
+            <button type="button" class="ghost-btn" (click)="useGardenFolder()">{{ gardenLabel() }}</button>
+          }
+        </div>
+        <label class="gate-path">
+          <span class="sr-only">Folder path</span>
+          <input
+            [ngModel]="draftPath()"
+            (ngModelChange)="draftPath.set($event)"
+            (keydown.enter)="commitDraftPath()"
+            placeholder="C:\src\my-project"
+          />
+        </label>
+        @if (folderChoices().length) {
+          <p class="hint">Recent</p>
+          <div class="roster">
+            @for (folder of folderChoices(); track folder.path) {
+              <button type="button" class="roster-open" (click)="useFolder(folder.path)">
+                <span class="dot"></span>
+                <span class="roster-copy">
+                  <strong>{{ folder.name || nameOf(folder.path) }}</strong>
+                  <small>{{ folder.path }}</small>
+                </span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    @if (phase() === 'ready' && view() === 'session' && !needsFolder()) {
       <div class="thread-meta">
         <div>
           <strong>{{ activeRow()?.title || 'New session' }}</strong>
@@ -96,9 +153,9 @@
         <p class="hint">Opening the thread…</p>
       }
 
-      <div class="thread" aria-live="polite">
+      <div class="thread" aria-live="polite" #thread>
         @if (!items().length && !hydrating()) {
-          <p class="hint">Ask Grok to work in this folder.</p>
+          <p class="hint">What would you like us to work on together?</p>
         }
         @for (item of items(); track $index) {
           <article class="item" [class.user]="item.kind === 'user'" [class.work]="item.kind === 'work'" [class.thought]="item.kind === 'thought'">
@@ -111,7 +168,7 @@
             @if (item.kind === 'agent') {
               <div class="item-body markdown" [innerHTML]="html(item)"></div>
             } @else {
-              <p class="item-body">{{ item.text }}</p>
+              <p class="item-body">{{ displayText(item) }}</p>
             }
           </article>
         }
@@ -119,7 +176,10 @@
 
       @if (hitl(); as request) {
         <div class="hitl-card">
-          <p>{{ request.questions[0]?.question || request.method }}</p>
+          <p>{{ hitlQuestion().spoken }}</p>
+          @if (hitlQuestion().raw && hitlQuestion().raw !== hitlQuestion().spoken) {
+            <small>{{ displayPath(hitlQuestion().raw) }}</small>
+          }
           @if (request.questions[0]?.header) {
             <small>{{ request.questions[0]?.header }}</small>
           }
@@ -141,7 +201,7 @@
           [placeholder]="'Ask Grok in ' + folderLabel()"
         ></textarea>
         @if (working()) {
-          <button type="button" class="ghost-btn" (click)="cancelTurn()">Stop</button>
+          <button type="button" class="ghost-btn" (click)="cancelTurn()">Stop Grok</button>
         } @else {
           <button type="button" class="save-btn" (click)="send()" [disabled]="!prompt().trim()">Send</button>
         }

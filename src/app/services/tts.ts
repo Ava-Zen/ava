@@ -3,6 +3,7 @@ import { XaiAuthService } from './xai/xai-auth';
 import { GROK_FALLBACK_VOICES, GrokVoiceInfo, XaiClient } from './xai/xai-client';
 
 export type TtsEngine = 'kokoro' | 'system' | 'grok';
+export type ListenMode = 'open' | 'push';
 
 export interface TtsVoiceOption {
   id: TtsEngine;
@@ -26,6 +27,7 @@ interface TtsConfig {
 
 const DEFAULT_KOKORO_VOICE = 'af_bella';
 const DEFAULT_GROK_VOICE = 'carina';
+const LISTEN_MODE_KEY = 'ava-listen-mode';
 
 @Injectable({ providedIn: 'root' })
 export class TtsService {
@@ -66,6 +68,7 @@ export class TtsService {
 
   private readonly config = signal<TtsConfig>(this.load());
   readonly grokVoiceCatalog = signal<GrokVoiceInfo[]>(GROK_FALLBACK_VOICES);
+  readonly listenMode = signal<ListenMode>(this.loadListenMode());
 
   readonly selectedVoiceId = computed(() => {
     const voice = this.config().voice;
@@ -99,6 +102,25 @@ export class TtsService {
   setGrokVoice(id: string) {
     this.config.update(c => ({ ...c, grokVoice: id, voice: 'grok' }));
     this.save();
+  }
+
+  setListenMode(mode: ListenMode) {
+    this.listenMode.set(mode);
+    try {
+      localStorage.setItem(LISTEN_MODE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  }
+
+  private loadListenMode(): ListenMode {
+    try {
+      const raw = localStorage.getItem(LISTEN_MODE_KEY);
+      if (raw === 'push' || raw === 'open') return raw;
+    } catch {
+      // ignore
+    }
+    return 'open';
   }
 
   preferGrokVoice(): void {

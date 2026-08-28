@@ -109,9 +109,12 @@ h2 {
 .ghost-btn,
 .filters button,
 .search input {
+  appearance: none;
+  -webkit-appearance: none;
   border: 1px solid var(--line);
   background: var(--surface-strong);
   color: var(--text);
+  -webkit-text-fill-color: var(--text);
   cursor: pointer;
   border-radius: 16px;
 }
@@ -220,6 +223,7 @@ h2 {
   padding: 0 14px;
   background: var(--input-bg);
   color: var(--input-text);
+  -webkit-text-fill-color: var(--input-text);
 }
 
 .log {
@@ -234,28 +238,34 @@ h2 {
 .event {
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--surface-strong);
   overflow: hidden;
 }
 
 .event.error {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-strong));
 }
 
 .event-head {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   gap: 10px;
   padding: 10px 12px;
   border: 0;
   background: transparent;
-  color: inherit;
+  font: inherit;
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
 .event-head time {
   flex: 0 0 auto;
-  color: var(--soft);
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78rem;
 }
@@ -266,6 +276,8 @@ h2 {
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--line);
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
   text-align: center;
   font-size: 0.7rem;
   font-weight: 780;
@@ -291,8 +303,11 @@ h2 {
 
 .event-head strong {
   flex: 1 1 auto;
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
   font-size: 0.95rem;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .preview,
@@ -300,6 +315,7 @@ pre {
   margin: 0;
   padding: 0 12px 12px 98px;
   color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -316,6 +332,7 @@ pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
   color: var(--text);
+  -webkit-text-fill-color: var(--text);
 }
 
 .sr-only {

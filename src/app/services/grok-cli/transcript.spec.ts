@@ -4,6 +4,8 @@ import {
   chunkText,
   friendlyTool,
   isTurnComplete,
+  shortFileLabel,
+  speakableLine,
   spokenRecap,
 } from './transcript';
 import { TranscriptItem } from './types';
@@ -64,6 +66,18 @@ describe('grok-cli transcript', () => {
       { kind: 'work', text: 'ls' },
     ];
     expect(spokenRecap(items)).toBe('I listed the files.');
+  });
+
+  it('speaks file names instead of paths and GUIDs', () => {
+    expect(shortFileLabel('C:\\Users\\me\\src\\app.ts')).toBe('app.ts');
+    expect(
+      speakableLine("Edit 'C:\\Users\\me\\AppData\\Local\\Temp\\a1b2c3d4-e5f6-7890-abcd-ef1234567890\\src\\app.ts'"),
+    ).toBe('Edit app.ts?');
+    expect(speakableLine('Trust F:\\github\\nostria?')).toBe('Trust nostria?');
+    expect(
+      speakableLine('Allow editing /home/me/.grok/sessions/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/lib.rs'),
+    ).toBe('Allow editing lib.rs');
+    expect(speakableLine('I listed the files. More detail.')).toBe('I listed the files.');
   });
 
   it('detects turn completion', () => {

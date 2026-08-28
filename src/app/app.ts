@@ -52,7 +52,18 @@ import {
   needsLocalFileAccess,
   shouldUseCopilot,
 } from './services/copilot/copilot-auth';
-import { AVA_CAPABILITIES_REPLY, isAskingCapabilities, isAskingForTime } from './intents';
+import {
+  AVA_CAPABILITIES_REPLY,
+  extractProjectHint,
+  isAskingCapabilities,
+  isAskingForGrokWork,
+  isAskingForTime,
+  isAskingToStopGrokTurn,
+  isAskingToStopListening,
+  isLeavingGrokWork,
+} from './intents';
+import { speakableLine } from './services/grok-cli/transcript';
+import { ListenMode } from './services/tts';
 
 type CopilotGateKind = 'signin' | 'workspace' | 'tools' | 'photo';
 
@@ -308,7 +319,7 @@ export class App {
 
   /** Reactive: the conversation card is shown while there is content or active voice. */
   protected readonly chatStarted = computed(() =>
-    this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading()
+    this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading() || this.showGrokCli()
   );
   protected readonly showChatPanel = computed(() => this.chatStarted());
   protected readonly activeTopicLabel = computed(() => this.memory.activeTopic()?.title || 'Here');
@@ -396,6 +407,20 @@ export class App {
     this.status() === 'speaking' ||
     this.isGeneratingAudioFile()
   );
+  protected readonly grokWorking = this.grokCli.working;
+  protected readonly grokListenMode = signal<ListenMode>('push');
+  protected readonly pushToTalk = computed(() =>
+    this.showGrokCli() ? this.grokListenMode() === 'push' : this.tts.listenMode() === 'push',
+  );
+  protected readonly pushTalkHeld = signal(false);
+  protected readonly micTitle = computed(() => {
+    if (this.pushToTalk()) return this.isListening() ? 'Release to send' : 'Hold to talk';
+    return this.voiceEnabled() ? 'Stop listening' : 'Start speaking';
+  });
+  protected readonly micAriaLabel = computed(() => {
+    if (this.pushToTalk()) return this.isListening() ? 'Release to send' : 'Hold to talk';
+    return this.voiceEnabled() ? 'Stop listening' : 'Start speaking with Ava';
+  });
   private requestSeq = 0;
   protected readonly chatModelLoading = computed(() => this.llm.isLoading());
   protected readonly chatModelLoadStatus = computed(() => this.llm.downloadStatus());
@@ -406,6 +431,7 @@ export class App {
     if (this.chatModelLoading()) return this.chatModelLoadStatus() || 'Loading chat model… please wait';
     if (this.agents.isLoading()) return 'Loading agent';
     if (this.isGeneratingAudioFile()) return 'Generating audio';
+    if (this.grokCli.working()) return 'Grok working';
     if (this.isThinking()) return 'Thinking';
     if (this.hasActiveAgents()) {
       const usingCopilot = this.agentTasks().some(
@@ -427,7 +453,8 @@ export class App {
     this.isKokoroLoading() ||
     this.chatModelLoading() ||
     this.agents.isLoading() ||
-    this.isGeneratingAudioFile()
+    this.isGeneratingAudioFile() ||
+    this.grokCli.working()
   );
   private activeAudioExportController: AbortController | null = null;
   private audioPreviewPlayer: HTMLAudioElement | null = null;
@@ -464,6 +491,7 @@ export class App {
 
     this.registerMcpTtsBridge();
     this.watchAgentCompletions();
+    this.watchGrokTurns();
     this.watchDebugSnapshot();
     this.debug.log('system', 'Ava started', this.llm.selectedModel().name);
     if (this.onboarding.completed()) {
@@ -508,6 +536,36 @@ export class App {
   }
 
   /** Speaks a short wrap-up when a background agent (local or Copilot) finishes. */
+  private watchGrokTurns() {
+    let lastTurn = this.grokCli.turn();
+    let lastHitlId: unknown = null;
+    effect(() => {
+      if (!this.showGrokCli()) {
+        lastTurn = this.grokCli.turn();
+        lastHitlId = this.grokCli.hitl()?.requestId ?? null;
+        return;
+      }
+      const turn = this.grokCli.turn();
+      if (lastTurn !== 'settled' && turn === 'settled') {
+        const recap = this.grokCli.recap();
+        if (recap) {
+          queueMicrotask(() => {
+            if (!this.isThinking()) void this.speak(recap);
+          });
+        }
+      }
+      lastTurn = turn;
+
+      const hitl = this.grokCli.hitl();
+      const id = hitl?.requestId ?? null;
+      if (hitl && id !== lastHitlId) {
+        const question = speakableLine(hitl.questions[0]?.question || '') || 'Grok needs a decision.';
+        queueMicrotask(() => void this.speak(question));
+      }
+      lastHitlId = id;
+    });
+  }
+
   private watchAgentCompletions() {
     effect(() => {
       const tasks = this.agentTasks();
@@ -730,10 +788,52 @@ export class App {
     this.showSettings.set(false);
     this.showMemory.set(false);
     this.showGrokCli.set(true);
+    this.grokListenMode.set('push');
+    void this.grokCli.openRoster();
   }
 
   protected closeGrokCli() {
     this.showGrokCli.set(false);
+  }
+
+  protected onGrokListenMode(mode: ListenMode) {
+    this.grokListenMode.set(mode);
+    if (mode === 'push' && (this.voiceEnabled() || this.isListening())) {
+      this.stopListening();
+    }
+  }
+
+  protected onGrokReadyToWork() {
+    const line = 'What would you like us to work on together?';
+    this.addAvaNotice(this.threadId(), line);
+    void this.speak(line);
+  }
+
+  private async openGrokForWork(text: string, requestSeq: number) {
+    this.showSettings.set(false);
+    this.showMemory.set(false);
+    this.showGrokCli.set(true);
+    this.grokListenMode.set('push');
+    const hint = extractProjectHint(text);
+    const result = await this.grokCli.openForWork(hint);
+    if (!this.isCurrentRequest(requestSeq)) return;
+    const spoken =
+      result === 'setup'
+        ? 'I can install Grok so we can work in your project.'
+        : result === 'signed-out'
+          ? 'Sign in with Grok and we can start.'
+          : result === 'folder'
+            ? hint
+              ? `Choose the folder for ${hint}.`
+              : 'Choose the folder we should work in.'
+            : 'What would you like us to work on together?';
+    this.addAvaNotice(this.threadId(), spoken);
+    this.isThinking.set(false);
+    this.status.set('speaking');
+    await this.speak(spoken);
+    if (!this.isCurrentRequest(requestSeq)) return;
+    if (this.status() === 'speaking') this.status.set('idle');
+    this.resumeVoiceCaptureIfEnabled();
   }
 
   protected openDebugConsole() {
@@ -814,8 +914,20 @@ export class App {
       return;
     }
 
+    if (event.key === 'Escape' && this.showGrokCli()) {
+      if (this.isListening() || this.voiceEnabled() || this.pushTalkHeld()) {
+        this.stopListening();
+        return;
+      }
+      if (this.grokCli.working()) {
+        this.stopGrokTurn();
+        return;
+      }
+      return;
+    }
+
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showGrokCli() || this.showDebugOverlay() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
+    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showDebugOverlay() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -824,7 +936,22 @@ export class App {
 
     event.preventDefault();
     (document.activeElement as HTMLElement | null)?.blur?.();
+    if (this.pushToTalk()) {
+      void this.beginPushTalk();
+      return;
+    }
     this.toggleVoice();
+  }
+
+  @HostListener('document:keyup', ['$event'])
+  protected onGlobalKeyup(event: KeyboardEvent) {
+    if (event.code !== 'Space' || !this.pushToTalk() || !this.pushTalkHeld()) return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+    event.preventDefault();
+    this.endPushTalk();
   }
 
   @HostListener('document:mousedown', ['$event'])
@@ -911,6 +1038,7 @@ export class App {
       'ava-llm-model',
       'ava-llm-uncensored',
       'ava-tts-config',
+      'ava-listen-mode',
       'ava-agent-model',
       'ava-agent-runtime',
       'ava-copilot-auth',
@@ -957,7 +1085,29 @@ export class App {
       return;
     }
 
+    if (this.pushToTalk()) return;
     void this.toggleVoice();
+  }
+
+  protected onOrbClick(event: Event) {
+    if (this.pushToTalk()) {
+      event.preventDefault();
+      return;
+    }
+    void this.toggleVoice();
+  }
+
+  protected onPushTalkPointerDown(event: PointerEvent) {
+    if (!this.pushToTalk() || event.button !== 0) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+    void this.beginPushTalk();
+  }
+
+  protected onPushTalkPointerUp(event: PointerEvent) {
+    if (!this.pushToTalk() || !this.pushTalkHeld()) return;
+    event.preventDefault();
+    this.endPushTalk();
   }
 
   protected toggleManualInput() {
@@ -1770,6 +1920,33 @@ export class App {
     await this.enableVoiceChannel();
   }
 
+  protected stopListening() {
+    this.pushTalkHeld.set(false);
+    this.disableVoiceChannel();
+  }
+
+  protected stopGrokTurn() {
+    this.debug.log('command', 'Stop Grok turn');
+    void this.grokCli.cancel();
+  }
+
+  private async beginPushTalk() {
+    if (this.pushTalkHeld()) return;
+    this.pushTalkHeld.set(true);
+    this.voiceEnabled.set(true);
+    this.setBackgroundVoiceSession(false);
+    if (this.status() === 'speaking') this.stopSpeaking();
+    if (!this.isListening()) await this.startMoonshineListening();
+  }
+
+  private endPushTalk() {
+    if (!this.pushTalkHeld()) return;
+    this.pushTalkHeld.set(false);
+    this.voiceEnabled.set(false);
+    this.setBackgroundVoiceSession(false);
+    this.stopMoonshineListening({ commitPending: true, submitPartial: true });
+  }
+
   private async enableVoiceChannel() {
     this.voiceEnabled.set(true);
     // Gemini-style background session: on Android a microphone foreground
@@ -1781,6 +1958,7 @@ export class App {
   }
 
   private disableVoiceChannel() {
+    this.pushTalkHeld.set(false);
     this.voiceEnabled.set(false);
     this.setBackgroundVoiceSession(false);
     this.stopMoonshineListening();
@@ -1802,6 +1980,7 @@ export class App {
   }
 
   private resumeVoiceCaptureIfEnabled() {
+    if (this.pushToTalk() || this.pushTalkHeld()) return;
     if (!this.voiceEnabled() || this.manualInputEnabled() || this.showStartup() || this.showOnboarding() || this.showSettings()) return;
     if (this.isListening() || this.isThinking() || this.status() === 'speaking') return;
     this.startMoonshineListening().catch(() => {});
@@ -2353,9 +2532,23 @@ export class App {
     this.currentTranscript.set('');
 
     this.debug.log('speech', 'Heard you', text);
-    if (this.isListeningStopCommand(text)) {
+    if (!text.trim()) return;
+
+    if (this.showGrokCli() && this.grokCli.working() && isAskingToStopGrokTurn(text)) {
+      this.debug.log('route', 'Stop Grok turn');
+      this.stopGrokTurn();
+      return;
+    }
+
+    if ((this.isListening() || this.voiceEnabled() || this.pushTalkHeld()) && isAskingToStopListening(text)) {
       this.debug.log('route', 'Stop listening');
-      this.disableVoiceChannel();
+      this.stopListening();
+      return;
+    }
+
+    if (this.showGrokCli() && this.grokCli.working() && /^(stop|end)$/.test(text.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim())) {
+      this.debug.log('route', 'Stop Grok turn');
+      this.stopGrokTurn();
       return;
     }
 
@@ -2373,14 +2566,47 @@ export class App {
       return;
     }
 
-    if (this.showGrokCli() && this.grokCli.canTakeSpeech()) {
-      this.debug.log('route', 'Grok CLI session', text);
-      this.status.set('thinking');
-      this.isThinking.set(true);
-      await this.grokCli.send(text);
-      this.isThinking.set(false);
-      this.status.set('idle');
-      return;
+    if (this.showGrokCli()) {
+      if (isLeavingGrokWork(text)) {
+        this.debug.log('route', 'Leave Grok session');
+        this.closeGrokCli();
+        this.status.set('thinking');
+        this.isThinking.set(true);
+        await this.respond(this.threadId(), 'Alright. I am here.', undefined, undefined, undefined, seq);
+        return;
+      }
+      if (isAskingForGrokWork(text) && (extractProjectHint(text) || !this.grokCli.canTakeSpeech())) {
+        this.debug.log('route', 'Grok CLI work', text);
+        this.status.set('thinking');
+        this.isThinking.set(true);
+        await this.openGrokForWork(text, seq);
+        return;
+      }
+      if (this.grokCli.needsFolder()) {
+        this.debug.log('route', 'Grok CLI folder', text);
+        this.status.set('thinking');
+        this.isThinking.set(true);
+        const picked = await this.grokCli.handleFolderSpeech(text);
+        this.isThinking.set(false);
+        if (picked) {
+          await this.speak('What would you like us to work on together?');
+        } else {
+          await this.speak('Choose a folder for this session and we can start.');
+        }
+        if (this.status() === 'speaking') this.status.set('idle');
+        this.resumeVoiceCaptureIfEnabled();
+        return;
+      }
+      if (this.grokCli.canTakeSpeech()) {
+        this.debug.log('route', 'Grok CLI session', text);
+        this.status.set('thinking');
+        this.isThinking.set(true);
+        await this.grokCli.send(text);
+        this.isThinking.set(false);
+        this.status.set('idle');
+        this.resumeVoiceCaptureIfEnabled();
+        return;
+      }
     }
 
     this.status.set('thinking');
@@ -2433,6 +2659,23 @@ export class App {
     if (wantsImage(text)) {
       this.debug.log('route', 'Imagine generate');
       await this.handleImagineGenerate(chatId, text, seq);
+      return;
+    }
+
+    if (isAskingForGrokWork(text)) {
+      this.debug.log('route', 'Grok CLI work', text);
+      if (!this.grokCli.desktop()) {
+        await this.respond(
+          gardenId,
+          'Grok sessions live in the desktop app. Open Ava there and we can work on a project together.',
+          undefined,
+          undefined,
+          undefined,
+          seq,
+        );
+        return;
+      }
+      await this.openGrokForWork(text, seq);
       return;
     }
 
@@ -2542,20 +2785,6 @@ export class App {
       console.error('Weather request failed', e);
       this.respond(gardenId, 'Sorry, I could not get the weather right now.', undefined, undefined, undefined, requestSeq);
     }
-  }
-
-  private isListeningStopCommand(text: string): boolean {
-    if (!this.isListening()) return false;
-
-    const normalized = text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return /\b(stop|end|turn off|shut off|disable|mute)\b(?:\s+(the|my|your))?\s+(listening|mic|microphone|voice|recording|voice channel)\b/.test(normalized)
-      || /\b(stop|end)\s+(listening|recording)\b/.test(normalized)
-      || /\b(mic|microphone)\s+(off|stop)\b/.test(normalized);
   }
 
   private isNewConversationCommand(text: string): boolean {

@@ -112,7 +112,7 @@
       @if (grokBuildInfo(); as info) {
         <p class="hint">{{ info.version }} · {{ info.path }}</p>
       } @else if (grokBuildPhase() === 'setup') {
-        <p class="hint">Grok is not installed yet. Ava can install it from the sessions overlay.</p>
+        <p class="hint">Grok is not installed yet. Ava can install it from the Grok sessions panel.</p>
       }
       <div class="auth-row">
         <button class="save-btn" type="button" (click)="openGrokSessions()">Open Grok sessions</button>
@@ -381,6 +381,18 @@
         Grok Voice is the default in cloud mode. Kokoro and the system voice stay available offline.
       } @else {
         Choose how Ava speaks. Kokoro and the system voice run on this device.
+      }
+    </p>
+    <p class="hint">How Ava listens. Grok sessions default to hold to talk.</p>
+    <div class="segmented intelligence-toggle" aria-label="Microphone">
+      <button type="button" [class.active]="listenMode() === 'open'" (click)="setListenMode('open')">Open channel</button>
+      <button type="button" [class.active]="listenMode() === 'push'" (click)="setListenMode('push')">Push to talk</button>
+    </div>
+    <p class="hint">
+      @if (listenMode() === 'push') {
+        Hold Space or the mic, then release to send.
+      } @else {
+        The mic stays on until you turn it off.
       }
     </p>
 
