@@ -133,6 +133,38 @@ fn normalize_name_guess(raw: &str) -> Option<String> {
   Some(cleaned)
 }
 
+#[cfg(desktop)]
+fn open_debug_window_inner(app: &tauri::AppHandle) -> Result<(), String> {
+  if let Some(existing) = app.get_webview_window("debug") {
+    let _ = existing.show();
+    let _ = existing.set_focus();
+    return Ok(());
+  }
+
+  if !cfg!(debug_assertions) {
+    return Err("Debug window is only available in debug builds.".into());
+  }
+
+  let config = app.config();
+  let window_cfg = config
+    .app
+    .windows
+    .iter()
+    .find(|window| window.label == "debug")
+    .ok_or_else(|| "debug window is not configured".to_string())?;
+  tauri::WebviewWindowBuilder::from_config(app, window_cfg)
+    .map_err(|error| error.to_string())?
+    .build()
+    .map_err(|error| error.to_string())?;
+  Ok(())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+async fn open_debug_window(app: tauri::AppHandle) -> Result<(), String> {
+  open_debug_window_inner(&app)
+}
+
 fn title_case_name_part(part: &str) -> String {
   let mut chars = part.chars();
   match chars.next() {
@@ -176,6 +208,12 @@ pub fn run() {
 
         // Host the MCP TTS server on desktop so other local agents can borrow Ava's voice.
         mcp::start(app.handle().clone());
+
+        if cfg!(debug_assertions) {
+          if let Err(error) = open_debug_window_inner(app.handle()) {
+            log::warn!("Could not open debug window: {error}");
+          }
+        }
       }
 
       Ok(())
@@ -187,6 +225,7 @@ pub fn run() {
     xai_read_grok_cli_auth,
     write_file_bytes,
     reset_app_cache,
+    open_debug_window,
     home::home_pick_folder,
     home::home_suggested_path,
     home::home_ensure,

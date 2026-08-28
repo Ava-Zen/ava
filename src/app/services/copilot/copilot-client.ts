@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { assertCloudAllowed } from '../cloud-guard';
+import { DebugLogService } from '../debug-log';
 import { CopilotAuthService } from './copilot-auth';
 
 export interface CopilotRunOptions {
@@ -30,6 +31,7 @@ function isTauri(): boolean {
 @Injectable({ providedIn: 'root' })
 export class CopilotRuntimeService {
   private readonly auth = inject(CopilotAuthService);
+  private readonly debug = inject(DebugLogService);
   readonly lastError = signal('');
 
   async runTask(options: CopilotRunOptions): Promise<string> {
@@ -43,9 +45,15 @@ export class CopilotRuntimeService {
       throw new Error(host.reason || 'GitHub Copilot is not available on this device.');
     }
 
+    this.debug.log('copilot', `Run ${options.agent || 'copilot'}`, options.prompt, {
+      data: { workspace: options.workspace, model: options.model },
+    });
     const { invoke, Channel } = await import('@tauri-apps/api/core');
     const onEvent = new Channel<CopilotProgressEvent>();
-    onEvent.onmessage = event => options.onEvent?.(event);
+    onEvent.onmessage = event => {
+      if (event.text) this.debug.log('command', event.event || 'Copilot', event.text);
+      options.onEvent?.(event);
+    };
 
     const token = await this.auth.getAccessToken();
     const result = await invoke<CopilotRunResult>('copilot_run_task', {
@@ -61,7 +69,9 @@ export class CopilotRuntimeService {
       },
       onEvent,
     });
-    return result.content.trim();
+    const content = result.content.trim();
+    this.debug.log('copilot', 'Copilot finished', content);
+    return content;
   }
 
   async abort(): Promise<void> {

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Ava",
         "width": 420,
         "height": 720,
@@ -19,6 +20,17 @@
         "fullscreen": false,
         "minWidth": 360,
         "minHeight": 600
+      },
+      {
+        "label": "debug",
+        "title": "Ava Debug",
+        "url": "index.html?window=debug",
+        "width": 820,
+        "height": 940,
+        "minWidth": 480,
+        "minHeight": 560,
+        "resizable": true,
+        "create": false
       }
     ],
     "security": {

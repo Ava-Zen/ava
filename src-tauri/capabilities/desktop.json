@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop-updater",
   "description": "Desktop auto-update and relaunch permissions",
-  "windows": ["main"],
+  "windows": ["main", "debug"],
   "platforms": ["linux", "macOS", "windows"],
   "permissions": [
     "updater:default",

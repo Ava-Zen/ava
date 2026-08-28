@@ -1,4 +1,5 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { DebugLogService } from './debug-log';
 import { McpClient, McpUnauthorizedError } from './mcp/mcp-client';
 import { authorizeServer, getValidAccessToken } from './mcp/mcp-oauth';
 import {
@@ -56,6 +57,7 @@ export const MCP_PRESETS: ReadonlyArray<Omit<McpServerConfig, 'id' | 'enabled'>>
 
 @Injectable({ providedIn: 'root' })
 export class McpService {
+  private readonly debug = inject(DebugLogService);
   private readonly _servers = signal<McpServerConfig[]>(this.load());
   private readonly _statuses = signal<Record<string, McpServerStatus>>({});
   private readonly clients = new Map<string, McpClient>();
@@ -146,6 +148,7 @@ export class McpService {
       const client = this.clientFor(server);
       const tools = await client.listTools();
       this.setStatus(id, { state: 'connected', tools });
+      this.debug.log('mcp', `Connected ${server.name}`, tools.map(t => t.name).join(', ') || 'no tools');
     } catch (err) {
       if (err instanceof McpUnauthorizedError) {
         this.setStatus(id, {
@@ -154,11 +157,13 @@ export class McpService {
           error: 'Authentication required.',
         });
       } else {
+        const error = err instanceof Error ? err.message : String(err);
         this.setStatus(id, {
           state: 'error',
           tools: [],
-          error: err instanceof Error ? err.message : String(err),
+          error,
         });
+        this.debug.log('error', `MCP ${server.name} failed`, error);
       }
     }
   }
@@ -198,8 +203,20 @@ export class McpService {
   async callTool(serverId: string, name: string, args: Record<string, unknown>): Promise<McpToolResult> {
     const server = this.find(serverId);
     if (!server) throw new Error(`Unknown MCP server: ${serverId}`);
+    this.debug.log('mcp', `Call ${server.name}.${name}`, args);
     const client = this.clientFor(server);
-    return client.callTool(name, args);
+    try {
+      const result = await client.callTool(name, args);
+      this.debug.log(
+        result.isError ? 'error' : 'mcp',
+        result.isError ? `${name} error` : `${name} returned`,
+        result.text,
+      );
+      return result;
+    } catch (error) {
+      this.debug.log('error', `${name} failed`, error);
+      throw error;
+    }
   }
 
   // --- internals ----------------------------------------------------------

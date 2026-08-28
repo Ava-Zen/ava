@@ -16,6 +16,7 @@ import {
 } from './llm/native-llama-backend';
 import { GrokChatBackend, GROK_CHAT_MODELS, GROK_DEFAULT_MODEL, GROK_SYSTEM_PROMPT } from './llm/grok-chat-backend';
 import { isCloudBlocked } from './cloud-guard';
+import { DebugLogService, extractThinkBlock } from './debug-log';
 import { XaiAuthService } from './xai/xai-auth';
 
 // Re-exported for existing consumers (AgentsService, components, specs).
@@ -120,6 +121,7 @@ export class LlmService {
   private readonly STORAGE_KEY = 'ava-llm-model';
   private readonly UNCENSORED_STORAGE_KEY = 'ava-llm-uncensored';
   private readonly xai = inject(XaiAuthService);
+  private readonly debug = inject(DebugLogService);
 
   /** True when the Tauri host provides the native llama.cpp engine. */
   private readonly nativeEngine = signal(false);
@@ -309,6 +311,7 @@ export class LlmService {
     this.generationAbort = null;
     this.thinkingTrace.set([]);
     this.backend?.cancel?.();
+    this.debug.log('llm', 'Generation cancelled');
   }
 
   async generate(
@@ -318,10 +321,18 @@ export class LlmService {
     memoryContext?: string,
   ): Promise<ChatResult> {
     const signal = this.beginGeneration();
-    this.thinkingTrace.set([
+    const thinkSteps = [
       memoryContext ? 'Gathering what I remember' : 'Preparing context',
       this.isCloudExclusive() ? 'Talking to Grok' : 'Building local prompt',
-    ]);
+    ];
+    this.thinkingTrace.set(thinkSteps);
+    this.debug.log('think', thinkSteps[0], thinkSteps.join(' → '));
+    this.debug.log(
+      'llm',
+      `Generate with ${this.selectedModel().name}`,
+      userText,
+      { data: { model: this.selectedModel().id, images: images?.length ?? 0 } },
+    );
 
     try {
       const backend = await this.ensureLoaded();
@@ -345,6 +356,7 @@ export class LlmService {
       ];
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply']);
+      this.debug.log('think', 'Generating reply', backend.kind);
       const raw = await backend.generate(messages, {
         maxNewTokens: backend.kind === 'grok' ? 320 : 192,
         doSample: true,
@@ -357,12 +369,18 @@ export class LlmService {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
       this.thinkingTrace.set(['Preparing context', 'Generating reply', 'Cleaning response']);
+      const think = extractThinkBlock(raw.text);
+      if (think) this.debug.log('think', 'Model reasoning', think);
       const reply = this.sanitizeModelOutput(raw.text);
       this.thinkingTrace.set([]);
+      this.debug.log('llm', 'Reply ready', reply, {
+        data: { images: raw.images?.length ?? 0, rawChars: raw.text.length },
+      });
       return { text: reply, images: raw.images };
     } catch (e) {
       this.thinkingTrace.set([]);
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      this.debug.log('error', 'Generation failed', e);
       if (this.loadedDevice && this.loadedDevice !== 'wasm' && this.isRecoverableAcceleratorRuntimeError(e)) {
         console.warn('[LLM] Accelerator generation failed; CPU fallback is available in Settings', e);
         this.loadInfo.set('GPU/NPU chat failed during generation. CPU fallback is available in Settings.');
@@ -381,6 +399,7 @@ export class LlmService {
     const signal = this.beginGeneration();
     const backend = await this.ensureLoaded();
     if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    this.debug.log('llm', 'Agent generation', `${messages.length} messages`);
     try {
       const result = await backend.generate(messages, {
         maxNewTokens: options?.maxNewTokens ?? 1024,
@@ -391,6 +410,8 @@ export class LlmService {
         signal,
       });
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      const think = extractThinkBlock(result.text);
+      if (think) this.debug.log('think', 'Agent reasoning', think);
       return result;
     } finally {
       if (this.generationAbort?.signal === signal) this.generationAbort = null;

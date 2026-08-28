@@ -16,6 +16,7 @@ import { ConfirmDialogService } from '../services/confirm-dialog';
 import { ThemePreference, ThemeService } from '../services/theme';
 import { GardensService } from '../services/gardens';
 import { GrokCliService } from '../services/grok-cli';
+import { DebugLogService } from '../services/debug-log';
 
 interface ModelFileInfo {
   name: string;
@@ -48,6 +49,8 @@ export class Settings {
   private readonly theme = inject(ThemeService);
   private readonly gardensService = inject(GardensService);
   private readonly grokBuild = inject(GrokCliService);
+  private readonly debugLog = inject(DebugLogService);
+  protected readonly debugAvailable = this.debugLog.available;
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected gardenError = '';
@@ -403,6 +406,10 @@ export class Settings {
     this.openGrokCli.emit();
   }
 
+  openDebugConsole() {
+    this.openDebug.emit();
+  }
+
   setIntelligenceMode(mode: 'local' | 'grok') {
     this.llmService.setIntelligenceMode(mode);
     if (mode === 'grok') {
@@ -607,6 +614,7 @@ export class Settings {
   @Output() resetCache = new EventEmitter<void>();
   @Output() openMemory = new EventEmitter<void>();
   @Output() openGrokCli = new EventEmitter<void>();
+  @Output() openDebug = new EventEmitter<void>();
   @Output() gardenChanged = new EventEmitter<void>();
   @Output() deleteGarden = new EventEmitter<string>();
 

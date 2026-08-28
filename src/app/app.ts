@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Settings } from './settings/settings';
 import { MemoryExplorer } from './memory/memory';
 import { GrokCliOverlay } from './grok-cli/grok-cli';
+import { DebugConsole } from './debug/debug-console';
 import { Onboarding } from './onboarding/onboarding';
 import { Startup } from './startup/startup';
 import { UpdateDialog } from './updates/update-dialog';
@@ -13,6 +14,7 @@ import { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 import { UpdateService } from './services/updates';
 import { ConfirmDialogService } from './services/confirm-dialog';
 import { GrokCliService } from './services/grok-cli';
+import { DebugLogService } from './services/debug-log';
 import { env, pipeline } from '@huggingface/transformers';
 import { KokoroTTS } from 'kokoro-js';
 import { GardensService, Garden } from './services/gardens';
@@ -217,7 +219,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, Settings, MemoryExplorer, GrokCliOverlay, Onboarding, Startup, UpdateDialog, ConfirmDialog],
+  imports: [RouterOutlet, Settings, MemoryExplorer, GrokCliOverlay, DebugConsole, Onboarding, Startup, UpdateDialog, ConfirmDialog],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -258,6 +260,7 @@ export class App {
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly grokCli = inject(GrokCliService);
+  private readonly debug = inject(DebugLogService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
@@ -294,6 +297,8 @@ export class App {
   protected showSettings = signal(false);
   protected showMemory = signal(false);
   protected showGrokCli = signal(false);
+  protected readonly showDebugOverlay = this.debug.overlayOpen;
+  protected readonly debugAvailable = this.debug.available;
   protected readonly grokCliDesktop = this.grokCli.desktop;
   protected readonly showStartup = signal(true);
   protected readonly showOnboarding = computed(() => !this.onboarding.completed());
@@ -459,9 +464,47 @@ export class App {
 
     this.registerMcpTtsBridge();
     this.watchAgentCompletions();
+    this.watchDebugSnapshot();
+    this.debug.log('system', 'Ava started', this.llm.selectedModel().name);
     if (this.onboarding.completed()) {
       this.updates.scheduleAutoCheck();
     }
+  }
+
+  private watchDebugSnapshot() {
+    let lastStatus = '';
+    effect(() => {
+      const status = this.status();
+      if (status !== lastStatus) {
+        lastStatus = status;
+        this.debug.log('status', status);
+      }
+      this.debug.publishSnapshot({
+        status: this.status(),
+        thinking: this.isThinking(),
+        listening: this.isListening(),
+        speaking: this.status() === 'speaking',
+        transcript: this.currentTranscript(),
+        thinkingTrace: this.llmThinkingTrace(),
+        model: this.llm.activeModel()?.name ?? this.llm.selectedModel().name,
+        intelligence: this.llm.intelligenceMode(),
+        voice: this.voiceBackendInfo(),
+        garden: this.currentGarden()?.name ?? '',
+        workspace: this.currentWorkspace(),
+        topic: this.memory.activeTopic()?.title ?? '',
+        mcp: this.mcp.tools().map(tool => tool.name),
+        agents: this.agentTasks().slice(-8).map(task => ({
+          id: task.id,
+          status: task.status,
+          engine: task.engine,
+          prompt: task.prompt,
+          progress: task.progress,
+        })),
+        copilot: this.copilotAuth.signedIn(),
+        grok: this.xai.signedIn(),
+        at: Date.now(),
+      });
+    });
   }
 
   /** Speaks a short wrap-up when a background agent (local or Copilot) finishes. */
@@ -523,6 +566,7 @@ export class App {
         const { id, text, voice } = event.payload;
         let ok = false;
         try {
+          this.debug.log('command', 'MCP speak', text, { data: { voice } });
           this.applyMcpVoice(voice);
           this.recordMcpSpeech(text);
           await this.speak(text);
@@ -692,6 +736,15 @@ export class App {
     this.showGrokCli.set(false);
   }
 
+  protected openDebugConsole() {
+    this.showSettings.set(false);
+    void this.debug.open();
+  }
+
+  protected closeDebugOverlay() {
+    this.debug.closeOverlay();
+  }
+
   private cleanLoadLabel(label: string): string {
     return label
       .replace(/^loading\s+/i, 'Loading ')
@@ -702,6 +755,13 @@ export class App {
   /** Global spacebar toggles listening, unless the user is typing or a dialog is open. */
   @HostListener('document:keydown', ['$event'])
   protected onGlobalKeydown(event: KeyboardEvent) {
+    if (this.debugAvailable() && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'd') {
+      event.preventDefault();
+      if (this.showDebugOverlay()) this.debug.closeOverlay();
+      else void this.debug.open();
+      return;
+    }
+
     if (this.viewerImage()) {
       if (event.key === 'Escape') {
         this.closePhotoViewer();
@@ -749,8 +809,13 @@ export class App {
       return;
     }
 
+    if (event.key === 'Escape' && this.showDebugOverlay()) {
+      this.debug.closeOverlay();
+      return;
+    }
+
     if (event.code !== 'Space' || event.repeat) return;
-    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showGrokCli() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
+    if (this.showStartup() || this.showSettings() || this.showMemory() || this.showGrokCli() || this.showDebugOverlay() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -797,6 +862,7 @@ export class App {
 
   protected onStartupFinished() {
     this.showStartup.set(false);
+    if (this.debug.shouldAutoOpenOverlay() && this.onboarding.completed()) void this.debug.open();
   }
 
   protected playAvaFace(event: Event): void {
@@ -814,6 +880,7 @@ export class App {
     this.showSettings.set(false);
     void this.hydrateMemory();
     this.updates.scheduleAutoCheck(1200);
+    if (this.debug.shouldAutoOpenOverlay()) void this.debug.open();
   }
 
   protected async onResetCache() {
@@ -1722,9 +1789,11 @@ export class App {
   /** Starts/stops the native background voice session (no-op outside Tauri). */
   private setBackgroundVoiceSession(active: boolean) {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    this.debug.log('command', active ? 'voice_session_start' : 'voice_session_stop');
     invoke(active ? 'voice_session_start' : 'voice_session_stop').catch(err => {
       // Older hosts without the command, or the OS denied the service.
       console.warn('[voice] background session toggle failed', err);
+      this.debug.log('error', 'Voice session command failed', err);
     });
   }
 
@@ -2283,7 +2352,9 @@ export class App {
   private async handleUserSpeech(text: string, existingUserMessage?: Message) {
     this.currentTranscript.set('');
 
+    this.debug.log('speech', 'Heard you', text);
     if (this.isListeningStopCommand(text)) {
+      this.debug.log('route', 'Stop listening');
       this.disableVoiceChannel();
       return;
     }
@@ -2294,6 +2365,7 @@ export class App {
     const seq = this.beginRequest();
 
     if (this.isNewConversationCommand(text)) {
+      this.debug.log('route', 'New conversation');
       this.resetCurrentConversation();
       this.status.set('thinking');
       this.isThinking.set(true);
@@ -2302,6 +2374,7 @@ export class App {
     }
 
     if (this.showGrokCli() && this.grokCli.canTakeSpeech()) {
+      this.debug.log('route', 'Grok CLI session', text);
       this.status.set('thinking');
       this.isThinking.set(true);
       await this.grokCli.send(text);
@@ -2314,6 +2387,11 @@ export class App {
     this.isThinking.set(true);
 
     const routed = this.memory.route(text);
+    this.debug.log(
+      'memory',
+      routed.created ? 'New topic' : routed.switched ? 'Switched topic' : 'Held topic',
+      routed.topic?.title ?? 'Here',
+    );
     const attached = this.takePendingImages();
     if (existingUserMessage) {
       this.updateMessageText(gardenId, existingUserMessage, text);
@@ -2326,11 +2404,13 @@ export class App {
     const referringToExisting = /\b(this|that)\b/i.test(text);
 
     if (attached.length) {
+      this.debug.log('route', 'Imagine edit', { photos: attached.length });
       await this.handleImagineEdit(chatId, text, attached, seq);
       return;
     }
 
     if (wantsPhotoHelp(text) && (!this.lastChatImage() || !referringToExisting)) {
+      this.debug.log('route', 'Photo gate');
       this.pendingPhotoEdit = { prompt: text, chatId };
       this.addGateMessage(
         chatId,
@@ -2345,11 +2425,13 @@ export class App {
     }
 
     if (wantsImageEdit(text) && this.lastChatImage()) {
+      this.debug.log('route', 'Imagine edit last photo');
       await this.handleImagineEdit(chatId, text, attached, seq);
       return;
     }
 
     if (wantsImage(text)) {
+      this.debug.log('route', 'Imagine generate');
       await this.handleImagineGenerate(chatId, text, seq);
       return;
     }
@@ -2361,12 +2443,14 @@ export class App {
       isGithubWorkRequest(text) ||
       isFileWorkRequest(text)
     ) {
+      this.debug.log('route', 'Agent / Copilot');
       await this.handleAgentRequest(gardenId, text, seq);
       return;
     }
 
     // 2) Weather questions → answer right now with the built-in weather tools.
     if (this.detectWeatherRequest(text)) {
+      this.debug.log('route', 'Weather tools');
       await this.handleWeatherRequest(gardenId, text, seq);
       return;
     }
@@ -2375,6 +2459,7 @@ export class App {
       ? !text.includes('?') && text.trim().length < 360
       : remembered.kind !== 'none' && remembered.explicit && text.trim().length < 220;
     if (keepQuiet) {
+      this.debug.log('route', 'Quiet remember', remembered.kind);
       await this.delay(250);
       if (!this.isCurrentRequest(seq)) return;
       const spoken = remembered.kind === 'people'
@@ -2387,13 +2472,14 @@ export class App {
     // 3) Fast hard-coded reply for common phrases.
     const fixed = this.generateAvaResponse(text);
     if (fixed) {
+      this.debug.log('route', 'Fixed reply', fixed);
       await this.delay(350 + Math.random() * 350);
       if (!this.isCurrentRequest(seq)) return;
       this.respond(gardenId, fixed, undefined, undefined, undefined, seq);
       return;
     }
 
-    // 4) Anything else → Gemma. Acknowledge immediately, then think.
+    this.debug.log('route', 'Conversation model');
     await this.handleLlmReply(gardenId, text, seq, routed.topic?.id);
   }
 
@@ -2743,6 +2829,7 @@ export class App {
 
   private async speak(text: string): Promise<void> {
     const id = ++this.speechGen;
+    this.debug.log('tts', `Speak (${this.tts.selectedVoiceId()})`, text);
 
     // Interrupt anything already speaking.
     this.isPaused.set(false);
@@ -3195,6 +3282,7 @@ export class App {
       const path = joinPath(folder, filename);
       try {
         const bytes = await dataUrlToBytes(image.dataUrl);
+        this.debug.log('command', 'write_file_bytes', path);
         await invoke('write_file_bytes', { path, contents: Array.from(bytes) });
         saved.push(path);
       } catch (e) {
@@ -3456,6 +3544,7 @@ export class App {
 
   /** Aborts the in-flight reply, image job, or spoken response. */
   protected stopCurrentRequest() {
+    this.debug.log('command', 'Abort current request');
     this.requestSeq += 1;
     this.llm.cancel();
     this.agents.abortActive();

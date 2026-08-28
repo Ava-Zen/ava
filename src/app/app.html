@@ -690,6 +690,7 @@
           (close)="closeSettings()"
           (openMemory)="closeSettings(); openMemory()"
           (openGrokCli)="closeSettings(); openGrokCli()"
+          (openDebug)="openDebugConsole()"
           (previewVoice)="previewVoice($event)"
           (resetCache)="onResetCache()"
           (gardenChanged)="onGardenChanged()"
@@ -705,6 +706,10 @@
 
   @if (showGrokCli()) {
     <app-grok-cli (close)="closeGrokCli()"></app-grok-cli>
+  }
+
+  @if (showDebugOverlay()) {
+    <app-debug-console [embedded]="true" (close)="closeDebugOverlay()"></app-debug-console>
   }
 
   @if (showStartup()) {

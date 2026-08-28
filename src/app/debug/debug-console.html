@@ -1,0 +1,127 @@
+<div class="debug-root" [class.overlay]="embedded" (click)="embedded && dismiss()">
+  <section class="debug-shell" [class.fill]="!embedded" (click)="$event.stopPropagation()" role="dialog" aria-labelledby="debug-title">
+    <header class="debug-header">
+      <div>
+        <p class="overline">Ava</p>
+        <h2 id="debug-title">Debug</h2>
+      </div>
+      <div class="header-tools">
+        <span class="status-pill" [attr.data-state]="statusLabel().toLowerCase()">{{ statusLabel() }}</span>
+        <button type="button" class="ghost-btn" (click)="togglePause()">
+          {{ paused() ? 'Resume' : 'Pause' }}
+        </button>
+        <button type="button" class="ghost-btn" (click)="clear()">Clear</button>
+        @if (embedded) {
+          <button type="button" class="ghost-btn" (click)="popOut()">Pop out</button>
+          <button type="button" class="close-btn" (click)="dismiss()" aria-label="Close debug console">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        }
+      </div>
+    </header>
+
+    @if (snapshot(); as snap) {
+      <section class="now" aria-label="What Ava is doing">
+        <div class="now-grid">
+          <div>
+            <span>Status</span>
+            <strong>{{ statusLabel() }}</strong>
+          </div>
+          <div>
+            <span>Model</span>
+            <strong>{{ snap.model || '—' }}</strong>
+          </div>
+          <div>
+            <span>Intelligence</span>
+            <strong>{{ snap.intelligence }}</strong>
+          </div>
+          <div>
+            <span>Voice</span>
+            <strong>{{ snap.voice || '—' }}</strong>
+          </div>
+          <div>
+            <span>Garden</span>
+            <strong>{{ snap.garden || '—' }}</strong>
+          </div>
+          <div>
+            <span>Topic</span>
+            <strong>{{ snap.topic || 'Here' }}</strong>
+          </div>
+        </div>
+        @if (snap.thinkingTrace.length) {
+          <p class="now-line"><em>Thinking</em> {{ snap.thinkingTrace.join(' → ') }}</p>
+        } @else if (liveThink()) {
+          <p class="now-line"><em>Thinking</em> {{ liveThink() }}</p>
+        }
+        @if (liveCommand()) {
+          <p class="now-line"><em>Command</em> {{ liveCommand() }}</p>
+        }
+        @if (snap.transcript) {
+          <p class="now-line"><em>Heard</em> {{ snap.transcript }}</p>
+        }
+        @if (snap.mcp.length) {
+          <p class="now-line"><em>MCP</em> {{ snap.mcp.join(', ') }}</p>
+        }
+        @for (task of snap.agents; track task.id) {
+          <p class="now-line">
+            <em>{{ task.engine }}</em>
+            {{ task.status }} · {{ task.progress || task.prompt }}
+          </p>
+        }
+      </section>
+    } @else {
+      <p class="hint">Waiting for the companion window. Talk to Ava and this fills in.</p>
+    }
+
+    <div class="toolbar">
+      <div class="filters" role="tablist" aria-label="Event kinds">
+        @for (item of filters; track item.id) {
+          <button
+            type="button"
+            [class.active]="filter() === item.id"
+            (click)="setFilter(item.id)"
+          >
+            {{ item.label }}
+          </button>
+        }
+      </div>
+      <label class="search">
+        <span class="sr-only">Filter events</span>
+        <input
+          type="search"
+          [value]="query()"
+          (input)="onQuery($event)"
+          placeholder="Filter events"
+        />
+      </label>
+    </div>
+
+    <div class="log" #log aria-live="polite">
+      @if (!visible().length) {
+        <p class="hint">No events yet. Ask Ava something.</p>
+      }
+      @for (event of visible(); track event.id) {
+        <article
+          class="event"
+          [class.error]="event.level === 'error'"
+          [class.warn]="event.level === 'warn'"
+          [class.open]="isOpen(event.id)"
+        >
+          <button type="button" class="event-head" (click)="toggleEvent(event.id)">
+            <time>{{ formatTime(event.at) }}</time>
+            <span class="kind" [attr.data-kind]="event.kind">{{ kindLabel(event.kind) }}</span>
+            <strong>{{ event.title }}</strong>
+          </button>
+          @if (event.detail && isOpen(event.id)) {
+            <pre>{{ event.detail }}</pre>
+          } @else if (event.detail) {
+            <p class="preview">{{ event.detail }}</p>
+          }
+        </article>
+      }
+    </div>
+  </section>
+</div>

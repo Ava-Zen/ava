@@ -730,6 +730,23 @@
     </div>
   </section>
 
+  @if (debugAvailable()) {
+    <section class="section">
+      <div class="section-heading">
+        <div>
+          <p class="overline">Develop</p>
+          <h3>Debug console</h3>
+        </div>
+      </div>
+      <p class="hint">
+        Watch routing, thinking, and commands while Ava is running in debug mode. Ctrl+Shift+D.
+      </p>
+      <div class="auth-row">
+        <button class="save-btn" type="button" (click)="openDebugConsole()">Open debug console</button>
+      </div>
+    </section>
+  }
+
   <section class="section about-section">
     <div class="section-heading">
       <div>

@@ -5,6 +5,7 @@ import { ChatTurn, LlmModelOption, LlmService } from './llm';
 import { CopilotAuthService, inferCopilotAgent } from './copilot/copilot-auth';
 import { CopilotRuntimeService } from './copilot/copilot-client';
 import { ChatsService } from './chats';
+import { DebugLogService, extractThinkBlock } from './debug-log';
 
 export type AgentTaskStatus = 'queued' | 'running' | 'done' | 'error';
 export type AgentRuntime = 'local' | 'copilot';
@@ -110,6 +111,7 @@ export class AgentsService {
   private readonly copilotAuth = inject(CopilotAuthService);
   private readonly copilot = inject(CopilotRuntimeService);
   private readonly chats = inject(ChatsService);
+  private readonly debug = inject(DebugLogService);
 
   readonly models: LlmModelOption[] = [
     QWEN_MODELS.low,
@@ -243,6 +245,7 @@ export class AgentsService {
       updatedAt: new Date(),
     };
     this.tasks.update(list => [...list, task]);
+    this.debug.log('agent', `Queued ${engine} task`, prompt, { data: { id: task.id, engine } });
     if (engine === 'local' && options.tools?.length && options.exec) {
       this.toolContext.set(task.id, { tools: options.tools, exec: options.exec });
     }
@@ -263,6 +266,7 @@ export class AgentsService {
 
   private async execute(taskId: string): Promise<void> {
     this.patchTask(taskId, { status: 'running' });
+    this.debug.log('agent', 'Task running', taskId);
     try {
       const task = this.tasks().find(t => t.id === taskId);
       if (!task) return;
@@ -275,8 +279,10 @@ export class AgentsService {
         )
         : await this.generateLocal(task);
       this.patchTask(taskId, { status: 'done', result, progress: undefined });
+      this.debug.log('agent', 'Task done', result, { data: { id: taskId } });
     } catch (err: any) {
       console.error('[agent] task failed', err);
+      this.debug.log('error', 'Agent task failed', err, { data: { id: taskId } });
       this.patchTask(taskId, {
         status: 'error',
         error: this.friendlyError(err) ?? err?.message ?? 'Agent task failed.',
@@ -312,7 +318,10 @@ export class AgentsService {
       allowWrites: allowLocal,
       allowLocalTools: allowLocal,
       onEvent: event => {
-        if (event.text) this.patchTask(taskId, { progress: event.text });
+        if (event.text) {
+          this.patchTask(taskId, { progress: event.text });
+          this.debug.log('copilot', event.event || 'Copilot', event.text, { data: { id: taskId } });
+        }
       },
     });
   }
@@ -566,6 +575,9 @@ export class AgentsService {
       { role: 'user', content: prompt },
     ];
 
+    this.debug.log('agent', 'Tool loop started', prompt, {
+      data: { tools: tools.map(t => t.name), maxRounds },
+    });
     let lastText = '';
     for (let round = 0; round < maxRounds; round++) {
       const text = this.llm.isCloudExclusive()
@@ -577,13 +589,19 @@ export class AgentsService {
             top_p: 0.95,
           }));
       lastText = text;
+      const think = extractThinkBlock(text);
+      if (think) this.debug.log('think', `Agent round ${round + 1}`, think);
 
       const call = this.parseToolCall(text);
-      if (!call) return text;
+      if (!call) {
+        this.debug.log('agent', 'Final answer', text);
+        return text;
+      }
 
       const known = tools.find(t => t.name === call.tool);
       messages.push({ role: 'assistant', content: text });
       if (!known) {
+        this.debug.log('tool', `Unknown tool ${call.tool}`, call.arguments, { level: 'warn' });
         messages.push({
           role: 'user',
           content: `Tool "${call.tool}" is not available. Available tools: ${tools.map(t => t.name).join(', ')}. Try another tool or give your final answer.`,
@@ -591,12 +609,15 @@ export class AgentsService {
         continue;
       }
 
+      this.debug.log('tool', `Calling ${call.tool}`, call.arguments);
       let resultText: string;
       try {
         resultText = await exec(call.tool, call.arguments);
       } catch (err: any) {
         resultText = `Error: ${err?.message ?? String(err)}`;
+        this.debug.log('error', `${call.tool} failed`, err);
       }
+      this.debug.log('tool', `Result of ${call.tool}`, resultText);
       messages.push({
         role: 'user',
         content: `Result of ${call.tool}:\n${resultText}\n\nUse this to continue, or give your final answer.`,
@@ -605,6 +626,7 @@ export class AgentsService {
 
     // Ran out of rounds — return the last text, stripped of any trailing tool JSON.
     const trailing = this.parseToolCall(lastText);
+    this.debug.log('agent', 'Tool loop stopped', trailing ? 'ran out of rounds' : lastText);
     return trailing ? 'I gathered some information but could not finish the task in time.' : lastText;
   }
 
