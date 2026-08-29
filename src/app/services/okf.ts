@@ -67,6 +67,21 @@ export function generatedNow(by = OKF_ACTOR): OkfGenerated {
   return { by, at: nowIso() };
 }
 
+/** Last content change: `generated.at`, with v0.1 `timestamp` as fallback. */
+export function okfGeneratedAt(doc: OkfDoc): string {
+  const generated = doc.frontmatter['generated'];
+  if (generated && typeof generated === 'object') {
+    const at = (generated as { at?: unknown }).at;
+    if (typeof at === 'string' && at.trim()) return at.trim();
+  }
+  const timestamp = doc.frontmatter['timestamp'];
+  return typeof timestamp === 'string' ? timestamp.trim() : '';
+}
+
+export function okfHasType(doc: OkfDoc | null | undefined): doc is OkfDoc {
+  return !!doc && typeof doc.frontmatter['type'] === 'string' && !!String(doc.frontmatter['type']).trim();
+}
+
 export function slugify(value: string): string {
   const slug = value
     .normalize('NFKD')

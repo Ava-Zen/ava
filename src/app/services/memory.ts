@@ -20,6 +20,8 @@ import {
   generatedNow,
   joinRel,
   okfDescription,
+  okfGeneratedAt,
+  okfHasType,
   okfStringList,
   okfTags,
   okfTitle,
@@ -414,15 +416,17 @@ export class MemoryService {
         tags: [],
       };
     }
-    const doc = await this.readDoc(path.endsWith('.md') ? path : joinRel(path, 'index.md'));
+    const doc = path.endsWith('.md')
+      ? await this.readDoc(path)
+      : await this.readDirectoryConcept(path);
     if (doc) {
       return {
         id: path,
         rel: path,
         title: okfTitle(doc, titleFromRel(path)),
         description: okfDescription(doc),
-        type: okfType(doc),
-        kind: path.endsWith('.md') && !path.endsWith('index.md') ? 'doc' : 'dir',
+        type: okfHasType(doc) ? okfType(doc) : 'Directory',
+        kind: path.endsWith('.md') && !path.endsWith('index.md') && !path.endsWith('topic.md') ? 'doc' : 'dir',
         tags: okfTags(doc),
         body: doc.body,
       };
@@ -443,17 +447,17 @@ export class MemoryService {
     const entries = await this.home.list(rel);
     const nodes: MemoryNode[] = [];
     for (const entry of entries) {
-      if (entry.name === 'index.md') continue;
+      if (entry.name === 'index.md' || entry.name === 'topic.md') continue;
       if (entry.dir) {
-        const index = await this.readDoc(joinRel(entry.rel, 'index.md'));
+        const concept = await this.readDirectoryConcept(entry.rel);
         nodes.push({
           id: entry.rel,
           rel: entry.rel,
-          title: index ? okfTitle(index, titleFromRel(entry.rel)) : titleFromRel(entry.rel),
-          description: index ? okfDescription(index) : '',
-          type: 'Directory',
+          title: concept ? okfTitle(concept, titleFromRel(entry.rel)) : titleFromRel(entry.rel),
+          description: concept ? okfDescription(concept) : '',
+          type: concept && okfHasType(concept) ? okfType(concept) : 'Directory',
           kind: 'dir',
-          tags: index ? okfTags(index) : [],
+          tags: concept ? okfTags(concept) : [],
         });
         continue;
       }
@@ -625,7 +629,7 @@ export class MemoryService {
     const topics: MemoryTopic[] = [];
     for (const entry of entries) {
       if (!entry.dir) continue;
-      const index = await this.readDoc(joinRel('topics', entry.name, 'index.md'));
+      const index = await this.readDirectoryConcept(joinRel('topics', entry.name));
       const notes = await this.readDoc(joinRel('topics', entry.name, 'notes.md'));
       const title = index ? okfTitle(index, titleFromRel(entry.name)) : titleFromRel(entry.name);
       topics.push({
@@ -635,23 +639,29 @@ export class MemoryService {
         tags: index ? okfTags(index) : [entry.name],
         aliases: index ? okfStringList(index.frontmatter['aliases']) : [],
         notes: notes?.body.trim() ?? '',
-        updatedAt: new Date().toISOString(),
+        updatedAt: (index && okfGeneratedAt(index)) || new Date().toISOString(),
       });
     }
     this.topics.set(topics);
+    for (const topic of topics) {
+      if (!(await this.home.exists(joinRel('topics', topic.id, 'topic.md')))) {
+        await this.writeTopic(topic);
+      }
+    }
   }
 
   private async writeTopic(topic: MemoryTopic): Promise<void> {
     const dir = joinRel('topics', topic.id);
-    await this.home.writeText(joinRel(dir, 'index.md'), stringifyOkf({
+    const description = topic.description || `What Ava remembers about ${topic.title}.`;
+    await this.home.writeText(joinRel(dir, 'topic.md'), stringifyOkf({
       type: 'Topic',
       title: topic.title,
-      description: topic.description || `What Ava remembers about ${topic.title}.`,
+      description,
       tags: topic.tags,
       aliases: topic.aliases,
       status: 'stable',
       generated: generatedNow(),
-    }, `${topic.description || `Notes on ${topic.title}.`}\n\nSee [notes](./notes.md).\n`));
+    }, `${description}\n\nSee [notes](./notes.md).\n`));
     await this.home.writeText(joinRel(dir, 'notes.md'), stringifyOkf({
       type: 'Note',
       title: `${topic.title} notes`,
@@ -659,6 +669,9 @@ export class MemoryService {
       tags: topic.tags,
       generated: generatedNow(),
     }, `${topic.notes.trim()}\n`));
+    await this.home.writeText(joinRel(dir, 'index.md'), directoryIndex(topic.title, [
+      { href: 'notes.md', title: `${topic.title} notes`, description: `Living notes for ${topic.title}` },
+    ]));
   }
 
   private async writeTopicsIndex(): Promise<void> {
@@ -854,6 +867,14 @@ export class MemoryService {
   private async readDoc(rel: string) {
     const raw = await this.home.readText(rel);
     return raw ? parseOkf(raw) : null;
+  }
+
+  private async readDirectoryConcept(rel: string) {
+    const topic = await this.readDoc(joinRel(rel, 'topic.md'));
+    if (okfHasType(topic)) return topic;
+    const index = await this.readDoc(joinRel(rel, 'index.md'));
+    if (okfHasType(index)) return index;
+    return topic ?? null;
   }
 
   private async appendLog(entry: string): Promise<void> {

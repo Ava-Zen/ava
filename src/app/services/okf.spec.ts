@@ -1,4 +1,4 @@
-import { parseOkf, slugify, stringifyOkf } from './okf';
+import { okfGeneratedAt, okfHasType, parseOkf, slugify, stringifyOkf } from './okf';
 
 describe('OKF', () => {
   it('round-trips frontmatter and body', () => {
@@ -19,5 +19,17 @@ describe('OKF', () => {
   it('slugifies titles for folder names', () => {
     expect(slugify('My Project Plan!')).toBe('my-project-plan');
     expect(slugify('   ')).toBe('topic');
+  });
+
+  it('reads generated.at and falls back to a v0.1 timestamp', () => {
+    const current = parseOkf(stringifyOkf({
+      type: 'Topic',
+      generated: { by: 'ava/0.1', at: '2026-08-19T12:00:00Z' },
+    }, 'body\n'));
+    expect(okfHasType(current)).toBeTrue();
+    expect(okfGeneratedAt(current)).toBe('2026-08-19T12:00:00Z');
+    expect(okfGeneratedAt(parseOkf('---\ntype: Note\ntimestamp: 2026-01-02T00:00:00Z\n---\n\nHi\n'))).toBe(
+      '2026-01-02T00:00:00Z',
+    );
   });
 });
