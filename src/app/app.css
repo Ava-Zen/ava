@@ -298,6 +298,8 @@
   position: relative;
   cursor: pointer;
   outline: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   transition: width 0.55s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .orb-container:focus-visible {
@@ -1291,6 +1293,8 @@
   background: #fff6ee;
   color: #3a241c;
   box-shadow: 0 8px 18px rgba(92, 36, 24, 0.12);
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .send-circle:hover:not(:disabled) {
   transform: translateY(-1px);
@@ -1348,6 +1352,19 @@
 .footer-settings .action-menu {
   left: auto;
   right: 0;
+}
+.listen-menu {
+  position: fixed;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: min(228px, calc(100vw - 24px));
+  padding: 10px;
+  z-index: 40;
+}
+.listen-menu .menu-action.active {
+  border-color: rgba(196, 92, 78, 0.4);
+  background: linear-gradient(135deg, rgba(196, 92, 78, 0.14), rgba(232, 180, 138, 0.16));
 }
 .menu-header {
   display: none;
@@ -1747,6 +1764,13 @@
     z-index: 900;
     align-content: start;
     gap: 8px;
+  }
+  .action-menu.listen-menu {
+    inset: auto;
+    width: min(228px, calc(100vw - 24px));
+    max-height: none;
+    overflow: visible;
+    z-index: 40;
   }
   .menu-header {
     display: flex;

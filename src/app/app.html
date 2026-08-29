@@ -49,14 +49,17 @@
         </div>
 
         <button
-          class="orb-container"
+          class="orb-container mic-control"
           (click)="onOrbClick($event)"
-          (pointerdown)="onPushTalkPointerDown($event)"
-          (pointerup)="onPushTalkPointerUp($event)"
-          (pointercancel)="onPushTalkPointerUp($event)"
+          (contextmenu)="onMicContextMenu($event)"
+          (pointerdown)="onMicPointerDown($event)"
+          (pointerup)="onMicPointerUp($event)"
+          (pointercancel)="onMicPointerUp($event)"
           (keydown.enter)="toggleVoice()"
           [title]="micTitle()"
           [attr.aria-label]="micAriaLabel()"
+          aria-haspopup="menu"
+          [attr.aria-expanded]="listenMenuOpen()"
         >
           <span class="orb-ring"></span>
           <span
@@ -96,7 +99,7 @@
             <small>{{ voiceEnabled() && !pushToTalk() ? 'Voice resumes after this' : 'Ava voice active' }}</small>
           } @else if (pushToTalk()) {
             <span>Hold to talk</span>
-            <small>Hold Space or the mic, then release to send</small>
+            <small>Hold Space, Right Ctrl, or the mic, then release to send</small>
           } @else if (voiceEnabled()) {
             <span>Voice channel on</span>
             <small>Ready to listen</small>
@@ -604,11 +607,17 @@
               </button>
             } @else if (!pushTalkHeld() && (isListening() || (voiceEnabled() && !pushToTalk()))) {
               <button
-                class="send-circle stop-circle"
+                class="send-circle stop-circle mic-control"
                 type="button"
-                (click)="stopListening()"
+                (click)="onStopListeningClick($event)"
+                (contextmenu)="onMicContextMenu($event)"
+                (pointerdown)="onMicPointerDown($event)"
+                (pointerup)="onMicPointerUp($event)"
+                (pointercancel)="onMicPointerUp($event)"
                 aria-label="Stop listening"
-                title="Stop listening"
+                title="Stop listening · right-click to switch mode"
+                aria-haspopup="menu"
+                [attr.aria-expanded]="listenMenuOpen()"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <rect x="7" y="7" width="10" height="10" rx="2.5"></rect>
@@ -630,14 +639,17 @@
               </button>
             } @else {
               <button
-                class="send-circle speak-circle"
+                class="send-circle speak-circle mic-control"
                 type="button"
                 [attr.aria-label]="micAriaLabel()"
                 [title]="micTitle()"
                 (click)="onPrimaryActionClick()"
-                (pointerdown)="onPushTalkPointerDown($event)"
-                (pointerup)="onPushTalkPointerUp($event)"
-                (pointercancel)="onPushTalkPointerUp($event)"
+                (contextmenu)="onMicContextMenu($event)"
+                (pointerdown)="onMicPointerDown($event)"
+                (pointerup)="onMicPointerUp($event)"
+                (pointercancel)="onMicPointerUp($event)"
+                aria-haspopup="menu"
+                [attr.aria-expanded]="listenMenuOpen()"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <rect x="9" y="2" width="6" height="12" rx="3"></rect>
@@ -754,6 +766,39 @@
 
   @if (!showStartup() && showOnboarding()) {
     <app-onboarding (completed)="onOnboardingCompleted()"></app-onboarding>
+  }
+
+  @if (listenMenuOpen()) {
+    <div
+      #listenMenu
+      class="action-menu listen-menu"
+      role="menu"
+      aria-label="Listen mode"
+      [style.left.px]="listenMenuX()"
+      [style.top.px]="listenMenuY()"
+    >
+      <p class="menu-label">Listen</p>
+      <button
+        class="menu-action"
+        [class.active]="pushToTalk()"
+        type="button"
+        role="menuitemradio"
+        [attr.aria-checked]="pushToTalk()"
+        (click)="setListenModeFromMenu('push')"
+      >
+        Hold to talk
+      </button>
+      <button
+        class="menu-action"
+        [class.active]="!pushToTalk()"
+        type="button"
+        role="menuitemradio"
+        [attr.aria-checked]="!pushToTalk()"
+        (click)="setListenModeFromMenu('open')"
+      >
+        Open channel
+      </button>
+    </div>
   }
 
   <app-update-dialog />

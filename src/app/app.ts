@@ -294,6 +294,7 @@ export class App {
   @ViewChild('manualInput') private manualInputEl?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('primaryActionShell') private primaryActionShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('settingsActionShell') private settingsActionShellEl?: ElementRef<HTMLDivElement>;
+  @ViewChild('listenMenu') private listenMenuEl?: ElementRef<HTMLDivElement>;
   @ViewChild('workspaceShell') private workspaceShellEl?: ElementRef<HTMLDivElement>;
   @ViewChild('gardenShell') private gardenShellEl?: ElementRef<HTMLDivElement>;
   private photoStageEl?: ElementRef<HTMLElement>;
@@ -397,6 +398,10 @@ export class App {
   );
   /** Right-click quick-select menu for the conversation model. */
   protected readonly modelMenuOpen = signal(false);
+  /** Right-click / long-press menu on the orb and composer mic. */
+  protected readonly listenMenuOpen = signal(false);
+  protected readonly listenMenuX = signal(0);
+  protected readonly listenMenuY = signal(0);
   protected readonly conversationModels = this.llm.models;
   protected readonly selectedConversationModelId = computed(() => this.llm.selectedModel().id);
   protected readonly cloudExclusive = this.llm.isCloudExclusive;
@@ -426,9 +431,18 @@ export class App {
     this.showGrokCli() ? this.grokListenMode() === 'push' : this.tts.listenMode() === 'push',
   );
   protected readonly pushTalkHeld = signal(false);
+  private pushTalkKeyCode: string | null = null;
+  private listenMenuTimer: ReturnType<typeof setTimeout> | null = null;
+  private listenMenuSuppressClick = false;
   protected readonly micTitle = computed(() => {
-    if (this.pushToTalk()) return this.isListening() ? 'Release to send' : 'Hold to talk';
-    return this.voiceEnabled() ? 'Stop listening' : 'Start speaking';
+    if (this.pushToTalk()) {
+      return this.isListening()
+        ? 'Release to send'
+        : 'Hold Space, Right Ctrl, or the mic · right-click to switch mode';
+    }
+    return this.voiceEnabled()
+      ? 'Stop listening · right-click to switch mode'
+      : 'Start speaking · right-click to switch mode';
   });
   protected readonly micAriaLabel = computed(() => {
     if (this.pushToTalk()) return this.isListening() ? 'Release to send' : 'Hold to talk';
@@ -1046,13 +1060,14 @@ export class App {
       return;
     }
 
-    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen() || this.gardenMenuOpen())) {
+    if (event.key === 'Escape' && (this.composerMenuOpen() || this.modelMenuOpen() || this.workspaceMenuOpen() || this.gardenMenuOpen() || this.listenMenuOpen())) {
       this.composerMenuOpen.set(false);
       this.modelMenuOpen.set(false);
       this.workspaceMenuOpen.set(false);
       this.workspaceDraftOpen.set(false);
       this.gardenMenuOpen.set(false);
       this.gardenMenuError.set('');
+      this.listenMenuOpen.set(false);
       return;
     }
 
@@ -1073,18 +1088,23 @@ export class App {
       return;
     }
 
-    if (event.code !== 'Space' || event.repeat) return;
+    if (event.repeat) return;
     if (this.showStartup() || this.showSettings() || this.showMemory() || this.showDebugOverlay() || this.showOnboarding() || this.viewerImage() || this.updates.dialogOpen() || this.confirm.open()) return;
 
-    const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    if (event.code === 'ControlRight') {
+      if (!this.pushToTalk()) return;
+      event.preventDefault();
+      void this.beginPushTalk('ControlRight');
       return;
     }
+
+    if (event.code !== 'Space') return;
+    if (this.isTypingTarget(event.target)) return;
 
     event.preventDefault();
     (document.activeElement as HTMLElement | null)?.blur?.();
     if (this.pushToTalk()) {
-      void this.beginPushTalk();
+      void this.beginPushTalk('Space');
       return;
     }
     this.toggleVoice();
@@ -1092,7 +1112,8 @@ export class App {
 
   @HostListener('document:keyup', ['$event'])
   protected onGlobalKeyup(event: KeyboardEvent) {
-    if (event.code !== 'Space' || !this.pushToTalk() || !this.pushTalkHeld()) return;
+    if ((event.code !== 'Space' && event.code !== 'ControlRight') || !this.pushToTalk() || !this.pushTalkHeld()) return;
+    if (this.pushTalkKeyCode && this.pushTalkKeyCode !== event.code) return;
     event.preventDefault();
     this.endPushTalk();
   }
@@ -1100,6 +1121,7 @@ export class App {
   @HostListener('document:pointerup', ['$event'])
   @HostListener('document:pointercancel', ['$event'])
   protected onDocumentPointerEnd(event: PointerEvent) {
+    this.clearListenMenuLongPress();
     if (!this.pushToTalk() || !this.pushTalkHeld()) return;
     if (event.type === 'pointerup' && event.button !== 0) return;
     this.endPushTalk();
@@ -1116,6 +1138,7 @@ export class App {
     this.closeModelMenuIfOutside(event.target);
     this.closeWorkspaceMenuIfOutside(event.target);
     this.closeGardenMenuIfOutside(event.target);
+    this.closeListenMenuIfOutside(event.target);
   }
 
   @HostListener('document:touchstart', ['$event'])
@@ -1124,6 +1147,7 @@ export class App {
     this.closeModelMenuIfOutside(event.target);
     this.closeWorkspaceMenuIfOutside(event.target);
     this.closeGardenMenuIfOutside(event.target);
+    this.closeListenMenuIfOutside(event.target);
   }
 
   /** Right-clicking the Settings button opens the model quick-select menu. */
@@ -1234,6 +1258,7 @@ export class App {
   }
 
   protected onPrimaryActionClick() {
+    if (this.consumeListenMenuClick()) return;
     this.composerMenuOpen.set(false);
 
     if (this.manualInputEnabled()) {
@@ -1246,11 +1271,46 @@ export class App {
   }
 
   protected onOrbClick(event: Event) {
+    if (this.consumeListenMenuClick()) {
+      event.preventDefault();
+      return;
+    }
     if (this.pushToTalk()) {
       event.preventDefault();
       return;
     }
     void this.toggleVoice();
+  }
+
+  protected onStopListeningClick(event: Event) {
+    if (this.consumeListenMenuClick()) {
+      event.preventDefault();
+      return;
+    }
+    this.stopListening();
+  }
+
+  protected onMicContextMenu(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    // Touch long-press also fires contextmenu; don't steal an in-progress hold-to-talk.
+    if (this.pushToTalk() && this.pushTalkHeld() && event.button !== 2) return;
+    if (this.pushTalkHeld()) this.endPushTalk();
+    if (this.listenMenuOpen()) {
+      this.listenMenuOpen.set(false);
+      return;
+    }
+    this.showListenMenuAt(event.clientX, event.clientY);
+  }
+
+  protected onMicPointerDown(event: PointerEvent) {
+    this.armListenMenuLongPress(event);
+    this.onPushTalkPointerDown(event);
+  }
+
+  protected onMicPointerUp(event: PointerEvent) {
+    this.clearListenMenuLongPress();
+    this.onPushTalkPointerUp(event);
   }
 
   protected onPushTalkPointerDown(event: PointerEvent) {
@@ -1264,6 +1324,19 @@ export class App {
     if (!this.pushToTalk() || !this.pushTalkHeld()) return;
     event.preventDefault();
     this.endPushTalk();
+  }
+
+  protected setListenModeFromMenu(mode: ListenMode) {
+    this.listenMenuOpen.set(false);
+    if (this.showGrokCli()) {
+      this.onGrokListenMode(mode);
+      return;
+    }
+    if (this.tts.listenMode() === mode) return;
+    this.tts.setListenMode(mode);
+    if (mode === 'push' && (this.voiceEnabled() || this.isListening())) {
+      this.stopListening();
+    }
   }
 
   protected toggleManualInput() {
@@ -2079,6 +2152,7 @@ export class App {
   }
 
   protected stopListening() {
+    this.pushTalkKeyCode = null;
     this.pushTalkHeld.set(false);
     this.disableVoiceChannel();
   }
@@ -2088,8 +2162,10 @@ export class App {
     void this.grokCli.cancel();
   }
 
-  private async beginPushTalk() {
+  private async beginPushTalk(fromKey?: string) {
     if (this.pushTalkHeld()) return;
+    this.listenMenuOpen.set(false);
+    this.pushTalkKeyCode = fromKey ?? null;
     this.pushTalkHeld.set(true);
     this.voiceEnabled.set(true);
     this.setBackgroundVoiceSession(false);
@@ -2100,12 +2176,78 @@ export class App {
 
   private endPushTalk() {
     if (!this.pushTalkHeld()) return;
+    this.pushTalkKeyCode = null;
     this.pushTalkHeld.set(false);
     this.voiceEnabled.set(false);
     this.setBackgroundVoiceSession(false);
     this.listenEpoch += 1;
     this.debug.log('speech', 'Push-to-talk release');
     this.stopMoonshineListening({ commitPending: true, submitPartial: true, fromPushTalk: true });
+  }
+
+  /** Buttons and other chrome keep Space for hold-to-talk; text fields still type a space. */
+  private isTypingTarget(target: EventTarget | null): boolean {
+    const el = target instanceof HTMLElement ? target : null;
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    const host = el.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]');
+    if (!host || !(host instanceof HTMLElement)) return false;
+    if (host instanceof HTMLInputElement) {
+      const type = host.type;
+      if (type === 'button' || type === 'submit' || type === 'reset' || type === 'checkbox' || type === 'radio' || type === 'file' || type === 'image') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private showListenMenuAt(x: number, y: number) {
+    const width = 228;
+    const height = 148;
+    const pad = 12;
+    this.listenMenuX.set(Math.max(pad, Math.min(x, window.innerWidth - width - pad)));
+    this.listenMenuY.set(Math.max(pad, Math.min(y, window.innerHeight - height - pad)));
+    this.listenMenuOpen.set(true);
+    this.composerMenuOpen.set(false);
+    this.modelMenuOpen.set(false);
+    this.workspaceMenuOpen.set(false);
+    this.gardenMenuOpen.set(false);
+  }
+
+  private armListenMenuLongPress(event: PointerEvent) {
+    if (event.button !== 0) return;
+    // Hold-to-talk already uses a press-and-hold; only long-press for the menu in open-channel mode.
+    if (this.pushToTalk()) return;
+    this.clearListenMenuLongPress();
+    const x = event.clientX;
+    const y = event.clientY;
+    this.listenMenuTimer = setTimeout(() => {
+      this.listenMenuTimer = null;
+      this.listenMenuSuppressClick = true;
+      this.showListenMenuAt(x, y);
+    }, 520);
+  }
+
+  private clearListenMenuLongPress() {
+    if (!this.listenMenuTimer) return;
+    clearTimeout(this.listenMenuTimer);
+    this.listenMenuTimer = null;
+  }
+
+  private consumeListenMenuClick(): boolean {
+    if (!this.listenMenuSuppressClick) return false;
+    this.listenMenuSuppressClick = false;
+    return true;
+  }
+
+  private closeListenMenuIfOutside(target: EventTarget | null) {
+    if (!this.listenMenuOpen()) return;
+    const menu = this.listenMenuEl?.nativeElement;
+    const node = target as Node | null;
+    if (menu && node && menu.contains(node)) return;
+    const el = target instanceof HTMLElement ? target : null;
+    if (el?.closest('.mic-control')) return;
+    this.listenMenuOpen.set(false);
   }
 
   private async enableVoiceChannel() {
@@ -2119,6 +2261,7 @@ export class App {
   }
 
   private disableVoiceChannel() {
+    this.pushTalkKeyCode = null;
     this.pushTalkHeld.set(false);
     this.voiceEnabled.set(false);
     this.setBackgroundVoiceSession(false);
