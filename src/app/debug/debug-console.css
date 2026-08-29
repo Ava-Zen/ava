@@ -1,13 +1,16 @@
 :host {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   color: var(--text, #3a241c);
 }
 
-:host(.overlay-host),
-.debug-root.overlay {
+:host(.overlay-host) {
   position: fixed;
   inset: 0;
   z-index: 2100;
+  height: 100%;
 }
 
 * {
@@ -15,7 +18,11 @@
 }
 
 .debug-root {
-  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .debug-root.overlay {
@@ -31,7 +38,6 @@
 }
 
 .debug-root:not(.overlay) {
-  height: 100dvh;
   padding: 16px;
   background:
     radial-gradient(110% 80% at 8% -10%, var(--glow-a), transparent 48%),
@@ -41,12 +47,14 @@
 
 .debug-shell {
   width: min(920px, 100%);
+  height: min(880px, 92dvh);
   max-height: min(920px, 92dvh);
+  min-height: 0;
   overflow: hidden;
   border-radius: 28px;
   padding: clamp(16px, 2.6vw, 24px);
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   background: var(--panel-strong);
   border: 1px solid var(--line-strong);
@@ -65,10 +73,14 @@
 .debug-header,
 .header-tools,
 .toolbar,
-.event-head,
-.now-grid {
+.event-head {
   display: flex;
   align-items: center;
+}
+
+.debug-header,
+.toolbar {
+  flex: 0 0 auto;
 }
 
 .debug-header {
@@ -94,7 +106,7 @@
 h2 {
   margin: 0;
   font-family: Newsreader, "Iowan Old Style", Palatino, Georgia, serif;
-  font-size: clamp(2rem, 5vw, 3rem);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
   font-weight: 550;
   line-height: 1;
 }
@@ -103,6 +115,7 @@ h2 {
   margin: 0;
   color: var(--soft);
   font-size: 0.92rem;
+  flex: 0 0 auto;
 }
 
 .close-btn,
@@ -163,6 +176,7 @@ h2 {
 }
 
 .now {
+  flex: 0 0 auto;
   display: grid;
   gap: 8px;
   padding: 12px 14px;
@@ -227,15 +241,32 @@ h2 {
 }
 
 .log {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-  display: grid;
-  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
   gap: 8px;
   padding-right: 4px;
 }
 
+.log::-webkit-scrollbar {
+  width: 10px;
+}
+
+.log::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
 .event {
+  flex: 0 0 auto;
+  height: auto;
   border-radius: 16px;
   border: 1px solid var(--line);
   background: var(--surface-strong);
@@ -260,6 +291,7 @@ h2 {
   -webkit-text-fill-color: var(--text);
   text-align: left;
   cursor: pointer;
+  align-items: flex-start;
 }
 
 .event-head time {
@@ -268,6 +300,7 @@ h2 {
   -webkit-text-fill-color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .kind {
@@ -303,10 +336,12 @@ h2 {
 
 .event-head strong {
   flex: 1 1 auto;
+  min-width: 0;
   color: var(--text);
   -webkit-text-fill-color: var(--text);
   font-size: 0.95rem;
   font-weight: 650;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 

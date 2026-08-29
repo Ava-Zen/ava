@@ -790,6 +790,32 @@
     }
   </section>
 
+  @if (selfImproveDesktop()) {
+    <section class="section danger-zone">
+      <div>
+        <p class="overline">Self</p>
+        <h3>Self-improvements</h3>
+        <p class="hint">
+          @if (selfImproveStatus()?.customized) {
+            This copy has been changed. Undo restores the original.
+          } @else {
+            Say “Ava, improve yourself by …” to change this app. Undo restores the original.
+          }
+        </p>
+        @if (selfImproveError) {
+          <p class="hint">{{ selfImproveError }}</p>
+        }
+      </div>
+      <button class="reset-btn" type="button" (click)="undoSelfImprovements()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+          <path d="M3 4v6h6"></path>
+        </svg>
+        <span>Undo self-improvements</span>
+      </button>
+    </section>
+  }
+
   <section class="section danger-zone">
     <div>
       <p class="overline">Fresh start</p>

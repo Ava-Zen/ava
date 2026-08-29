@@ -17,6 +17,7 @@ import { ThemePreference, ThemeService } from '../services/theme';
 import { GardensService } from '../services/gardens';
 import { GrokCliService } from '../services/grok-cli';
 import { DebugLogService } from '../services/debug-log';
+import { SelfImproveService } from '../services/self-improve';
 
 interface ModelFileInfo {
   name: string;
@@ -50,7 +51,11 @@ export class Settings {
   private readonly gardensService = inject(GardensService);
   private readonly grokBuild = inject(GrokCliService);
   private readonly debugLog = inject(DebugLogService);
+  private readonly selfImprove = inject(SelfImproveService);
   protected readonly debugAvailable = this.debugLog.available;
+  protected readonly selfImproveDesktop = this.selfImprove.desktop;
+  protected readonly selfImproveStatus = this.selfImprove.status;
+  protected selfImproveError = '';
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected gardenError = '';
@@ -94,6 +99,7 @@ export class Settings {
     void this.refreshModelFiles();
     if (this.xai.signedIn()) void this.ttsService.refreshGrokVoices();
     if (this.grokBuild.desktop()) void this.grokBuild.boot();
+    if (this.selfImprove.desktop()) void this.selfImprove.refresh();
     effect(() => {
       this.workspaceDraft = this.agentsService.workspace();
     });
@@ -684,6 +690,22 @@ export class Settings {
       danger: true,
     });
     if (ok) this.resetCache.emit();
+  }
+
+  async undoSelfImprovements() {
+    const ok = await this.confirm.ask({
+      title: 'Undo self-improvements?',
+      message: 'This restores the original Ava and forgets those source changes.',
+      confirmLabel: 'Undo',
+      danger: true,
+    });
+    if (!ok) return;
+    this.selfImproveError = '';
+    try {
+      await this.selfImprove.reset();
+    } catch (error) {
+      this.selfImproveError = error instanceof Error ? error.message : 'Could not restore the original Ava.';
+    }
   }
 
   async checkForUpdates() {

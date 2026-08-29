@@ -8,6 +8,7 @@ import {
 } from './grok-cli/folders';
 import { openExternal } from './mcp/mcp-http';
 import { isTauriDesktop } from './updates';
+import { allowOptionId, isCommandPermission } from './grok-cli/permissions';
 import {
   addPendingUser,
   applySessionUpdate,
@@ -74,6 +75,10 @@ export class GrokCliService {
   readonly projects = signal<ProjectPrefs>({ lastProject: '', recentProjects: [] });
   readonly view = signal<GrokView>('roster');
   readonly projectHint = signal('');
+  readonly selfImproveSessionId = signal<string | null>(null);
+  readonly selfImproving = computed(
+    () => !!this.selfImproveSessionId() && this.activeId() === this.selfImproveSessionId(),
+  );
 
   readonly signedIn = computed(() => !!this.auth()?.signedIn);
   readonly working = computed(() => this.turn() === 'sending' || this.turn() === 'live');
@@ -325,6 +330,51 @@ export class GrokCliService {
     }
   }
 
+  async startSelfImprove(sourcePath: string, prompt: string): Promise<GrokWorkResult> {
+    const folder = sourcePath.trim();
+    if (!folder) return 'folder';
+    this.projectHint.set('');
+    this.view.set('session');
+    await this.boot();
+    if (this.phase() === 'setup') return 'setup';
+    if (this.phase() !== 'ready') return 'signed-out';
+    await this.useFolder(folder);
+    this.error.set('');
+    try {
+      this.turn.set('sending');
+      const avaMcp = [{ name: 'ava', type: 'http', url: 'http://127.0.0.1:7456' }];
+      let sessionId: string;
+      try {
+        sessionId = await invoke<string>('new_session', {
+          cwd: this.cwd(),
+          mode: 'full',
+          mcpServers: avaMcp,
+        });
+      } catch {
+        sessionId = await invoke<string>('new_session', {
+          cwd: this.cwd(),
+          mode: 'full',
+        });
+      }
+      this.activeId.set(sessionId);
+      this.selfImproveSessionId.set(sessionId);
+      this.mode.set('full');
+      try {
+        await invoke('set_session_mode', { sessionId, mode: 'full' });
+      } catch {
+        // Session already requested full permissions through _meta.
+      }
+      this.items.update(items => addPendingUser(items, prompt));
+      await invoke('send_prompt', { sessionId, text: prompt, sendNow: null, promptId: null });
+      this.turn.set('live');
+      return 'ready';
+    } catch (err) {
+      this.turn.set('idle');
+      this.error.set(readError(err));
+      throw err;
+    }
+  }
+
   async cancel(): Promise<void> {
     const sessionId = this.activeId();
     if (!sessionId || sessionId === DRAFT_ID) return;
@@ -340,6 +390,30 @@ export class GrokCliService {
     const request = this.hitl();
     if (!request) return;
     this.hitl.set(null);
+    if (optionId && isCommandPermission(request) && /allow[-_ ]?always|allow all|yolo/i.test(optionId)) {
+      this.mode.set('full');
+      await this.persistMode('full');
+    }
+    try {
+      await invoke('respond_agent_request', {
+        requestId: request.requestId,
+        optionId,
+        answers: null,
+        payload: null,
+      });
+    } catch (err) {
+      this.error.set(readError(err));
+    }
+  }
+
+  async allowAll(): Promise<void> {
+    const request = this.hitl();
+    this.mode.set('full');
+    await this.persistMode('full');
+    if (!request) return;
+    const optionId = allowOptionId(request);
+    this.hitl.set(null);
+    if (!optionId) return;
     try {
       await invoke('respond_agent_request', {
         requestId: request.requestId,
@@ -367,6 +441,26 @@ export class GrokCliService {
 
   async setMode(mode: string): Promise<void> {
     this.mode.set(mode);
+    await this.persistMode(mode);
+    if (mode !== 'full') return;
+    const request = this.hitl();
+    if (!request || !isCommandPermission(request)) return;
+    const optionId = allowOptionId(request);
+    this.hitl.set(null);
+    if (!optionId) return;
+    try {
+      await invoke('respond_agent_request', {
+        requestId: request.requestId,
+        optionId,
+        answers: null,
+        payload: null,
+      });
+    } catch (err) {
+      this.error.set(readError(err));
+    }
+  }
+
+  private async persistMode(mode: string): Promise<void> {
     const sessionId = this.activeId();
     try {
       await invoke('grok_set_default_mode', { mode });
@@ -415,9 +509,26 @@ export class GrokCliService {
     });
     await listen<AgentRequestEvent>('acp://agent-request', event => {
       const payload = event.payload;
-      if (payload?.sessionId && payload.sessionId === this.activeId()) {
-        this.hitl.set(payload);
+      if (!payload?.sessionId || payload.sessionId !== this.activeId()) return;
+      const selfImprove =
+        !!this.selfImproveSessionId() && payload.sessionId === this.selfImproveSessionId();
+      const auto =
+        (this.mode() === 'full' && isCommandPermission(payload)) ||
+        (selfImprove &&
+          (isCommandPermission(payload) || payload.method === 'x.ai/folder_trust/request'));
+      if (auto) {
+        const optionId = allowOptionId(payload);
+        if (optionId) {
+          void invoke('respond_agent_request', {
+            requestId: payload.requestId,
+            optionId,
+            answers: null,
+            payload: null,
+          }).catch(err => this.error.set(readError(err)));
+          return;
+        }
       }
+      this.hitl.set(payload);
     });
     await listen('acp://roster-changed', () => {
       void this.refreshRoster();

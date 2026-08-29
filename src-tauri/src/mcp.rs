@@ -39,7 +39,8 @@ const SERVER_INSTRUCTIONS: &str = "\
 Ava is a local voice companion. Call list_voices to see speakers, speak to \
 say text aloud on this machine, stop_speaking to interrupt, and get_status \
 to check that Ava is open. Prefer speak for any request to talk, announce, \
-or read something out loud.";
+or read something out loud. Call self_improve_ready only after Ava asked you \
+to change her own source and compile has already succeeded.";
 
 pub struct McpBridge {
   next_id: AtomicU64,
@@ -216,9 +217,23 @@ fn handle_tool_call(app: &AppHandle, req: &Value, id: Value) -> Value {
     "get_status" => {
       tool_text(
         id,
-        "Ava is open and ready. Tools: speak, list_voices, stop_speaking, get_status. \
-Call list_voices to see speaker ids, then speak with optional voice.",
+        "Ava is open and ready. Tools: speak, list_voices, stop_speaking, get_status, \
+self_improve_ready. Call list_voices to see speaker ids, then speak with optional voice. \
+Call self_improve_ready only to finish an Ava self-improvement after compile succeeded.",
       )
+    }
+    "self_improve_ready" => {
+      #[cfg(desktop)]
+      {
+        match crate::self_improve::ready_from_mcp(app) {
+          Ok(message) => tool_text(id, &message),
+          Err(error) => tool_error(id, &error),
+        }
+      }
+      #[cfg(not(desktop))]
+      {
+        tool_error(id, "Self-improvement is only available in the desktop app.")
+      }
     }
     _ => rpc_error(id, -32602, "Unknown tool"),
   }
@@ -274,6 +289,11 @@ fn tool_definitions() -> Value {
     {
       "name": "get_status",
       "description": "Check that Ava is running and which voice tools are available.",
+      "inputSchema": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "self_improve_ready",
+      "description": "Finish an Ava self-improvement: re-check that her source compiles, then rebuild and restart her. Call only after she asked you to improve herself, after `npm run build` and the Rust cargo check both succeeded, and after speak. Returns an error if no self-improvement is in progress or compile fails.",
       "inputSchema": { "type": "object", "properties": {} }
     }
   ])

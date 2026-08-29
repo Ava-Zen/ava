@@ -586,6 +586,7 @@ fn keep_remote_commit<T>(value: T, label: &str, follow_up: Result<(), String>) -
 pub async fn new_session(
     cwd: Option<String>,
     mode: Option<String>,
+    mcp_servers: Option<Vec<Value>>,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<String, String> {
     let _operation = operation().await;
@@ -597,11 +598,12 @@ pub async fn new_session(
         .filter(|row| !row.trim().is_empty())
         .map(|row| row.to_string())
         .unwrap_or_else(overlay::default_mode);
+    let mcp_servers = mcp_servers.unwrap_or_default();
     let created = open_new_session(
         &state,
         json!({
             "cwd": dir,
-            "mcpServers": [],
+            "mcpServers": mcp_servers,
             "_meta": acp_msg::stamp_client_id(overlay::permission_meta(&mode))
         }),
     )

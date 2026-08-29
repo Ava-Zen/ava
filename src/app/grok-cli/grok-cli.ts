@@ -4,6 +4,12 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { GardensService } from '../services/gardens';
 import { GrokCliService, RosterItem, TranscriptItem, folderName } from '../services/grok-cli';
+import {
+  hasAllowAllOption,
+  isCommandPermission,
+  permissionOptionLabel,
+  permissionOptions,
+} from '../services/grok-cli/permissions';
 import { speakableLine, shortFileLabel } from '../services/grok-cli/transcript';
 import { markdownToHtml } from '../services/text-format';
 import { ListenMode } from '../services/tts';
@@ -47,9 +53,11 @@ export class GrokCliOverlay {
   protected readonly view = this.grok.view;
   protected readonly projectHint = this.grok.projectHint;
   protected readonly needsFolder = this.grok.needsFolder;
+  protected readonly selfImproving = this.grok.selfImproving;
   protected readonly folderChoices = this.grok.folderChoices;
   protected readonly folderLabel = computed(() => folderName(this.cwd()) || 'Choose a folder');
   protected readonly heading = computed(() => {
+    if (this.selfImproving()) return 'Improving Ava';
     if (this.phase() !== 'ready') return 'Grok';
     if (this.view() === 'roster') return 'Sessions';
     if (!this.cwd().trim()) return 'New session';
@@ -63,6 +71,18 @@ export class GrokCliOverlay {
     const raw = request?.questions[0]?.question || request?.method || '';
     const spoken = speakableLine(raw);
     return { raw, spoken: spoken || 'Grok needs a decision.' };
+  });
+  protected readonly hitlOptions = computed(() => {
+    const request = this.hitl();
+    if (!request) return [];
+    return permissionOptions(request).map(option => ({
+      optionId: option.optionId,
+      name: permissionOptionLabel(option),
+    }));
+  });
+  protected readonly showAllowAll = computed(() => {
+    const request = this.hitl();
+    return !!request && isCommandPermission(request) && !hasAllowAllOption(request);
   });
 
   constructor() {
@@ -184,6 +204,10 @@ export class GrokCliOverlay {
 
   protected async answer(optionId: string): Promise<void> {
     await this.grok.respondHitl(optionId);
+  }
+
+  protected async allowAll(): Promise<void> {
+    await this.grok.allowAll();
   }
 
   protected async dismissHitl(): Promise<void> {

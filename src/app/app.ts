@@ -61,7 +61,15 @@ import {
   isAskingToStopGrokTurn,
   isAskingToStopListening,
   isLeavingGrokWork,
+  isAskingToSelfImprove,
+  isAskingToResetSelfImprovements,
+  extractSelfImproveTask,
 } from './intents';
+import {
+  SelfImproveService,
+  buildSelfImproveFollowUp,
+  buildSelfImprovePrompt,
+} from './services/self-improve';
 import { speakableLine } from './services/grok-cli/transcript';
 import { ListenMode } from './services/tts';
 
@@ -271,6 +279,7 @@ export class App {
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly grokCli = inject(GrokCliService);
+  private readonly selfImprove = inject(SelfImproveService);
   private readonly debug = inject(DebugLogService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly xai = inject(XaiAuthService);
@@ -827,6 +836,140 @@ export class App {
               ? `Choose the folder for ${hint}.`
               : 'Choose the folder we should work in.'
             : 'What would you like us to work on together?';
+    this.addAvaNotice(this.threadId(), spoken);
+    this.isThinking.set(false);
+    this.status.set('speaking');
+    await this.speak(spoken);
+    if (!this.isCurrentRequest(requestSeq)) return;
+    if (this.status() === 'speaking') this.status.set('idle');
+    this.resumeVoiceCaptureIfEnabled();
+  }
+
+  private async startSelfImprove(text: string, requestSeq: number, existingUserMessage?: Message) {
+    const gardenId = this.currentGarden()?.id;
+    if (gardenId) {
+      if (existingUserMessage) this.updateMessageText(gardenId, existingUserMessage, text);
+      else this.addUserMessage(gardenId, text);
+    }
+
+    this.status.set('thinking');
+    this.isThinking.set(true);
+
+    if (!this.grokCli.desktop()) {
+      await this.respond(
+        this.threadId(),
+        'I can only change myself in the desktop app.',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+
+    const status = await this.selfImprove.refresh();
+    if (status && !status.ready) {
+      const spoken = this.selfImprove.missingToolsLine(status) || status.message || 'I cannot change myself on this computer yet.';
+      await this.respond(this.threadId(), spoken, undefined, undefined, undefined, requestSeq);
+      return;
+    }
+
+    try {
+      const ensured = await this.selfImprove.ensureSource();
+      const task = extractSelfImproveTask(text);
+      this.showSettings.set(false);
+      this.showMemory.set(false);
+      this.showGrokCli.set(true);
+      this.grokListenMode.set('push');
+
+      if (this.grokCli.selfImproving() && this.grokCli.canTakeSpeech()) {
+        await this.selfImprove.arm();
+        await this.grokCli.send(buildSelfImproveFollowUp(task));
+      } else {
+        await this.selfImprove.arm();
+        const result = await this.grokCli.startSelfImprove(ensured.path, buildSelfImprovePrompt(task));
+        if (!this.isCurrentRequest(requestSeq)) return;
+        if (result === 'setup') {
+          await this.respond(
+            this.threadId(),
+            'I can install Grok so I can change myself.',
+            undefined,
+            undefined,
+            undefined,
+            requestSeq,
+          );
+          return;
+        }
+        if (result === 'signed-out') {
+          await this.respond(
+            this.threadId(),
+            'Sign in with Grok and I can change myself.',
+            undefined,
+            undefined,
+            undefined,
+            requestSeq,
+          );
+          return;
+        }
+      }
+    } catch (err) {
+      const spoken = err instanceof Error && err.message.trim() ? err.message : 'I could not start changing myself.';
+      await this.respond(this.threadId(), spoken, undefined, undefined, undefined, requestSeq);
+      return;
+    }
+
+    const spoken = 'I will change myself, make sure I still compile, then come back.';
+    this.addAvaNotice(this.threadId(), spoken);
+    this.isThinking.set(false);
+    this.status.set('speaking');
+    await this.speak(spoken);
+    if (!this.isCurrentRequest(requestSeq)) return;
+    if (this.status() === 'speaking') this.status.set('idle');
+    this.resumeVoiceCaptureIfEnabled();
+  }
+
+  private async resetSelfImprovements(text: string, requestSeq: number, existingUserMessage?: Message) {
+    const gardenId = this.currentGarden()?.id;
+    if (gardenId) {
+      if (existingUserMessage) this.updateMessageText(gardenId, existingUserMessage, text);
+      else this.addUserMessage(gardenId, text);
+    }
+
+    this.status.set('thinking');
+    this.isThinking.set(true);
+
+    if (!this.grokCli.desktop()) {
+      await this.respond(
+        this.threadId(),
+        'I can only undo that in the desktop app.',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+
+    const ok = await this.confirm.ask({
+      title: 'Undo self-improvements?',
+      message: 'This restores the original Ava and forgets those source changes.',
+      confirmLabel: 'Undo',
+      danger: true,
+    });
+    if (!ok) {
+      await this.respond(this.threadId(), 'Alright. I will keep this version.', undefined, undefined, undefined, requestSeq);
+      return;
+    }
+
+    try {
+      await this.selfImprove.reset();
+    } catch (err) {
+      const spoken = err instanceof Error && err.message.trim() ? err.message : 'I could not restore the original.';
+      await this.respond(this.threadId(), spoken, undefined, undefined, undefined, requestSeq);
+      return;
+    }
+
+    const spoken = 'I am going back to the original. I will be right back.';
     this.addAvaNotice(this.threadId(), spoken);
     this.isThinking.set(false);
     this.status.set('speaking');
@@ -2533,6 +2676,20 @@ export class App {
 
     this.debug.log('speech', 'Heard you', text);
     if (!text.trim()) return;
+
+    if (isAskingToSelfImprove(text) || isAskingToResetSelfImprovements(text)) {
+      const gardenId = this.currentGarden()?.id;
+      if (!gardenId) return;
+      const seq = this.beginRequest();
+      if (isAskingToResetSelfImprovements(text)) {
+        this.debug.log('route', 'Reset self-improvements', text);
+        await this.resetSelfImprovements(text, seq, existingUserMessage);
+        return;
+      }
+      this.debug.log('route', 'Self-improve', text);
+      await this.startSelfImprove(text, seq, existingUserMessage);
+      return;
+    }
 
     if (this.showGrokCli() && this.grokCli.working() && isAskingToStopGrokTurn(text)) {
       this.debug.log('route', 'Stop Grok turn');

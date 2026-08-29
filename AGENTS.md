@@ -78,6 +78,14 @@ The update prompt (`app-update-dialog`) is a separate, specialized dialog. Do no
 - New native capability = a `#[tauri::command]` plus a capability entry under `src-tauri/capabilities/` if it needs permissions.
 - Guard `invoke` calls with a Tauri check when the same code also runs in the browser (`npm start`).
 
+## Self-improvement
+
+Ava can edit this source when the user says **“Ava, improve yourself …”** or **“Ava, self-improve …”**. That session is started by the app, not by a generic coding ask. A line like “improve the button in my app” in another Grok session is not a self-improvement.
+
+If you are in a self-improvement session: stay in this workspace, make the smallest change, prove compile with `npm run build` and `node scripts/with-windows-clang.js cargo check --manifest-path src-tauri/Cargo.toml`, then call Ava MCP `speak` and `self_improve_ready`. Do not call `self_improve_ready` from a normal project session.
+
+Undo is **“Ava, reset yourself”** or Settings → Undo self-improvements.
+
 ## Scope
 
 - Change only what the task needs. Do not drive-by refactors or extra docs.

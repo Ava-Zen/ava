@@ -11,6 +11,9 @@ mod voice_session;
 #[cfg(desktop)]
 mod grok;
 
+#[cfg(desktop)]
+mod self_improve;
+
 #[tauri::command]
 fn mcp_tts_complete(bridge: tauri::State<mcp::McpBridge>, id: u64, ok: bool) {
   bridge.complete(id, ok);
@@ -199,6 +202,9 @@ pub fn run() {
       // On Windows/Linux this also enables the scheme during development.
       #[cfg(desktop)]
       {
+        if self_improve::hop_to_live_if_needed(&app.handle()) {
+          std::process::exit(0);
+        }
         grok::platform::init();
         app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
         app.handle().plugin(tauri_plugin_process::init())?;
@@ -282,7 +288,12 @@ pub fn run() {
     grok::grok_default_mode,
     grok::grok_set_default_mode,
     grok::grok_last_session,
-    grok::grok_remember_session
+    grok::grok_remember_session,
+    self_improve::self_improve_status,
+    self_improve::self_improve_ensure_source,
+    self_improve::self_improve_arm,
+    self_improve::self_improve_reset,
+    self_improve::self_improve_apply
   ]);
 
   #[cfg(not(desktop))]

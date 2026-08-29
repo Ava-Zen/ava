@@ -12,6 +12,7 @@
     "tauri": "node scripts/with-windows-clang.js tauri",
     "tauri:dev": "node scripts/with-windows-clang.js tauri dev",
     "tauri:dev:native": "node scripts/with-windows-clang.js tauri dev --features native-llm",
+    "pack:source": "node scripts/pack-source.js",
     "tauri:build": "node scripts/with-windows-clang.js tauri build",
     "tauri:build:native": "node scripts/with-windows-clang.js tauri build --features native-llm",
     "tauri:android:init": "tauri android init",

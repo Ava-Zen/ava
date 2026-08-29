@@ -1,10 +1,14 @@
 import {
   AVA_CAPABILITIES_REPLY,
   extractProjectHint,
+  extractSelfImproveTask,
+  isAddressedToAva,
   isAskingCapabilities,
   isAskingForGrokWork,
   isAskingForTime,
   isAskingToPickFolder,
+  isAskingToResetSelfImprovements,
+  isAskingToSelfImprove,
   isAskingToStopGrokTurn,
   isAskingToStopListening,
   isLeavingGrokWork,
@@ -118,5 +122,44 @@ describe('isAskingToPickFolder', () => {
     expect(isAskingToPickFolder('choose a folder')).toBeTrue();
     expect(isAskingToPickFolder('pick the git folder')).toBeTrue();
     expect(isAskingToPickFolder('work on nostria')).toBeFalse();
+  });
+});
+
+describe('isAskingToSelfImprove', () => {
+  it('matches Ava-addressed self-improvement asks', () => {
+    expect(isAskingToSelfImprove('Ava, improve yourself by changing the color of the Pause button')).toBeTrue();
+    expect(isAskingToSelfImprove('Ava, self-improve how you visualize memory')).toBeTrue();
+    expect(isAskingToSelfImprove('Hey Ava, improve yourself')).toBeTrue();
+    expect(isAskingToSelfImprove('Ava self improve the memory view')).toBeTrue();
+    expect(extractSelfImproveTask('Ava, improve yourself by changing the color of the Pause button')).toBe(
+      'changing the color of the Pause button',
+    );
+    expect(extractSelfImproveTask('Ava, self-improve how you visualize memory')).toBe(
+      'how you visualize memory',
+    );
+  });
+
+  it('ignores asks that are not addressed to Ava or lack the trigger', () => {
+    expect(isAskingToSelfImprove('Improve the button in my app')).toBeFalse();
+    expect(isAskingToSelfImprove('improve yourself by changing the Pause button')).toBeFalse();
+    expect(isAskingToSelfImprove('Hey Ava, improve the pause button')).toBeFalse();
+    expect(isAskingToSelfImprove('work on my Ava project')).toBeFalse();
+    expect(isAskingToSelfImprove('Ava, what time is it')).toBeFalse();
+    expect(isAddressedToAva('Improve the button in my app')).toBeFalse();
+    expect(isAddressedToAva('Ava, improve yourself')).toBeTrue();
+  });
+});
+
+describe('isAskingToResetSelfImprovements', () => {
+  it('matches Ava-addressed reset asks', () => {
+    expect(isAskingToResetSelfImprovements('Ava, reset yourself')).toBeTrue();
+    expect(isAskingToResetSelfImprovements('Ava, undo your self-improvements')).toBeTrue();
+    expect(isAskingToResetSelfImprovements('Hey Ava, restore the original Ava')).toBeTrue();
+  });
+
+  it('ignores reset talk that is not this safety phrase', () => {
+    expect(isAskingToResetSelfImprovements('reset yourself')).toBeFalse();
+    expect(isAskingToResetSelfImprovements('Ava, reset the conversation')).toBeFalse();
+    expect(isAskingToResetSelfImprovements('undo that')).toBeFalse();
   });
 });

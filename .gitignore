@@ -9,6 +9,9 @@
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/resources/ava-src/**
+!src-tauri/resources/ava-src/.gitkeep
+.ava-self-improve-build.log
 src-tauri/.updater.key
 src-tauri/.updater.key.pub
 

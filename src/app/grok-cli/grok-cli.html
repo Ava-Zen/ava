@@ -12,7 +12,7 @@
   >
     <header class="grok-header">
       <div>
-        <p class="overline">Grok</p>
+        <p class="overline">{{ selfImproving() ? 'Ava' : 'Grok' }}</p>
         <h2 id="grok-title">{{ heading() }}</h2>
       </div>
       <div class="header-tools">
@@ -144,7 +144,7 @@
           <div class="segmented" aria-label="Permission mode">
             <button type="button" [class.active]="mode() === 'ask'" (click)="setMode('ask')">Ask</button>
             <button type="button" [class.active]="mode() === 'plan'" (click)="setMode('plan')">Plan</button>
-            <button type="button" [class.active]="mode() === 'full'" (click)="setMode('full')">Always</button>
+            <button type="button" [class.active]="mode() === 'full'" (click)="setMode('full')">Allow all</button>
           </div>
         </div>
       </div>
@@ -155,7 +155,7 @@
 
       <div class="thread" aria-live="polite" #thread>
         @if (!items().length && !hydrating()) {
-          <p class="hint">What would you like us to work on together?</p>
+          <p class="hint">{{ selfImproving() ? 'Changing myself.' : 'What would you like us to work on together?' }}</p>
         }
         @for (item of items(); track $index) {
           <article class="item" [class.user]="item.kind === 'user'" [class.work]="item.kind === 'work'" [class.thought]="item.kind === 'thought'">
@@ -184,8 +184,11 @@
             <small>{{ request.questions[0]?.header }}</small>
           }
           <div class="hitl-actions">
-            @for (option of (request.questions[0]?.options || request.options); track option.optionId) {
+            @for (option of hitlOptions(); track option.optionId) {
               <button type="button" class="save-btn" (click)="answer(option.optionId)">{{ option.name }}</button>
+            }
+            @if (showAllowAll()) {
+              <button type="button" class="save-btn" (click)="allowAll()">Allow all</button>
             }
             <button type="button" class="ghost-btn" (click)="dismissHitl()">Not now</button>
           </div>

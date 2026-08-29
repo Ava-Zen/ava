@@ -47,7 +47,7 @@ export function isAskingCapabilities(text: string): boolean {
 }
 
 export const AVA_CAPABILITIES_REPLY =
-  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background.';
+  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background. On the desktop app, say Ava, improve yourself, and I will change my own source, compile, and come back.';
 
 const PROJECT_STOP =
   /^(this|that|it|them|myself|me|us|something|stuff|things|nothing|everything|grok|grok cli|a grok session|grok session|session)$/i;
@@ -131,4 +131,58 @@ export function isAskingToStopGrokTurn(text: string): boolean {
 export function isAskingToPickFolder(text: string): boolean {
   const q = peelWant(text);
   return /^(choose|pick|select|browse)(?: a| the)?(?: git| working)? folder$/.test(q);
+}
+
+/**
+ * True when the utterance is addressed to Ava by name. Optional greetings
+ * may precede it (“Hey Ava”), but a bare request without her name is not enough.
+ */
+export function isAddressedToAva(text: string): boolean {
+  const t = text
+    .trim()
+    .replace(/^[^\w]+/, '')
+    .replace(/\s+/g, ' ');
+  return /^(?:(?:hey|hi|hello|yo|ok|okay|so|well|um|uh)(?:\s+there)?\s+)?ava\b/i.test(t);
+}
+
+/**
+ * True only for an explicit self-improvement ask: addressed to Ava, and
+ * using “improve yourself” or “self-improve”. A generic “improve the button”
+ * in another Grok session must not match.
+ */
+export function isAskingToSelfImprove(text: string): boolean {
+  if (!isAddressedToAva(text)) return false;
+  const q = normalizeUtterance(text);
+  if (!q) return false;
+  return (
+    /\bimprove yourself\b/.test(q) ||
+    /\bself[- ]improve(?:ments?)?\b/.test(q)
+  );
+}
+
+/** The change the user wants, with the self-improve trigger stripped. */
+export function extractSelfImproveTask(text: string): string {
+  const q = normalizeUtterance(text);
+  const match = q.match(
+    /^(?:please\s+)?(?:improve yourself|self[- ]improve(?:ments?)?)\s*(?:by|and|to|with|:)?\s*(.*)$/i,
+  );
+  const stripped = (match?.[1] || '').trim();
+  if (!stripped) return q;
+  const original = text.replace(/\s+/g, ' ').trim();
+  const at = original.toLowerCase().lastIndexOf(stripped);
+  if (at >= 0) return original.slice(at, at + stripped.length).trim();
+  return stripped;
+}
+
+/** True when the user wants Ava restored to the original shipped build. */
+export function isAskingToResetSelfImprovements(text: string): boolean {
+  if (!isAddressedToAva(text)) return false;
+  const q = normalizeUtterance(text);
+  if (!q) return false;
+  return (
+    /^(?:reset|revert|undo)\s+yourself$/.test(q) ||
+    /^(?:reset|revert|undo|restore)\s+(?:your\s+)?self[- ]improvements?\b/.test(q) ||
+    /^(?:reset|revert|undo|restore)\s+(?:yourself|ava)\s+to\s+(?:the\s+)?original\b/.test(q) ||
+    /^(?:go back to|restore)\s+(?:the\s+)?(?:original|factory)\s+(?:ava|version|yourself|build)\b/.test(q)
+  );
 }

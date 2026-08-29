@@ -7,7 +7,7 @@
     "frontendDist": "../dist/ava/browser",
     "devUrl": "http://localhost:4222",
     "beforeDevCommand": "npm run start",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run pack:source && npm run build"
   },
   "app": {
     "windows": [
@@ -74,6 +74,9 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
-    }
+    },
+    "resources": [
+      "resources/ava-src"
+    ]
   }
 }
