@@ -2,39 +2,44 @@
   <div class="app-frame" [class.chat-active]="showChatPanel()" [attr.inert]="showStartup() ? '' : null">
     <section class="companion-grid" [class.chat-active]="showChatPanel()">
       <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
-        <div class="garden-switcher" #gardenShell>
-          <button
-            type="button"
-            class="garden-eyebrow"
-            (click)="toggleGardenMenu($event)"
-            title="Switch garden"
-            [attr.aria-expanded]="gardenMenuOpen()"
-          >
-            <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
-            <span>{{ currentGarden()?.name || 'Ava' }}</span>
-          </button>
-          @if (gardenMenuOpen()) {
-            <div class="garden-menu" role="menu" aria-label="Gardens">
-              <p>Gardens</p>
-              @for (garden of gardens(); track garden.id) {
-                <button
-                  type="button"
-                  role="menuitem"
-                  [class.active]="garden.id === currentGarden()?.id"
-                  (click)="selectGarden(garden.id)"
-                >
-                  <strong>{{ garden.name }}</strong>
-                  <small>{{ gardenHomeLabel(garden) }}</small>
+        <div class="garden-row">
+          <div class="garden-switcher" #gardenShell>
+            <button
+              type="button"
+              class="garden-eyebrow"
+              (click)="toggleGardenMenu($event)"
+              title="Switch garden"
+              [attr.aria-expanded]="gardenMenuOpen()"
+            >
+              <img class="ava-symbol" src="ava-mark.svg" alt="" aria-hidden="true" />
+              <span>{{ currentGarden()?.name || 'Ava' }}</span>
+            </button>
+            @if (gardenMenuOpen()) {
+              <div class="garden-menu" role="menu" aria-label="Gardens">
+                <p>Gardens</p>
+                @for (garden of gardens(); track garden.id) {
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [class.active]="garden.id === currentGarden()?.id"
+                    (click)="selectGarden(garden.id)"
+                  >
+                    <strong>{{ garden.name }}</strong>
+                    <small>{{ gardenHomeLabel(garden) }}</small>
+                  </button>
+                }
+                <button type="button" role="menuitem" (click)="createGardenFromUi()">
+                  <strong>New garden</strong>
+                  <small>{{ desktopHome() ? 'A separate Ava in another folder' : 'A separate Ava in this browser' }}</small>
                 </button>
-              }
-              <button type="button" role="menuitem" (click)="createGardenFromUi()">
-                <strong>New garden</strong>
-                <small>{{ desktopHome() ? 'A separate Ava in another folder' : 'A separate Ava in this browser' }}</small>
-              </button>
-              @if (gardenMenuError()) {
-                <p class="garden-menu-error">{{ gardenMenuError() }}</p>
-              }
-            </div>
+                @if (gardenMenuError()) {
+                  <p class="garden-menu-error">{{ gardenMenuError() }}</p>
+                }
+              </div>
+            }
+          </div>
+          @if (!showChatPanel()) {
+            <button type="button" class="memory-open" (click)="openMemory()">Memory</button>
           }
         </div>
 
@@ -499,21 +504,6 @@
                     Grok sessions
                   </button>
                 }
-
-                <div class="menu-divider"></div>
-
-                <div class="quick-prompt-list">
-                  @for (prompt of quickPrompts; track prompt.label) {
-                    <button
-                      class="quick-prompt"
-                      type="button"
-                      role="menuitem"
-                      (click)="queueQuickPrompt(prompt.text)"
-                    >
-                      {{ prompt.label }}
-                    </button>
-                  }
-                </div>
 
                 <div class="menu-divider"></div>
 

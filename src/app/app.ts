@@ -36,6 +36,7 @@ import { MemoryService, MemoryTurn } from './services/memory';
 import {
   isAskingWhatSheRemembers,
   isExplicitRemember,
+  pickIdleNudge,
   presenceAside,
   presenceTitle,
   peopleAck,
@@ -102,11 +103,6 @@ interface Message {
   images?: GeneratedImage[];
   /** Spoken line that arrived through the local MCP voice server or Copilot. */
   via?: 'mcp' | 'copilot';
-}
-
-interface QuickPrompt {
-  label: string;
-  text: string;
 }
 
 interface AudioDownload {
@@ -244,24 +240,6 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 })
 export class App {
   protected readonly title = signal('Ava');
-  protected readonly quickPrompts: QuickPrompt[] = [
-    {
-      label: 'Summarize this',
-      text: 'Please summarize this and pull out the key points.'
-    },
-    {
-      label: 'Action items',
-      text: 'Please turn this into a short action list with priorities.'
-    },
-    {
-      label: 'Draft reply',
-      text: 'Please help me draft a clear and thoughtful reply.'
-    },
-    {
-      label: 'Explain simply',
-      text: 'Please explain this in plain language and keep it concise.'
-    },
-  ];
   private readonly MAX_FILE_CHARS = 12000;
   private readonly TEXT_FILE_EXTENSIONS = new Set([
     'txt', 'md', 'markdown', 'json', 'csv', 'ts', 'tsx', 'js', 'jsx', 'html', 'css', 'scss', 'xml', 'yml', 'yaml', 'log'
@@ -449,6 +427,13 @@ export class App {
     return this.voiceEnabled() ? 'Stop listening' : 'Start speaking with Ava';
   });
   private requestSeq = 0;
+  private readonly startedAt = Date.now();
+  private lastIdleNudgeAt = 0;
+  private idleNudgesThisSession = 0;
+  private usedIdleKeys: string[] = [];
+  private readonly IDLE_AFTER_MS = 3 * 60 * 1000;
+  private readonly IDLE_GAP_MS = 8 * 60 * 1000;
+  private readonly MAX_IDLE_NUDGES = 4;
   protected readonly chatModelLoading = computed(() => this.llm.isLoading());
   protected readonly chatModelLoadStatus = computed(() => this.llm.downloadStatus());
 
@@ -520,10 +505,72 @@ export class App {
     this.watchAgentCompletions();
     this.watchGrokTurns();
     this.watchDebugSnapshot();
+    this.watchIdlePresence();
     this.debug.log('system', 'Ava started', this.llm.selectedModel().name);
     if (this.onboarding.completed()) {
       this.updates.scheduleAutoCheck();
     }
+  }
+
+  private watchIdlePresence() {
+    if (typeof window === 'undefined') return;
+    window.setInterval(() => void this.maybeIdleNudge(), 20_000);
+  }
+
+  private async maybeIdleNudge() {
+    if (this.idleNudgesThisSession >= this.MAX_IDLE_NUDGES) return;
+    if (
+      this.showOnboarding() ||
+      this.showStartup() ||
+      this.showSettings() ||
+      this.showMemory() ||
+      this.showGrokCli() ||
+      this.showDebugOverlay() ||
+      this.viewerImage() ||
+      this.updates.dialogOpen() ||
+      this.confirm.open()
+    ) {
+      return;
+    }
+    if (this.selfImprove.phase() !== 'idle' || this.grokCli.selfImproving()) return;
+    if (this.status() !== 'idle' || this.isListening() || this.isThinking() || this.pushTalkHeld()) return;
+    if (this.hasActiveAgents() || this.activityBadgeBusy()) return;
+    if (this.manualPrompt().trim() || this.currentTranscript().trim()) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+
+    const now = Date.now();
+    if (now - this.startedAt < this.IDLE_AFTER_MS) return;
+    if (this.lastIdleNudgeAt && now - this.lastIdleNudgeAt < this.IDLE_GAP_MS) return;
+    const lastMsg = this.messages().at(-1)?.timestamp?.getTime() ?? 0;
+    const lastActivity = Math.max(this.startedAt, lastMsg, this.lastIdleNudgeAt);
+    if (now - lastActivity < this.IDLE_AFTER_MS) return;
+
+    const unfinished = [...this.agentTasks()].reverse().find(task =>
+      task.status === 'error' || task.status === 'queued',
+    );
+    const nudge = pickIdleNudge({
+      identity: this.memory.identityNotes(),
+      name: this.userName(),
+      peopleCount: this.memory.people().filter(person => person.id !== 'ava' && person.id !== 'profile').length,
+      topics: this.memory.topics().map(topic => ({
+        id: topic.id,
+        title: topic.title,
+        notes: topic.notes,
+        updatedAt: topic.updatedAt,
+      })),
+      unfinishedPrompt: unfinished?.prompt ?? null,
+      usedKeys: this.usedIdleKeys,
+    });
+    if (!nudge) return;
+
+    this.usedIdleKeys = [...this.usedIdleKeys, nudge.key];
+    this.lastIdleNudgeAt = now;
+    this.idleNudgesThisSession += 1;
+    this.debug.log('memory', 'Idle nudge', nudge.key);
+
+    const gardenId = this.currentGarden()?.id || this.threadId();
+    const seq = this.beginRequest();
+    await this.respond(gardenId, nudge.line, undefined, undefined, undefined, seq);
   }
 
   private watchDebugSnapshot() {
@@ -1405,12 +1452,6 @@ export class App {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 152)}px`;
-  }
-
-  protected queueQuickPrompt(prompt: string) {
-    this.setManualInputMode(true);
-    this.appendToManualPrompt(prompt);
-    this.composerNotice.set('Quick prompt added. You can edit it before sending.');
   }
 
   protected openFilePicker() {
@@ -4312,11 +4353,6 @@ export class App {
     if (ms < 1000) return `${Math.max(1, Math.round(ms))} ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
     return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
-  }
-
-  private appendToManualPrompt(text: string) {
-    const current = this.manualPrompt().trim();
-    this.manualPrompt.set(current ? `${current}\n\n${text}` : text);
   }
 
   private closeComposerMenuIfOutside(target: EventTarget | null) {

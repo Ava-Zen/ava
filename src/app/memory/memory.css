@@ -214,6 +214,8 @@ h2 {
   background:
     radial-gradient(circle at 50% 50%, var(--surface-strong), var(--wash));
   border: 1px solid var(--line);
+  /* Icon SVGs inherit a stroke; this diagram must not, or labels blob. */
+  stroke: none;
 }
 
 .orbit {
@@ -246,9 +248,12 @@ h2 {
 }
 
 .star text {
-  fill: var(--text);
-  font-size: 11px;
-  font-weight: 700;
+  fill: var(--muted);
+  stroke: none;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   text-anchor: middle;
   pointer-events: none;
 }

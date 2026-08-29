@@ -103,7 +103,103 @@ export function identityFact(text: string): string | null {
   if (live) return `Lives in ${cleanFactTail(live[1])}`;
   const work = text.match(/\bi work(?:\s+as|\s+at|\s+for)?\s+([^.,!?]{2,40})/i);
   if (work) return `Works ${cleanFactTail(work[1])}`;
+  const age = text.match(/\b(?:i(?:'m| am)\s+)?(\d{1,2})\s+years old\b/i)
+    || text.match(/\bmy age is\s+(\d{1,2})\b/i);
+  if (age) return `Age is ${age[1]}`;
   return null;
+}
+
+export type PersonaGap = 'name' | 'age' | 'work' | 'family' | 'home';
+
+export interface IdleNudge {
+  key: string;
+  line: string;
+}
+
+export interface IdleNudgeInput {
+  identity?: string;
+  name?: string;
+  peopleCount?: number;
+  topics?: Array<{ id: string; title: string; notes: string; updatedAt: string }>;
+  unfinishedPrompt?: string | null;
+  usedKeys?: string[];
+}
+
+const PERSONA_LINES: Record<PersonaGap, string> = {
+  name: 'I realized I never asked your name. What should I call you?',
+  age: 'How old are you? I would like to know you a little better.',
+  work: 'What do you do for work, if you want to tell me?',
+  family: 'Do you have family around you that I should know?',
+  home: 'Where do you live these days?',
+};
+
+export function missingPersona(input: {
+  identity?: string;
+  name?: string;
+  peopleCount?: number;
+}): PersonaGap[] {
+  const hay = (input.identity ?? '').toLowerCase();
+  const missing: PersonaGap[] = [];
+  if (!input.name?.trim()) missing.push('name');
+  if (!/\b(age is|years old|yrs old)\b/.test(hay)) missing.push('age');
+  if (!/\b(works?\b|job\b|career\b)/.test(hay)) missing.push('work');
+  const familyKnown = (input.peopleCount ?? 0) > 0
+    || /\b(family|partner|wife|husband|kids?|children|son|daughter)\b/.test(hay);
+  if (!familyKnown) missing.push('family');
+  if (!/\blives in\b/.test(hay) && !/\blive in\b/.test(hay)) missing.push('home');
+  return missing;
+}
+
+/** One quiet spoken line for when nothing has happened for a while. */
+export function pickIdleNudge(input: IdleNudgeInput): IdleNudge | null {
+  const used = new Set(input.usedKeys ?? []);
+  const candidates: IdleNudge[] = [];
+
+  const unfinished = input.unfinishedPrompt?.replace(/\s+/g, ' ').trim();
+  if (unfinished) {
+    candidates.push({
+      key: `task:${unfinished.slice(0, 48).toLowerCase()}`,
+      line: `I still have that unfinished work: ${clipSpoken(unfinished)}. Want me to pick it up?`,
+    });
+  }
+
+  const topics = input.topics ?? [];
+  const research = topics.find(topic =>
+    /\b(research|look into|investigat|find out)\b/i.test(`${topic.title} ${topic.notes}`),
+  );
+  if (research) {
+    candidates.push({
+      key: `research:${research.id}`,
+      line: `I could go back to ${research.title} if you want to keep looking into it.`,
+    });
+  }
+
+  const stale = [...topics]
+    .filter(topic => topic.notes.trim() && topic.id !== research?.id)
+    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
+  if (stale) {
+    candidates.push({
+      key: `topic:${stale.id}`,
+      line: `We never finished ${stale.title}. Want to pick that up?`,
+    });
+  }
+
+  for (const gap of missingPersona(input)) {
+    candidates.push({ key: `persona:${gap}`, line: PERSONA_LINES[gap] });
+  }
+
+  candidates.push({
+    key: 'next',
+    line: 'I am here. What would you like to do next?',
+  });
+
+  return candidates.find(item => !used.has(item.key)) ?? null;
+}
+
+function clipSpoken(text: string): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim().replace(/[.,;:]+$/, '');
+  if (cleaned.length <= 42) return cleaned;
+  return `${cleaned.slice(0, 40).trim()}…`;
 }
 
 export function durableFact(text: string): string | null {

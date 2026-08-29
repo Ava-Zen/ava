@@ -64,7 +64,7 @@
 }
 .privacy-badge {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-strong);
   color: var(--text);
   border-radius: 999px;
 }
@@ -178,6 +178,18 @@
   color: var(--text);
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.1);
+}
+.garden-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 6;
+}
+.garden-row .memory-open {
+  min-height: 0;
+  padding: 9px 17px;
+  font-size: 0.9rem;
 }
 .garden-switcher {
   position: relative;
@@ -520,7 +532,7 @@
     line-height: 1.3;
     color: var(--text);
   }
-  .voice-console.mini .garden-eyebrow {
+  .voice-console.mini .garden-row {
     order: 5;
     margin-left: auto;
   }
@@ -620,7 +632,7 @@
   min-width: 0;
   max-width: min(260px, 42%);
   padding: 10px 15px;
-  color: var(--green);
+  color: var(--text);
   font-weight: 750;
   font-size: 0.96rem;
   overflow: hidden;
@@ -1023,7 +1035,6 @@
   backdrop-filter: none;
 }
 .composer-row,
-.quick-prompt-list,
 .composer-actions {
   display: flex;
   align-items: center;
@@ -1396,8 +1407,7 @@
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.1);
 }
-.menu-action,
-.quick-prompt {
+.menu-action {
   width: 100%;
   border: 1px solid var(--line);
   color: var(--text);
@@ -1408,8 +1418,7 @@
     border-color 0.2s ease,
     background 0.2s ease;
 }
-.menu-action:hover,
-.quick-prompt:hover {
+.menu-action:hover {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(255, 255, 255, 0.1);
@@ -1462,19 +1471,6 @@
   margin: 2px 2px 0;
   color: var(--muted);
 }
-.quick-prompt-list {
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.quick-prompt {
-  width: auto;
-  min-height: 42px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font: inherit;
-  font-size: 0.98rem;
-  font-weight: 720;
-}
 .manual-composer {
   min-width: 0;
   flex: 1 1 auto;
@@ -1508,8 +1504,7 @@
 .card-icon-btn:focus-visible,
 .send-circle:focus-visible,
 .action-trigger:focus-visible,
-.menu-action:focus-visible,
-.quick-prompt:focus-visible {
+.menu-action:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(196, 92, 78, 0.28);
 }
@@ -1792,14 +1787,6 @@
   .menu-action span,
   .composer-note {
     font-size: 0.9rem;
-  }
-  .quick-prompt-list {
-    gap: 7px;
-  }
-  .quick-prompt {
-    min-height: 38px;
-    padding: 0 12px;
-    font-size: 0.92rem;
   }
 }
 
