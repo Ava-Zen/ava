@@ -118,7 +118,7 @@ export class GrokChatBackend implements ChatBackend {
     }
 
     const oauth = this.auth.method() === 'oauth';
-    const tools = resolveGrokTools(messages, oauth);
+    const tools = resolveGrokTools(messages, oauth, options.research === true);
     const payload: {
       model: string;
       input: Array<{ role: ChatTurn['role']; content: string }>;
@@ -189,7 +189,8 @@ export class GrokChatBackend implements ChatBackend {
   }
 }
 
-function resolveGrokTools(messages: ChatTurn[], oauth: boolean): Array<{ type: string }> {
+function resolveGrokTools(messages: ChatTurn[], oauth: boolean, research = false): Array<{ type: string }> {
+  if (research) return [{ type: 'web_search' }];
   if (!oauth) {
     return [{ type: 'image_generation' }, { type: 'web_search' }];
   }

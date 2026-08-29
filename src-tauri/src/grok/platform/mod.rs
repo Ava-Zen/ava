@@ -143,6 +143,7 @@ fn extra_bin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(home) = dirs::home_dir() {
         dirs.push(home.join(".grok").join("bin"));
+        dirs.push(home.join(".cargo").join("bin"));
         dirs.push(home.join(".local").join("bin"));
         dirs.push(home.join("bin"));
     }

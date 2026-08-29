@@ -61,6 +61,8 @@ export interface ChatGenerateOptions {
   images?: GeneratedImage[];
   /** When aborted, backends that support it should stop generating. */
   signal?: AbortSignal;
+  /** Longer written reply. Grok should use web_search when it can. */
+  research?: boolean;
 }
 
 /** Result of a successful backend load. */

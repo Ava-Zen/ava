@@ -53,7 +53,9 @@ export class MemoryExplorer {
   protected readonly mapHeight = 420;
 
   constructor() {
-    void this.open('');
+    const start = this.memory.focusRel();
+    this.memory.focusRel.set('');
+    void this.open(start);
   }
 
   protected async open(rel: string): Promise<void> {

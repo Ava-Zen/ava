@@ -47,7 +47,7 @@ export function isAskingCapabilities(text: string): boolean {
 }
 
 export const AVA_CAPABILITIES_REPLY =
-  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background. On the desktop app, say Ava, improve yourself, and I will change my own source, compile, and come back.';
+  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background. Ask me to research you or a topic and I will write a report you can open. You can schedule a task once or every morning, as long as I am still running. On the desktop app, say Ava, improve yourself, and I will change my own source, compile, and come back.';
 
 const PROJECT_STOP =
   /^(this|that|it|them|myself|me|us|something|stuff|things|nothing|everything|grok|grok cli|a grok session|grok session|session)$/i;
@@ -185,4 +185,140 @@ export function isAskingToResetSelfImprovements(text: string): boolean {
     /^(?:reset|revert|undo|restore)\s+(?:yourself|ava)\s+to\s+(?:the\s+)?original\b/.test(q) ||
     /^(?:go back to|restore)\s+(?:the\s+)?(?:original|factory)\s+(?:ava|version|yourself|build)\b/.test(q)
   );
+}
+
+const WEEKDAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday';
+const PERIOD_HOUR: Record<string, number> = {
+  morning: 8,
+  noon: 12,
+  afternoon: 15,
+  evening: 19,
+  night: 21,
+};
+
+export interface ParsedSchedule {
+  kind: 'once' | 'interval';
+  hour: number;
+  minute: number;
+  intervalDays: number;
+  delayMs?: number;
+  task: string;
+  researchMe: boolean;
+  title: string;
+}
+
+/** True when the user wants a public-web research pass about themselves. */
+export function isAskingToResearchSelf(text: string): boolean {
+  const q = peelWant(text);
+  if (!q) return false;
+  return (
+    /^(?:do\s+)?(?:some\s+|a\s+bit\s+of\s+)?research\s+(?:on\s+|about\s+)?(?:me|myself)$/.test(q) ||
+    /^(?:look|search)\s+me\s+up$/.test(q) ||
+    /^(?:look|search)\s+(?:up|into|on)\s+(?:me|myself)$/.test(q) ||
+    /^who\s+am\s+i\s+online$/.test(q) ||
+    /^search\s+(?:the\s+(?:web|internet)\s+for\s+)?(?:me|myself)$/.test(q)
+  );
+}
+
+/** Topic for “research X”, or null when it is about the user or not research. */
+export function extractResearchTopic(text: string): string | null {
+  const q = peelWant(text);
+  if (!q) return null;
+  const match = q.match(
+    /^(?:do\s+)?(?:some\s+|a\s+bit\s+of\s+)?(?:research|look\s+into|look\s+up|search(?:\s+the\s+(?:web|internet))?(?:\s+for)?)\s+(?:on\s+|about\s+)?(.+)$/i,
+  );
+  const topic = match?.[1]?.replace(/\s+(for me|please)$/i, '').trim();
+  if (!topic) return null;
+  if (/^(me|myself)$/i.test(topic)) return null;
+  if (/\b(in the background|background task|while i)\b/i.test(topic)) return null;
+  if (topic.split(/\s+/).length > 12) return null;
+  return topic;
+}
+
+export function isAskingAboutSchedules(text: string): boolean {
+  const q = peelWant(text);
+  if (!q) return false;
+  return (
+    /^(?:what|which|show|list|tell me(?: about)?)\s+(?:are\s+)?(?:my\s+)?schedules?\b/.test(q) ||
+    /^(?:what did you schedule|what is scheduled|what'?s scheduled)\b/.test(q)
+  );
+}
+
+export function isAskingToCancelSchedule(text: string): boolean {
+  const q = peelWant(text);
+  if (!q) return false;
+  return (
+    /^(?:cancel|stop|remove|delete|clear)\s+(?:all\s+)?(?:my\s+)?(?:the\s+)?schedules?\b/.test(q) ||
+    /^(?:don'?t|do not)\s+(?:run|do)\s+that(?:\s+anymore)?$/.test(q)
+  );
+}
+
+/** Single or repeating task from speech, or null when this is not a schedule ask. */
+export function parseScheduleRequest(text: string): ParsedSchedule | null {
+  const q = peelWant(text);
+  if (!q) return null;
+
+  const relative = q.match(/\bin\s+(\d+)\s+(minutes?|mins?|hours?|hrs?)\b/i);
+  const every = q.match(
+    new RegExp(`\\b(?:every|each)\\s+(morning|afternoon|evening|night|day|week|${WEEKDAYS})\\b`, 'i'),
+  );
+  const onceWord = /\b(once|today)\b/i.test(q);
+  const tomorrow = /\btomorrow\b/i.test(q);
+  const scheduleWord = /\bschedule\b/i.test(q);
+  if (!relative && !every && !onceWord && !tomorrow && !scheduleWord) return null;
+
+  let hour = 8;
+  let minute = 0;
+  const clock =
+    q.match(/\b(?:at|@)\s*(\d{1,2})(?:[:\s.](\d{2}))?\s*(am|pm)?\b/i)
+    || q.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b/i);
+  if (clock) {
+    hour = Number(clock[1]);
+    minute = Number(clock[2] || '0');
+    const ap = (clock[3] || '').toLowerCase();
+    if (ap === 'pm' && hour < 12) hour += 12;
+    if (ap === 'am' && hour === 12) hour = 0;
+  } else if (every) {
+    const period = PERIOD_HOUR[every[1].toLowerCase()];
+    if (period !== undefined) hour = period;
+  }
+  if (!Number.isFinite(hour) || hour > 23 || minute > 59) return null;
+
+  let kind: ParsedSchedule['kind'] = 'once';
+  let intervalDays = 1;
+  let delayMs: number | undefined;
+  if (relative) {
+    const n = Number(relative[1]);
+    delayMs = /hour|hr/i.test(relative[2]) ? n * 3_600_000 : n * 60_000;
+  } else if (every) {
+    kind = 'interval';
+    const word = every[1].toLowerCase();
+    intervalDays = word === 'week' || new RegExp(`^(?:${WEEKDAYS})$`).test(word) ? 7 : 1;
+  } else if (scheduleWord && !tomorrow && !onceWord) {
+    kind = 'interval';
+  }
+
+  let task = q
+    .replace(/\b(?:please\s+)?(?:schedule|remind me to|set up)\b/gi, ' ')
+    .replace(new RegExp(`\\b(?:every|each)\\s+(?:morning|afternoon|evening|night|day|week|${WEEKDAYS})\\b`, 'gi'), ' ')
+    .replace(/\b(?:once|tomorrow|today)\b/gi, ' ')
+    .replace(/\bin\s+\d+\s+(?:minutes?|mins?|hours?|hrs?)\b/gi, ' ')
+    .replace(/\b(?:at|@)\s*\d{1,2}(?:[:\s.]\d{2})?\s*(?:am|pm)?\b/gi, ' ')
+    .replace(/\b\d{1,2}[:.]\d{2}\s*(?:am|pm)?\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:i want you to |i want to |please |do |to |and |then )+/i, '')
+    .replace(/\s+(please)$/i, '')
+    .trim();
+  if (!task || task.length < 3) return null;
+
+  const researchMe = isAskingToResearchSelf(task);
+  const title = researchMe ? 'Research on you' : clipScheduleTitle(task);
+  return { kind, hour, minute, intervalDays, delayMs, task, researchMe, title };
+}
+
+function clipScheduleTitle(task: string): string {
+  const cleaned = task.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= 42) return cleaned.replace(/^\w/, ch => ch.toUpperCase());
+  return `${cleaned.slice(0, 40).trim()}…`;
 }

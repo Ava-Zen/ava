@@ -120,6 +120,85 @@
     </section>
   }
 
+  @if (selfImproveDesktop()) {
+    <section class="section" id="self-improve-setup">
+      <div class="section-heading">
+        <div>
+          <p class="overline">Self</p>
+          <h3>Self-improvements</h3>
+        </div>
+      </div>
+      <p class="hint">
+        @if (selfImproveReady()) {
+          Say “Ava, improve yourself by …” to change this app.
+        } @else {
+          The first time you ask, Ava checks Grok CLI and the tools needed to compile.
+        }
+      </p>
+
+      <div class="setup-list">
+        <div class="setup-row" [class.ready]="grokCliReady()" [class.missing]="!grokCliReady()">
+          <div>
+            <strong>Grok CLI</strong>
+            <small>
+              @if (grokBuildPhase() === 'ready') { Signed in }
+              @else if (grokBuildPhase() === 'signed-out') { Installed. Sign in to use it. }
+              @else if (grokBuildPhase() === 'setup') { Not installed }
+              @else { Looking… }
+            </small>
+          </div>
+          @if (grokBuildPhase() === 'setup') {
+            <button class="ghost-btn" type="button" (click)="installGrokCli()" [disabled]="grokBuildBusy()">
+              {{ grokBuildBusy() ? 'Installing…' : 'Install' }}
+            </button>
+          } @else if (grokBuildPhase() === 'signed-out') {
+            <button class="ghost-btn" type="button" (click)="loginGrokCli()" [disabled]="grokBuildBusy()">
+              {{ grokBuildBusy() ? 'Waiting…' : 'Sign in' }}
+            </button>
+          }
+        </div>
+        @if (grokBuildPhase() === 'setup') {
+          <p class="hint command-line"><code>{{ grokInstallCommand() }}</code></p>
+          <p class="hint">
+            <button class="link-btn" type="button" (click)="openToolLink(grokInstallUrl)">Open install page</button>
+          </p>
+        }
+        @if (grokBuildInstallLog()) {
+          <p class="hint">{{ grokBuildInstallLog() }}</p>
+        }
+
+        @for (tool of selfImproveTools(); track tool.id) {
+          <div class="setup-row" [class.ready]="tool.present" [class.missing]="!tool.present">
+            <div>
+              <strong>{{ tool.label }}</strong>
+              <small>{{ tool.present ? 'Ready' : tool.detail }}</small>
+            </div>
+            @if (!tool.present && tool.installUrl) {
+              <button class="ghost-btn" type="button" (click)="openToolLink(tool.installUrl)">Download</button>
+            }
+          </div>
+          @if (!tool.present && tool.installCommand) {
+            <p class="hint command-line"><code>{{ tool.installCommand }}</code></p>
+          }
+        }
+      </div>
+
+      @if (selfImproveStatus()?.customized) {
+        <p class="hint">This copy has been changed. Undo restores the original.</p>
+        <button class="reset-btn" type="button" (click)="undoSelfImprovements()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+            <path d="M3 4v6h6"></path>
+          </svg>
+          <span>Undo self-improvements</span>
+        </button>
+      }
+      @if (selfImproveError) {
+        <p class="hint">{{ selfImproveError }}</p>
+      }
+    </section>
+  }
+
   <section class="section">
     <div class="section-heading">
       <div>
@@ -282,6 +361,38 @@
     <div class="auth-row">
       <button class="ghost-btn" type="button" (click)="openMemory.emit()">Open current memory</button>
     </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <p class="overline">Time</p>
+        <h3>Schedules</h3>
+      </div>
+    </div>
+    <p class="hint">I run these only while Ava is open. Say when, and whether it is once or every morning.</p>
+    @if (schedules().length) {
+      <div class="garden-list">
+        @for (job of schedules(); track job.id) {
+          <div class="garden-item" [class.active]="job.enabled">
+            <div class="garden-info">
+              <span>
+                <strong>{{ job.title }}</strong>
+                <small>{{ scheduleWhen(job) }}{{ job.enabled ? '' : ' · paused' }}</small>
+              </span>
+            </div>
+            <div class="garden-actions">
+              <button class="ghost-btn" type="button" (click)="toggleSchedule(job.id)">
+                {{ job.enabled ? 'Pause' : 'Resume' }}
+              </button>
+              <button class="ghost-btn" type="button" (click)="removeSchedule(job.id)">Remove</button>
+            </div>
+          </div>
+        }
+      </div>
+    } @else {
+      <p class="hint">Nothing scheduled.</p>
+    }
   </section>
 
   <section class="section">
@@ -789,32 +900,6 @@
       </div>
     }
   </section>
-
-  @if (selfImproveDesktop()) {
-    <section class="section danger-zone">
-      <div>
-        <p class="overline">Self</p>
-        <h3>Self-improvements</h3>
-        <p class="hint">
-          @if (selfImproveStatus()?.customized) {
-            This copy has been changed. Undo restores the original.
-          } @else {
-            Say “Ava, improve yourself by …” to change this app. Undo restores the original.
-          }
-        </p>
-        @if (selfImproveError) {
-          <p class="hint">{{ selfImproveError }}</p>
-        }
-      </div>
-      <button class="reset-btn" type="button" (click)="undoSelfImprovements()">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 12a9 9 0 1 0 3-6.7"></path>
-          <path d="M3 4v6h6"></path>
-        </svg>
-        <span>Undo self-improvements</span>
-      </button>
-    </section>
-  }
 
   <section class="section danger-zone">
     <div>

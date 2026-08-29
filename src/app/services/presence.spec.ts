@@ -1,6 +1,9 @@
 import {
   durableFact,
+  extractGivenFullName,
+  fullNameFromPersona,
   identityFact,
+  identitySocials,
   isAskingWhatSheRemembers,
   isExplicitRemember,
   missingPersona,
@@ -29,7 +32,13 @@ describe('what to keep', () => {
     expect(isExplicitRemember('Remember that my garden needs watering on Thursdays')).toBeTrue();
     expect(durableFact('Remember that my garden needs watering on Thursdays')).toMatch(/garden/i);
     expect(identityFact('My name is Sondre')).toBe('Name is Sondre');
+    expect(identityFact('My full name is Sondre Larsen')).toBe('Full name is Sondre Larsen');
+    expect(identityFact('My name is Sondre Larsen')).toBe('Full name is Sondre Larsen');
+    expect(identityFact('My twitter is @sondr')).toBe('X is @sondr');
     expect(identityFact('I am 42 years old')).toBe('Age is 42');
+    expect(fullNameFromPersona('Sondre', 'Full name is Sondre Larsen')).toBe('Sondre Larsen');
+    expect(extractGivenFullName('Sondre Larsen')).toBe('Sondre Larsen');
+    expect(identitySocials('X is @sondr\nYouTube is @ava')).toEqual(['X: @sondr', 'YouTube: @ava']);
     expect(durableFact('How are you today')).toBeNull();
     expect(isAskingWhatSheRemembers('What do you remember')).toBeTrue();
     expect(isAskingWhatSheRemembers('Remember that the keys are in the bowl')).toBeFalse();

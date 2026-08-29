@@ -43,17 +43,33 @@
     }
 
     @if (phase() === 'setup') {
-      <p class="hint">Ava can install the official Grok CLI and use the same sessions as the terminal.</p>
+      <p class="hint">
+        @if (selfImproveSetup()) {
+          I need the Grok CLI before I can change myself. Ava can install it, or run this in a terminal.
+        } @else {
+          Ava can install the official Grok CLI and use the same sessions as the terminal.
+        }
+      </p>
+      <p class="hint command-line"><code>{{ grokInstallCommand() }}</code></p>
       @if (installLog()) {
         <p class="hint">{{ installLog() }}</p>
       }
-      <button type="button" class="save-btn" (click)="install()" [disabled]="busy()">
-        {{ busy() ? 'Installing…' : 'Install Grok' }}
-      </button>
+      <div class="auth-row">
+        <button type="button" class="save-btn" (click)="install()" [disabled]="busy()">
+          {{ busy() ? 'Installing…' : 'Install Grok' }}
+        </button>
+        <button type="button" class="ghost-btn" (click)="openGrokInstallPage()">Install page</button>
+      </div>
     }
 
     @if (phase() === 'signed-out') {
-      <p class="hint">Sign in with the Grok CLI so Ava can open your existing sessions.</p>
+      <p class="hint">
+        @if (selfImproveSetup()) {
+          Sign in with Grok first, then I can change myself.
+        } @else {
+          Sign in with the Grok CLI so Ava can open your existing sessions.
+        }
+      </p>
       @if (busy()) {
         <p class="hint">Approve Grok in your browser.</p>
         <button type="button" class="ghost-btn" (click)="cancelLogin()">Cancel</button>

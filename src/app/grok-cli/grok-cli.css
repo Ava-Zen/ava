@@ -130,6 +130,29 @@ small {
   font-size: 0.92rem;
 }
 
+.command-line {
+  margin-top: 4px;
+}
+
+.command-line code {
+  display: block;
+  overflow-x: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .grok-error {
   margin: 0;
   color: var(--danger, #b42318);

@@ -95,7 +95,17 @@ pub fn executable_suffixes() -> Vec<String> {
 }
 
 pub fn extra_bin_dirs() -> Vec<PathBuf> {
-    Vec::new()
+    let mut dirs = Vec::new();
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let pf = PathBuf::from(pf);
+        dirs.push(pf.join("nodejs"));
+        dirs.push(pf.join("LLVM").join("bin"));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let local = PathBuf::from(local);
+        dirs.push(local.join("Programs").join("nodejs"));
+    }
+    dirs
 }
 
 pub fn login_path() -> Option<String> {

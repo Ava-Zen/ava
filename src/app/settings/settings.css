@@ -122,6 +122,83 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.setup-list {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+
+.setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.setup-row.ready {
+  background: color-mix(in srgb, var(--ok, #3d8b6e) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--ok, #3d8b6e) 28%, var(--line));
+}
+
+.setup-row.missing {
+  background: color-mix(in srgb, var(--amber, #c9a227) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--amber, #c9a227) 30%, var(--line));
+}
+
+.setup-row strong {
+  display: block;
+  font-size: 1.08rem;
+}
+
+.setup-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.setup-row .ghost-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+.command-line {
+  margin: 0 0 8px;
+}
+
+.command-line code {
+  display: block;
+  overflow-x: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.link-btn {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--coral, #c45c4e);
+  font: inherit;
+  font-weight: 740;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+#self-improve-setup .reset-btn {
+  margin-top: 8px;
+}
+
 .garden-list {
   display: grid;
   gap: 10px;
@@ -771,8 +848,12 @@ input:focus {
   }
   .danger-zone,
   .settings-footer .done-btn,
-  .reset-btn {
+  .reset-btn,
+  .setup-row {
     width: 100%;
+  }
+  .setup-row {
+    flex-wrap: wrap;
   }
   .danger-zone {
     align-items: stretch;

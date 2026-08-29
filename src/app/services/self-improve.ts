@@ -1,5 +1,15 @@
 import { Injectable, signal } from '@angular/core';
 import { isTauriDesktop } from './updates';
+import type { GrokPhase } from './grok-cli/types';
+
+export interface SelfImproveTool {
+  id: string;
+  label: string;
+  present: boolean;
+  installUrl: string;
+  installCommand: string;
+  detail: string;
+}
 
 export interface SelfImproveStatus {
   desktop: boolean;
@@ -10,17 +20,102 @@ export interface SelfImproveStatus {
   pristinePath: string;
   liveExe: string;
   originalExe: string;
+  os?: string;
   node: boolean;
   npm: boolean;
   cargo: boolean;
   ready: boolean;
   missing: string[];
+  tools?: SelfImproveTool[];
+  grokInstallUrl?: string;
+  grokInstallCommand?: string;
   message: string;
 }
 
 export interface SelfImproveEnsure {
   path: string;
   fromCheckout: boolean;
+}
+
+export type SelfImproveGrokGate = Extract<GrokPhase, 'setup' | 'signed-out' | 'ready' | 'boot'>;
+
+const SETUP_SEEN_KEY = 'ava-self-improve-setup-seen';
+
+export function grokCliInstallCommand(os?: string): string {
+  const windows = (os || guessOs()) === 'windows';
+  return windows
+    ? 'irm https://x.ai/cli/install.ps1 | iex'
+    : 'curl -fsSL https://x.ai/cli/install.sh | bash';
+}
+
+export function grokCliInstallUrl(): string {
+  return 'https://x.ai/cli';
+}
+
+export function guessOs(): 'windows' | 'macos' | 'linux' {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  if (/windows/i.test(ua)) return 'windows';
+  if (/mac os|macintosh/i.test(ua)) return 'macos';
+  return 'linux';
+}
+
+export function missingTools(status: SelfImproveStatus | null): SelfImproveTool[] {
+  return (status?.tools || []).filter(tool => !tool.present);
+}
+
+export function buildSelfImproveSetupSpeech(opts: {
+  grokPhase: SelfImproveGrokGate | string;
+  status: SelfImproveStatus | null;
+  firstTime: boolean;
+}): string {
+  const grokPhase = opts.grokPhase;
+  const grokMissing = grokPhase === 'setup' || grokPhase === 'boot';
+  const grokSignedOut = grokPhase === 'signed-out';
+  const tools = missingTools(opts.status);
+  const parts: string[] = [];
+
+  if (opts.firstTime) {
+    parts.push(
+      'To change myself I need the Grok CLI, signed in, plus Node.js, npm, Rust, and the C++ build tools.',
+    );
+  }
+
+  if (grokMissing) {
+    const command = opts.status?.grokInstallCommand || grokCliInstallCommand(opts.status?.os);
+    parts.push(
+      opts.firstTime
+        ? `Grok is not installed yet. I can install it here, or in a terminal run: ${command}. Then sign in.`
+        : `I still need the Grok CLI. I can install it here, or run: ${command}.`,
+    );
+  } else if (grokSignedOut) {
+    parts.push(
+      opts.firstTime
+        ? 'Grok is installed. Sign in with Grok first, then I can change myself.'
+        : 'Sign in with Grok first, then I can change myself.',
+    );
+  }
+
+  if (tools.length) {
+    const lines = tools.map(tool => {
+      if (tool.installCommand) return `${tool.label}: ${tool.installCommand}`;
+      if (tool.installUrl) return `${tool.label}: ${tool.installUrl}`;
+      return tool.label;
+    });
+    if (lines.length === 1) {
+      parts.push(`I also need ${lines[0]}.`);
+    } else {
+      parts.push(`I also need ${lines.join('. ')}.`);
+    }
+  }
+
+  if (!parts.length) {
+    return 'I cannot change myself on this computer yet.';
+  }
+
+  if (opts.firstTime) {
+    parts.push('I opened the setup so you can tap the links.');
+  }
+  return parts.join(' ');
 }
 
 export function buildSelfImprovePrompt(task: string): string {
@@ -52,6 +147,17 @@ export class SelfImproveService {
   readonly status = signal<SelfImproveStatus | null>(null);
   readonly phase = signal<'idle' | 'working' | 'compiling' | 'restarting'>('idle');
   readonly error = signal('');
+  readonly waitingOnSetup = signal(false);
+
+  consumeFirstAsk(): boolean {
+    try {
+      if (localStorage.getItem(SETUP_SEEN_KEY) === '1') return false;
+      localStorage.setItem(SETUP_SEEN_KEY, '1');
+      return true;
+    } catch {
+      return true;
+    }
+  }
 
   async refresh(): Promise<SelfImproveStatus | null> {
     if (!this.desktop()) return null;
@@ -77,6 +183,7 @@ export class SelfImproveService {
 
   async arm(): Promise<void> {
     if (!this.desktop()) return;
+    this.waitingOnSetup.set(false);
     await invoke('self_improve_arm');
     this.phase.set('working');
   }

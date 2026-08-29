@@ -33,7 +33,10 @@ import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
 import { ThemeService } from './services/theme';
 import { MemoryService, MemoryTurn } from './services/memory';
+import { SchedulesService } from './services/schedules';
+import { ResearchService } from './services/research';
 import {
+  extractGivenFullName,
   isAskingWhatSheRemembers,
   isExplicitRemember,
   pickIdleNudge,
@@ -65,11 +68,18 @@ import {
   isAskingToSelfImprove,
   isAskingToResetSelfImprovements,
   extractSelfImproveTask,
+  extractResearchTopic,
+  isAskingAboutSchedules,
+  isAskingToCancelSchedule,
+  isAskingToResearchSelf,
+  parseScheduleRequest,
+  type ParsedSchedule,
 } from './intents';
 import {
   SelfImproveService,
   buildSelfImproveFollowUp,
   buildSelfImprovePrompt,
+  buildSelfImproveSetupSpeech,
 } from './services/self-improve';
 import { speakableLine } from './services/grok-cli/transcript';
 import { ListenMode } from './services/tts';
@@ -101,6 +111,8 @@ interface Message {
   retryFor?: string;
   /** Imagine images returned by Grok. */
   images?: GeneratedImage[];
+  /** Memory path for a research report the user can open. */
+  reportRel?: string;
   /** Spoken line that arrived through the local MCP voice server or Copilot. */
   via?: 'mcp' | 'copilot';
 }
@@ -263,7 +275,12 @@ export class App {
   private readonly xai = inject(XaiAuthService);
   private readonly copilotAuth = inject(CopilotAuthService);
   private readonly xaiClient = new XaiClient(this.xai);
+  private readonly schedules = inject(SchedulesService);
+  private readonly research = inject(ResearchService);
   private readonly announcedAgentTasks = new Set<string>();
+  private pendingFullNameFor: 'research' | 'schedule' | null = null;
+  private pendingResearchTopic: string | null = null;
+  private scheduleBusy = false;
 
   @ViewChild('transcript') private transcriptEl?: ElementRef<HTMLDivElement>;
   @ViewChild('filePicker') private filePickerEl?: ElementRef<HTMLInputElement>;
@@ -506,6 +523,7 @@ export class App {
     this.watchGrokTurns();
     this.watchDebugSnapshot();
     this.watchIdlePresence();
+    this.watchSchedules();
     this.debug.log('system', 'Ava started', this.llm.selectedModel().name);
     if (this.onboarding.completed()) {
       this.updates.scheduleAutoCheck();
@@ -534,7 +552,7 @@ export class App {
     }
     if (this.selfImprove.phase() !== 'idle' || this.grokCli.selfImproving()) return;
     if (this.status() !== 'idle' || this.isListening() || this.isThinking() || this.pushTalkHeld()) return;
-    if (this.hasActiveAgents() || this.activityBadgeBusy()) return;
+    if (this.hasActiveAgents() || this.activityBadgeBusy() || this.scheduleBusy) return;
     if (this.manualPrompt().trim() || this.currentTranscript().trim()) return;
     if (typeof document !== 'undefined' && document.hidden) return;
 
@@ -846,11 +864,16 @@ export class App {
     this.showSettings.set(true);
   }
 
-  protected openMemory() {
+  protected openMemory(rel = '') {
     if (this.showOnboarding()) return;
     this.showSettings.set(false);
     this.showGrokCli.set(false);
+    this.memory.focusRel.set(rel);
     this.showMemory.set(true);
+  }
+
+  protected openMemoryAt(rel: string) {
+    this.openMemory(rel);
   }
 
   protected closeMemory() {
@@ -933,8 +956,23 @@ export class App {
     }
 
     const status = await this.selfImprove.refresh();
-    if (status && !status.ready) {
-      const spoken = this.selfImprove.missingToolsLine(status) || status.message || 'I cannot change myself on this computer yet.';
+    await this.grokCli.boot();
+    const grokPhase = this.grokCli.phase();
+    const grokReady = grokPhase === 'ready';
+    const toolsReady = !status || status.ready;
+    if (!grokReady || !toolsReady) {
+      const firstTime = this.selfImprove.consumeFirstAsk();
+      this.selfImprove.waitingOnSetup.set(true);
+      this.showMemory.set(false);
+      if (!grokReady) {
+        this.showSettings.set(false);
+        this.showGrokCli.set(true);
+        this.grokListenMode.set('push');
+      } else {
+        this.showGrokCli.set(false);
+        this.showSettings.set(true);
+      }
+      const spoken = buildSelfImproveSetupSpeech({ grokPhase, status, firstTime });
       await this.respond(this.threadId(), spoken, undefined, undefined, undefined, requestSeq);
       return;
     }
@@ -942,6 +980,7 @@ export class App {
     try {
       const ensured = await this.selfImprove.ensureSource();
       const task = extractSelfImproveTask(text);
+      this.selfImprove.waitingOnSetup.set(false);
       this.showSettings.set(false);
       this.showMemory.set(false);
       this.showGrokCli.set(true);
@@ -954,26 +993,15 @@ export class App {
         await this.selfImprove.arm();
         const result = await this.grokCli.startSelfImprove(ensured.path, buildSelfImprovePrompt(task));
         if (!this.isCurrentRequest(requestSeq)) return;
-        if (result === 'setup') {
-          await this.respond(
-            this.threadId(),
-            'I can install Grok so I can change myself.',
-            undefined,
-            undefined,
-            undefined,
-            requestSeq,
-          );
-          return;
-        }
-        if (result === 'signed-out') {
-          await this.respond(
-            this.threadId(),
-            'Sign in with Grok and I can change myself.',
-            undefined,
-            undefined,
-            undefined,
-            requestSeq,
-          );
+        if (result === 'setup' || result === 'signed-out') {
+          const firstTime = this.selfImprove.consumeFirstAsk();
+          this.selfImprove.waitingOnSetup.set(true);
+          const spoken = buildSelfImproveSetupSpeech({
+            grokPhase: result,
+            status,
+            firstTime,
+          });
+          await this.respond(this.threadId(), spoken, undefined, undefined, undefined, requestSeq);
           return;
         }
       }
@@ -3007,6 +3035,52 @@ export class App {
     }
     const remembered = this.memory.rememberUser(text, routed.topic);
 
+    if (this.pendingFullNameFor) {
+      await this.handlePendingFullName(gardenId, text, seq);
+      return;
+    }
+
+    if (isAskingAboutSchedules(text)) {
+      this.debug.log('route', 'List schedules');
+      await this.respond(gardenId, this.describeSchedules(), undefined, undefined, undefined, seq);
+      return;
+    }
+
+    if (isAskingToCancelSchedule(text)) {
+      this.debug.log('route', 'Cancel schedules');
+      const count = this.schedules.enabled().length;
+      this.schedules.clear();
+      await this.respond(
+        gardenId,
+        count ? 'I cleared the schedules.' : 'Nothing was scheduled.',
+        undefined,
+        undefined,
+        undefined,
+        seq,
+      );
+      return;
+    }
+
+    const scheduled = parseScheduleRequest(text);
+    if (scheduled) {
+      this.debug.log('route', 'Create schedule', scheduled.title);
+      await this.handleScheduleAsk(gardenId, scheduled, seq);
+      return;
+    }
+
+    if (isAskingToResearchSelf(text)) {
+      this.debug.log('route', 'Research me');
+      await this.handleResearch(gardenId, { aboutUser: true }, seq);
+      return;
+    }
+
+    const researchTopic = extractResearchTopic(text);
+    if (researchTopic && !this.detectAgentRequest(text)) {
+      this.debug.log('route', 'Research topic', researchTopic);
+      await this.handleResearch(gardenId, { topic: researchTopic }, seq);
+      return;
+    }
+
     const chatId = this.threadId();
     const referringToExisting = /\b(this|that)\b/i.test(text);
 
@@ -3115,6 +3189,172 @@ export class App {
     );
   }
 
+  private watchSchedules() {
+    if (typeof window === 'undefined') return;
+    window.setInterval(() => void this.maybeRunDueSchedules(), 20_000);
+  }
+
+  private async maybeRunDueSchedules() {
+    if (this.scheduleBusy) return;
+    if (this.showOnboarding() || this.showStartup()) return;
+    if (this.selfImprove.phase() !== 'idle' || this.grokCli.selfImproving()) return;
+    if (this.status() !== 'idle' || this.isListening() || this.isThinking() || this.pushTalkHeld()) return;
+    if (this.hasActiveAgents()) return;
+    const due = this.schedules.takeDue();
+    if (!due.length) return;
+    this.scheduleBusy = true;
+    try {
+      for (const job of due) {
+        const gardenId = this.currentGarden()?.id || this.threadId();
+        const seq = this.beginRequest();
+        this.debug.log('route', 'Schedule run', job.title);
+        this.status.set('thinking');
+        this.isThinking.set(true);
+        this.addUserMessage(gardenId, job.task, false, undefined, this.memory.activeTopic()?.id);
+        if ((job.researchMe || isAskingToResearchSelf(job.task)) && !this.research.fullName()) {
+          await this.respond(
+            gardenId,
+            'I skipped that research. I still need your full name.',
+            undefined,
+            undefined,
+            undefined,
+            seq,
+          );
+          this.schedules.markRan(job.id);
+          continue;
+        }
+        if (job.researchMe || isAskingToResearchSelf(job.task)) {
+          await this.handleResearch(gardenId, { aboutUser: true }, seq);
+        } else {
+          const topic = extractResearchTopic(job.task);
+          if (topic) await this.handleResearch(gardenId, { topic }, seq);
+          else await this.handleLlmReply(gardenId, job.task, seq);
+        }
+        this.schedules.markRan(job.id);
+      }
+    } finally {
+      this.scheduleBusy = false;
+    }
+  }
+
+  private describeSchedules(): string {
+    const items = this.schedules.enabled();
+    if (!items.length) return 'Nothing is scheduled. I only run those while I am still open.';
+    if (items.length === 1) {
+      const item = items[0];
+      return `${item.title}, ${this.schedules.describe(item)}. I need to stay open for it.`;
+    }
+    return items
+      .map(item => `${item.title}, ${this.schedules.describe(item)}`)
+      .join('. ') + '. I need to stay open for them.';
+  }
+
+  private async handleScheduleAsk(gardenId: string, parsed: ParsedSchedule, requestSeq: number) {
+    const job = this.schedules.addFromSpeech(parsed);
+    const when = this.schedules.describe(job);
+    if (parsed.researchMe && !this.research.fullName()) {
+      this.pendingFullNameFor = 'schedule';
+      await this.respond(
+        gardenId,
+        `I will. ${when.charAt(0).toUpperCase()}${when.slice(1)}, if I am still here. What is your full name, so I can look you up?`,
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+    await this.respond(
+      gardenId,
+      `I will. ${when.charAt(0).toUpperCase()}${when.slice(1)}, if I am still here.`,
+      undefined,
+      undefined,
+      undefined,
+      requestSeq,
+    );
+  }
+
+  private async handlePendingFullName(gardenId: string, text: string, requestSeq: number) {
+    const name = extractGivenFullName(text);
+    if (!name) {
+      await this.respond(
+        gardenId,
+        'Say your first and last name, and I will look from there.',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+    await this.memory.rememberFullName(name);
+    const kind = this.pendingFullNameFor;
+    this.pendingFullNameFor = null;
+    const topic = this.pendingResearchTopic;
+    this.pendingResearchTopic = null;
+    if (kind === 'schedule') {
+      await this.respond(
+        gardenId,
+        `I will keep ${name}. I will look you up when that schedule runs.`,
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+    await this.handleResearch(gardenId, topic ? { topic } : { aboutUser: true }, requestSeq);
+  }
+
+  private async handleResearch(
+    gardenId: string,
+    input: { aboutUser?: boolean; topic?: string },
+    requestSeq: number,
+  ) {
+    if (input.aboutUser && !this.research.fullName()) {
+      this.pendingFullNameFor = 'research';
+      this.pendingResearchTopic = null;
+      await this.respond(
+        gardenId,
+        'What is your full name, so I can look you up?',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+
+    this.status.set('speaking');
+    this.speak(input.aboutUser ? 'I will look you up.' : 'I will look into that.');
+
+    try {
+      const result = await this.research.run(input);
+      if (!this.isCurrentRequest(requestSeq)) return;
+      await this.respond(
+        gardenId,
+        result.spoken,
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+        result.reportRel,
+      );
+    } catch (error) {
+      if (!this.isCurrentRequest(requestSeq) || isAbortError(error)) return;
+      console.error('Research failed', error);
+      const friendly = this.llm.friendlyError(error);
+      await this.respond(
+        gardenId,
+        friendly ?? 'I could not finish that research just now.',
+        undefined,
+        input.topic || 'research me',
+        undefined,
+        requestSeq,
+      );
+    }
+  }
+
   /** Detects when the user is asking about the weather. */
   private detectWeatherRequest(text: string): boolean {
     const lower = text.toLowerCase();
@@ -3190,6 +3430,7 @@ export class App {
     retryFor?: string,
     images?: GeneratedImage[],
     requestSeq = this.requestSeq,
+    reportRel?: string,
   ) {
     if (!this.isCurrentRequest(requestSeq)) return;
 
@@ -3202,6 +3443,7 @@ export class App {
       debug,
       retryFor,
       images,
+      reportRel,
       topicId: this.memory.activeTopic()?.id,
     };
     currentMsgs.push(avaMsg);

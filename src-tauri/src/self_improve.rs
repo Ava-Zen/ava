@@ -4,6 +4,7 @@
 
 use std::{
   env, fs, io,
+  net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
   path::{Path, PathBuf},
   process::{Command, Stdio},
   sync::atomic::{AtomicBool, Ordering},
@@ -13,6 +14,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Angular `ng serve` port from `tauri.conf.json` `build.devUrl`.
+const DEV_PORT: u16 = 4222;
+const DEV_URL: &str = "http://localhost:4222/";
 
 const SKIP_DIR_NAMES: &[&str] = &[
   "node_modules",
@@ -44,6 +49,17 @@ struct Persist {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ToolNeed {
+  pub id: String,
+  pub label: String,
+  pub present: bool,
+  pub install_url: String,
+  pub install_command: String,
+  pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SelfImproveStatus {
   pub desktop: bool,
   pub from_checkout: bool,
@@ -53,11 +69,15 @@ pub struct SelfImproveStatus {
   pub pristine_path: String,
   pub live_exe: String,
   pub original_exe: String,
+  pub os: String,
   pub node: bool,
   pub npm: bool,
   pub cargo: bool,
   pub ready: bool,
   pub missing: Vec<String>,
+  pub tools: Vec<ToolNeed>,
+  pub grok_install_url: String,
+  pub grok_install_command: String,
   pub message: String,
 }
 
@@ -155,26 +175,48 @@ fn pristine_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn has_cmd(name: &str) -> bool {
-  #[cfg(windows)]
-  {
-    Command::new("cmd")
-      .args(["/C", "where", name])
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
-      .status()
-      .map(|s| s.success())
-      .unwrap_or(false)
+  if crate::grok::platform::which(name).is_ok() {
+    return true;
   }
-  #[cfg(not(windows))]
-  {
-    Command::new("sh")
-      .args(["-c", &format!("command -v {name}")])
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
-      .status()
-      .map(|s| s.success())
-      .unwrap_or(false)
+  known_binary(name).is_some()
+}
+
+fn known_binary(name: &str) -> Option<PathBuf> {
+  let mut candidates = Vec::new();
+  if let Some(home) = dirs::home_dir() {
+    candidates.push(home.join(".cargo").join("bin").join(exe_name(name)));
+    candidates.push(home.join(".grok").join("bin").join(exe_name(name)));
+    candidates.push(home.join(".local").join("bin").join(name));
   }
+  if cfg!(windows) {
+    if let Ok(pf) = env::var("ProgramFiles") {
+      let pf = PathBuf::from(pf);
+      candidates.push(pf.join("nodejs").join(exe_name(name)));
+      candidates.push(pf.join("nodejs").join(format!("{name}.cmd")));
+      candidates.push(pf.join("LLVM").join("bin").join(exe_name(name)));
+    }
+    if let Ok(local) = env::var("LOCALAPPDATA") {
+      let local = PathBuf::from(local);
+      candidates.push(local.join("Programs").join("nodejs").join(exe_name(name)));
+      candidates.push(local.join("Programs").join("nodejs").join(format!("{name}.cmd")));
+    }
+  }
+  candidates.into_iter().find(|path| path.is_file())
+}
+
+fn exe_name(base: &str) -> String {
+  if cfg!(windows) && !base.to_ascii_lowercase().ends_with(".exe") {
+    format!("{base}.exe")
+  } else {
+    base.to_string()
+  }
+}
+
+#[cfg(windows)]
+fn hide_console(cmd: &mut Command) {
+  use std::os::windows::process::CommandExt;
+  const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+  cmd.creation_flags(CREATE_NO_WINDOW);
 }
 
 fn skip_name(name: &str) -> bool {
@@ -309,8 +351,9 @@ fn spawn_detached(path: &Path, extra_args: &[&str]) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    // Do not set CREATE_NO_WINDOW: that can leave a GUI Ava as a shell
+    // with no visible window after a self-improve hop.
+    cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
   }
   #[cfg(unix)]
   {
@@ -331,6 +374,96 @@ fn live_exe_path(state: &Persist) -> Option<PathBuf> {
   } else {
     None
   }
+}
+
+fn looks_like_debug_target(path: &Path) -> bool {
+  let text = normalize_path(path)
+    .to_string_lossy()
+    .replace('\\', "/");
+  text.contains("/target/debug/")
+}
+
+fn port_open(port: u16) -> bool {
+  let v4 = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+  let v6 = SocketAddr::from((Ipv6Addr::LOCALHOST, port));
+  TcpStream::connect_timeout(&v4, Duration::from_millis(200)).is_ok()
+    || TcpStream::connect_timeout(&v6, Duration::from_millis(200)).is_ok()
+}
+
+fn start_dev_server(source: &Path) -> Result<(), String> {
+  let mut cmd = if cfg!(windows) {
+    let mut c = Command::new("cmd");
+    c.args(["/C", "npm", "start"]);
+    c
+  } else {
+    let mut c = Command::new("npm");
+    c.args(["start"]);
+    c
+  };
+  cmd.current_dir(source);
+  cmd.stdin(Stdio::null());
+  cmd.stdout(Stdio::null());
+  cmd.stderr(Stdio::null());
+  #[cfg(windows)]
+  {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+  }
+  #[cfg(unix)]
+  {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+  }
+  cmd.spawn().map(|_| ()).map_err(|e| format!("Could not start the app server: {e}"))
+}
+
+fn wait_for_port(port: u16, timeout: Duration) -> bool {
+  let deadline = std::time::Instant::now() + timeout;
+  while std::time::Instant::now() < deadline {
+    if port_open(port) {
+      return true;
+    }
+    thread::sleep(Duration::from_millis(400));
+  }
+  port_open(port)
+}
+
+fn reload_main_window(app: &AppHandle) {
+  let handle = app.clone();
+  let _ = app.run_on_main_thread(move || {
+    let script = format!("location.replace({:?})", DEV_URL);
+    for label in ["main", "debug"] {
+      if let Some(window) = handle.get_webview_window(label) {
+        let _ = window.eval(&script);
+      }
+    }
+  });
+}
+
+/// After a debug self-improve, reload the existing webview. Do not start a
+/// second `ng serve` from boot — that deadlocks `tauri dev` and freezes the UI.
+fn reload_debug_frontend(app: &AppHandle) {
+  if port_open(DEV_PORT) {
+    reload_main_window(app);
+    return;
+  }
+  let Ok(source) = working_source(app) else {
+    reload_main_window(app);
+    return;
+  };
+  let handle = app.clone();
+  thread::spawn(move || {
+    if !port_open(DEV_PORT) && source.join("package.json").is_file() {
+      log::warn!("Ava's UI server is not running; starting it from {}", source.display());
+      if let Err(error) = start_dev_server(&source) {
+        log::warn!("{error}");
+      }
+      let _ = wait_for_port(DEV_PORT, Duration::from_secs(45));
+    }
+    reload_main_window(&handle);
+  });
 }
 
 /// If a self-improved build exists, start it and tell the caller to exit.
@@ -356,6 +489,13 @@ pub fn hop_to_live_if_needed(app: &AppHandle) -> bool {
     return false;
   };
   let current = current_exe();
+  if looks_like_debug_target(&live) && !looks_like_debug_target(&current) {
+    log::warn!(
+      "Skipping self-improved debug binary {}; it would load localhost.",
+      live.display()
+    );
+    return false;
+  }
   if same_path(&live, &current) {
     state.live_ok = true;
     let _ = save_state(app, &state);
@@ -380,21 +520,193 @@ pub fn hop_to_live_if_needed(app: &AppHandle) -> bool {
   }
 }
 
-fn tool_status() -> (bool, bool, bool, Vec<String>) {
-  let node = has_cmd("node");
-  let npm = has_cmd("npm");
-  let cargo = has_cmd("cargo");
-  let mut missing = Vec::new();
-  if !node {
-    missing.push("Node.js".into());
+fn tool(
+  id: &str,
+  label: &str,
+  present: bool,
+  install_url: &str,
+  install_command: &str,
+  detail: &str,
+) -> ToolNeed {
+  ToolNeed {
+    id: id.into(),
+    label: label.into(),
+    present,
+    install_url: install_url.into(),
+    install_command: install_command.into(),
+    detail: detail.into(),
   }
-  if !npm {
-    missing.push("npm".into());
+}
+
+fn host_os() -> &'static str {
+  if cfg!(target_os = "windows") {
+    "windows"
+  } else if cfg!(target_os = "macos") {
+    "macos"
+  } else {
+    "linux"
   }
-  if !cargo {
-    missing.push("Rust (cargo)".into());
+}
+
+fn grok_install_command() -> &'static str {
+  if cfg!(windows) {
+    "irm https://x.ai/cli/install.ps1 | iex"
+  } else {
+    "curl -fsSL https://x.ai/cli/install.sh | bash"
   }
-  (node, npm, cargo, missing)
+}
+
+fn rust_install_command() -> &'static str {
+  if cfg!(windows) {
+    "irm https://win.rustup.rs | iex"
+  } else {
+    "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+  }
+}
+
+fn has_msvc() -> bool {
+  #[cfg(windows)]
+  {
+    let vswhere = PathBuf::from(
+      env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into()),
+    )
+    .join("Microsoft Visual Studio")
+    .join("Installer")
+    .join("vswhere.exe");
+    if !vswhere.is_file() {
+      return false;
+    }
+    let requires = [
+      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
+    ];
+    for required in requires {
+      let mut cmd = Command::new(&vswhere);
+      cmd.args([
+        "-latest",
+        "-products",
+        "*",
+        "-requires",
+        required,
+        "-property",
+        "installationPath",
+      ]);
+      hide_console(&mut cmd);
+      let Ok(out) = cmd.output() else {
+        continue;
+      };
+      if out.status.success() && !String::from_utf8_lossy(&out.stdout).trim().is_empty() {
+        return true;
+      }
+    }
+    false
+  }
+  #[cfg(not(windows))]
+  {
+    false
+  }
+}
+
+fn has_xcode_clt() -> bool {
+  #[cfg(target_os = "macos")]
+  {
+    Command::new("xcode-select")
+      .arg("-p")
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .status()
+      .map(|s| s.success())
+      .unwrap_or(false)
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    false
+  }
+}
+
+fn cpp_tool() -> ToolNeed {
+  if cfg!(windows) {
+    tool(
+      "cpp",
+      "Visual Studio C++ tools",
+      has_msvc(),
+      "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+      "",
+      "Install Build Tools and select Desktop development with C++.",
+    )
+  } else if cfg!(target_os = "macos") {
+    tool(
+      "cpp",
+      "Xcode command line tools",
+      has_xcode_clt(),
+      "https://developer.apple.com/xcode/",
+      "xcode-select --install",
+      "Needed to compile the desktop app.",
+    )
+  } else {
+    tool(
+      "cpp",
+      "C compiler",
+      has_cmd("cc") || has_cmd("gcc") || has_cmd("clang"),
+      "",
+      "sudo apt install build-essential",
+      "A C compiler is needed to compile the desktop app.",
+    )
+  }
+}
+
+fn collect_tools() -> Vec<ToolNeed> {
+  let mut tools = vec![
+    tool(
+      "node",
+      "Node.js",
+      has_cmd("node"),
+      "https://nodejs.org/en/download",
+      "",
+      "Download the LTS installer. npm comes with it.",
+    ),
+    tool(
+      "npm",
+      "npm",
+      has_cmd("npm"),
+      "https://nodejs.org/en/download",
+      "",
+      "Comes with Node.js.",
+    ),
+    tool(
+      "cargo",
+      "Rust",
+      has_cmd("cargo"),
+      "https://rustup.rs/",
+      rust_install_command(),
+      "Install the stable toolchain with rustup.",
+    ),
+    cpp_tool(),
+  ];
+  if cfg!(all(windows, target_arch = "aarch64")) {
+    tools.push(tool(
+      "clang",
+      "LLVM Clang",
+      has_cmd("clang"),
+      "https://releases.llvm.org/",
+      "",
+      "ARM64 Windows needs Clang to compile some Rust crates.",
+    ));
+  }
+  tools
+}
+
+fn tool_status() -> (bool, bool, bool, Vec<ToolNeed>, Vec<String>) {
+  let tools = collect_tools();
+  let node = tools.iter().find(|t| t.id == "node").map(|t| t.present).unwrap_or(false);
+  let npm = tools.iter().find(|t| t.id == "npm").map(|t| t.present).unwrap_or(false);
+  let cargo = tools.iter().find(|t| t.id == "cargo").map(|t| t.present).unwrap_or(false);
+  let missing: Vec<String> = tools
+    .iter()
+    .filter(|t| !t.present)
+    .map(|t| t.label.clone())
+    .collect();
+  (node, npm, cargo, tools, missing)
 }
 
 fn status_message(ready: bool, missing: &[String], source_ok: bool) -> String {
@@ -417,7 +729,7 @@ pub fn self_improve_status(app: AppHandle) -> Result<SelfImproveStatus, String> 
   let pristine = pristine_dir(&app).unwrap_or_default();
   let persist = load_state(&app);
   let source_ok = source.join("package.json").is_file() || bundled_source(&app).is_some() || from_checkout;
-  let (node, npm, cargo, missing) = tool_status();
+  let (node, npm, cargo, tools, missing) = tool_status();
   let ready = source_ok && missing.is_empty();
   Ok(SelfImproveStatus {
     desktop: true,
@@ -428,12 +740,16 @@ pub fn self_improve_status(app: AppHandle) -> Result<SelfImproveStatus, String> 
     pristine_path: pristine.to_string_lossy().into_owned(),
     live_exe: persist.live_exe,
     original_exe: persist.original_exe,
+    os: host_os().into(),
     node,
     npm,
     cargo,
     ready,
     message: status_message(ready, &missing, source_ok),
     missing,
+    tools,
+    grok_install_url: "https://x.ai/cli".into(),
+    grok_install_command: grok_install_command().into(),
   })
 }
 
@@ -563,7 +879,10 @@ pub fn apply_and_relaunch(app: &AppHandle) -> Result<(), String> {
   ARMED.store(false, Ordering::SeqCst);
 
   if cfg!(debug_assertions) {
-    app.request_restart();
+    // `request_restart()` relaunches target/debug/app.exe without `tauri dev`,
+    // so the webview hits localhost with nobody listening. Keep this process
+    // and reload the existing window instead.
+    reload_debug_frontend(app);
     return Ok(());
   }
 
@@ -630,7 +949,7 @@ fn relaunch_original(app: &AppHandle) -> Result<(), String> {
     }
   }
   if cfg!(debug_assertions) {
-    app.request_restart();
+    reload_debug_frontend(app);
     return Ok(());
   }
   Ok(())
@@ -699,5 +1018,40 @@ mod tests {
     if cfg!(windows) {
       assert!(same_path(&a, &b));
     }
+  }
+
+  #[test]
+  fn debug_target_path_is_detected() {
+    assert!(looks_like_debug_target(Path::new(
+      r"C:\src\ava\src-tauri\target\debug\app.exe"
+    )));
+    assert!(!looks_like_debug_target(Path::new(
+      r"C:\src\ava\src-tauri\target\release\app.exe"
+    )));
+  }
+
+  #[test]
+  fn collect_tools_covers_compile_needs() {
+    let tools = collect_tools();
+    let ids: Vec<&str> = tools.iter().map(|t| t.id.as_str()).collect();
+    assert!(ids.contains(&"node"));
+    assert!(ids.contains(&"npm"));
+    assert!(ids.contains(&"cargo"));
+    assert!(ids.contains(&"cpp"));
+    for tool in &tools {
+      if !tool.present {
+        assert!(
+          !tool.install_url.is_empty() || !tool.install_command.is_empty(),
+          "{} should explain how to install",
+          tool.id
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn grok_install_points_at_official_cli() {
+    let command = grok_install_command();
+    assert!(command.contains("x.ai/cli"));
   }
 }

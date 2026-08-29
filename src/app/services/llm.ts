@@ -395,7 +395,7 @@ export class LlmService {
   /** Agent / tool loops that already built a full message list. */
   async generateMessages(
     messages: ChatTurn[],
-    options?: { maxNewTokens?: number; temperature?: number; topP?: number },
+    options?: { maxNewTokens?: number; temperature?: number; topP?: number; research?: boolean },
   ): Promise<ChatResult> {
     const signal = this.beginGeneration();
     const backend = await this.ensureLoaded();
@@ -408,6 +408,7 @@ export class LlmService {
         temperature: options?.temperature ?? 0.6,
         topP: options?.topP ?? 0.95,
         modelId: this.selectedModel().id,
+        research: options?.research,
         signal,
       });
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');

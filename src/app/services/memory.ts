@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HomeService } from './home';
 import { GardensService } from './gardens';
 import { OnboardingService } from './onboarding';
-import { compactNote, durableFact, identityFact, isExplicitRemember, peopleFromText, type PersonMention } from './presence';
+import { compactNote, durableFact, fullNameFromPersona, identityFact, isExplicitRemember, peopleFromText, type PersonMention } from './presence';
 import {
   OKF_ACTOR,
   OKF_VERSION,
@@ -118,6 +118,7 @@ export class MemoryService {
   readonly homeError = signal('');
   readonly identityNotes = signal('');
   readonly people = signal<MemoryPerson[]>([]);
+  readonly focusRel = signal('');
 
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTurns: MemoryTurn[] = [];
@@ -154,6 +155,17 @@ export class MemoryService {
     const personName = name || this.onboarding.userName() || 'You';
     if (!(await this.home.exists('index.md'))) {
       await this.home.writeText('index.md', rootIndex());
+    } else {
+      const index = await this.home.readText('index.md');
+      if (index && !/reports\//i.test(index) && index.includes('[Noticing]')) {
+        await this.home.writeText(
+          'index.md',
+          index.replace(
+            '* [Noticing]',
+            '* [Reports](reports/) - research Ava wrote for you\n* [Noticing]',
+          ),
+        );
+      }
     }
     if (!(await this.home.exists('log.md'))) {
       await this.home.writeText('log.md', rootLog());
@@ -180,6 +192,48 @@ export class MemoryService {
     if (!(await this.home.exists('conversation/index.md'))) {
       await this.home.writeText('conversation/index.md', directoryIndex('Conversation', []));
     }
+    if (!(await this.home.exists('reports/index.md'))) {
+      await this.home.writeText('reports/index.md', directoryIndex('Reports', []));
+    }
+  }
+
+  async rememberFullName(name: string): Promise<void> {
+    await this.writeIdentity(`Full name is ${name}`);
+  }
+
+  async writeReport(title: string, body: string, description?: string): Promise<string> {
+    await this.home.whenReady();
+    if (!(await this.home.exists('reports/index.md'))) {
+      await this.home.writeText('reports/index.md', directoryIndex('Reports', []));
+    }
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    const rel = `reports/${stamp}-${slugify(title)}.md`;
+    await this.home.writeText(rel, stringifyOkf({
+      type: 'Report',
+      title,
+      description: description || 'A research report Ava wrote for you.',
+      tags: ['research', 'report'],
+      generated: generatedNow(),
+    }, `${body.trim()}\n`));
+    await this.writeReportsIndex();
+    this.noteQuietly(title);
+    void this.appendLog(`**Report**: Wrote [${title}](/${rel}).`);
+    return rel;
+  }
+
+  private async writeReportsIndex(): Promise<void> {
+    const entries = await this.home.list('reports');
+    const items: Array<{ href: string; title: string; description: string }> = [];
+    for (const entry of entries.filter(item => item.name.endsWith('.md') && item.name !== 'index.md')) {
+      const doc = await this.readDoc(entry.rel);
+      items.push({
+        href: entry.name,
+        title: doc ? okfTitle(doc, titleFromRel(entry.rel)) : titleFromRel(entry.rel),
+        description: doc ? okfDescription(doc) : 'A research report',
+      });
+    }
+    items.reverse();
+    await this.home.writeText('reports/index.md', directoryIndex('Reports', items));
   }
 
   route(text: string): TopicRoute {
@@ -226,6 +280,10 @@ export class MemoryService {
     const parts: string[] = [];
     const name = this.onboarding.userName();
     if (name) parts.push(`You are speaking with ${name}.`);
+    const fullName = fullNameFromPersona(name, this.identityNotes());
+    if (fullName && fullName.toLowerCase() !== name.trim().toLowerCase()) {
+      parts.push(`Their full name is ${fullName}.`);
+    }
     const identity = this.identityNotes().trim();
     if (identity) {
       parts.push('What you know about them:');
@@ -472,6 +530,18 @@ export class MemoryService {
         title: topic.title,
         detail: topic.description || 'A subject Ava is holding',
         rel: `topics/${topic.id}`,
+      });
+    }
+    const reports = await this.home.list('reports');
+    for (const entry of reports.filter(item => item.name.endsWith('.md') && item.name !== 'index.md')) {
+      const doc = await this.readDoc(entry.rel);
+      const generated = doc?.frontmatter['generated'] as { at?: string } | undefined;
+      events.push({
+        id: `report-${entry.name}`,
+        at: generated?.at || new Date().toISOString(),
+        title: doc ? okfTitle(doc, titleFromRel(entry.rel)) : titleFromRel(entry.rel),
+        detail: doc ? okfDescription(doc) || 'A research report' : 'A research report',
+        rel: entry.rel,
       });
     }
     return events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 40);
@@ -966,6 +1036,7 @@ What Ava keeps for you, as files on this device.
 * [You](person/) - who Ava is speaking with
 * [Topics](topics/) - one place per subject, kept apart
 * [Conversation](conversation/) - the single ongoing talk
+* [Reports](reports/) - research Ava wrote for you
 * [Noticing](noticing.md) - what Ava quietly kept
 `;
 }

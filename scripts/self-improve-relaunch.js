@@ -73,8 +73,13 @@ function run(command, args, cwd) {
 }
 
 function builtExe(root) {
-  const name = process.platform === 'win32' ? 'app.exe' : 'app';
-  return path.join(root, 'src-tauri', 'target', 'release', name);
+  const names = process.platform === 'win32' ? ['app.exe'] : ['app'];
+  const releaseDir = path.join(root, 'src-tauri', 'target', 'release');
+  for (const name of names) {
+    const candidate = path.join(releaseDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(releaseDir, names[0]);
 }
 
 function writeState(patch) {
@@ -92,12 +97,20 @@ function writeState(patch) {
 
 function startExe(exe, extraArgs) {
   log(`starting ${exe}`);
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key === 'TAURI_ENV' || key === 'TAURI_DEV_HOST' || key === 'TAURI_CLI_NO_DEV_SERVER_WAIT') {
+      delete env[key];
+    }
+  }
   const child = spawn(exe, extraArgs || [], {
     detached: true,
     stdio: 'ignore',
-    windowsHide: true,
+    windowsHide: false,
+    env,
   });
   child.unref();
+  return child;
 }
 
 function startOriginal(reason) {
@@ -131,7 +144,17 @@ try {
     lastHopAt: Math.floor(Date.now() / 1000),
     originalExe: originalExe || undefined,
   });
-  startExe(exe);
+  const child = startExe(exe);
+  const pid = child && child.pid;
+  if (pid) {
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      if (!pidAlive(pid)) {
+        throw new Error(`self-improved Ava exited immediately (${exe})`);
+      }
+      sleep(400);
+    }
+  }
   log('started self-improved Ava');
 } catch (error) {
   startOriginal(error instanceof Error ? error.message : String(error));

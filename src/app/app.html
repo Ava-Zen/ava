@@ -291,6 +291,17 @@
                         {{ msg.debug.model }} · {{ formatGenDuration(msg.debug.durationMs) }}
                       </small>
                     }
+                    @if (msg.reportRel) {
+                      <div class="message-actions">
+                        <button
+                          class="message-action"
+                          type="button"
+                          (click)="openMemoryAt(msg.reportRel || '')"
+                        >
+                          <span>Open report</span>
+                        </button>
+                      </div>
+                    }
                     @if (msg.retryFor) {
                       <div class="message-actions">
                         <button

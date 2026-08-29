@@ -1,17 +1,22 @@
 import {
   AVA_CAPABILITIES_REPLY,
   extractProjectHint,
+  extractResearchTopic,
   extractSelfImproveTask,
   isAddressedToAva,
+  isAskingAboutSchedules,
   isAskingCapabilities,
   isAskingForGrokWork,
   isAskingForTime,
+  isAskingToCancelSchedule,
   isAskingToPickFolder,
+  isAskingToResearchSelf,
   isAskingToResetSelfImprovements,
   isAskingToSelfImprove,
   isAskingToStopGrokTurn,
   isAskingToStopListening,
   isLeavingGrokWork,
+  parseScheduleRequest,
 } from './intents';
 
 describe('isAskingForTime', () => {
@@ -161,5 +166,53 @@ describe('isAskingToResetSelfImprovements', () => {
     expect(isAskingToResetSelfImprovements('reset yourself')).toBeFalse();
     expect(isAskingToResetSelfImprovements('Ava, reset the conversation')).toBeFalse();
     expect(isAskingToResetSelfImprovements('undo that')).toBeFalse();
+  });
+});
+
+describe('research and schedules', () => {
+  it('matches research on the user', () => {
+    expect(isAskingToResearchSelf('Ava please do some research on me')).toBeTrue();
+    expect(isAskingToResearchSelf('do some research on me')).toBeTrue();
+    expect(isAskingToResearchSelf('research me')).toBeTrue();
+    expect(isAskingToResearchSelf('look me up')).toBeTrue();
+    expect(isAskingToResearchSelf('research bitcoin')).toBeFalse();
+    expect(extractResearchTopic('research bitcoin')).toBe('bitcoin');
+    expect(extractResearchTopic('do some research on local models')).toBe('local models');
+    expect(extractResearchTopic('research me')).toBeNull();
+  });
+
+  it('parses morning interval research and one-shot relative runs', () => {
+    const daily = parseScheduleRequest('every morning at 08 00 do some research on me');
+    expect(daily?.kind).toBe('interval');
+    expect(daily?.hour).toBe(8);
+    expect(daily?.minute).toBe(0);
+    expect(daily?.researchMe).toBeTrue();
+    expect(daily?.intervalDays).toBe(1);
+
+    const topic = parseScheduleRequest('research quantum computing every day at 8');
+    expect(topic?.kind).toBe('interval');
+    expect(topic?.hour).toBe(8);
+    expect(topic?.researchMe).toBeFalse();
+    expect(topic?.task.toLowerCase()).toContain('quantum computing');
+
+    const once = parseScheduleRequest('in 5 minutes research me');
+    expect(once?.kind).toBe('once');
+    expect(once?.researchMe).toBeTrue();
+    expect(once?.delayMs).toBe(5 * 60 * 1000);
+
+    expect(parseScheduleRequest('what time is it')).toBeNull();
+    expect(parseScheduleRequest('research me')).toBeNull();
+  });
+
+  it('lists and cancels schedules', () => {
+    expect(isAskingAboutSchedules('what are my schedules')).toBeTrue();
+    expect(isAskingAboutSchedules('show my schedule')).toBeTrue();
+    expect(isAskingToCancelSchedule('cancel my schedules')).toBeTrue();
+    expect(isAskingToCancelSchedule('research me')).toBeFalse();
+  });
+
+  it('mentions research and schedules in capabilities', () => {
+    expect(AVA_CAPABILITIES_REPLY.toLowerCase()).toContain('research');
+    expect(AVA_CAPABILITIES_REPLY.toLowerCase()).toContain('schedule');
   });
 });

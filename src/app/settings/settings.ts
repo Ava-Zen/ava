@@ -17,7 +17,9 @@ import { ThemePreference, ThemeService } from '../services/theme';
 import { GardensService } from '../services/gardens';
 import { GrokCliService } from '../services/grok-cli';
 import { DebugLogService } from '../services/debug-log';
-import { SelfImproveService } from '../services/self-improve';
+import { SelfImproveService, grokCliInstallCommand, grokCliInstallUrl } from '../services/self-improve';
+import { openExternal } from '../services/mcp/mcp-http';
+import { AvaSchedule, SchedulesService } from '../services/schedules';
 
 interface ModelFileInfo {
   name: string;
@@ -52,6 +54,8 @@ export class Settings {
   private readonly grokBuild = inject(GrokCliService);
   private readonly debugLog = inject(DebugLogService);
   private readonly selfImprove = inject(SelfImproveService);
+  private readonly scheduleStore = inject(SchedulesService);
+  protected readonly schedules = this.scheduleStore.items;
   protected readonly debugAvailable = this.debugLog.available;
   protected readonly selfImproveDesktop = this.selfImprove.desktop;
   protected readonly selfImproveStatus = this.selfImprove.status;
@@ -102,6 +106,12 @@ export class Settings {
     if (this.selfImprove.desktop()) void this.selfImprove.refresh();
     effect(() => {
       this.workspaceDraft = this.agentsService.workspace();
+    });
+    effect(() => {
+      if (!this.selfImprove.waitingOnSetup()) return;
+      window.setTimeout(() => {
+        document.getElementById('self-improve-setup')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
     });
   }
 
@@ -268,6 +278,17 @@ export class Settings {
   protected readonly grokBuildDesktop = this.grokBuild.desktop;
   protected readonly grokBuildInfo = this.grokBuild.grokInfo;
   protected readonly grokBuildPhase = this.grokBuild.phase;
+  protected readonly grokBuildBusy = this.grokBuild.busy;
+  protected readonly grokBuildInstallLog = this.grokBuild.installLog;
+  protected readonly grokCliReady = computed(() => this.grokBuild.phase() === 'ready');
+  protected readonly selfImproveTools = computed(() => this.selfImprove.status()?.tools || []);
+  protected readonly selfImproveReady = computed(
+    () => !!this.selfImprove.status()?.ready && this.grokBuild.phase() === 'ready',
+  );
+  protected readonly grokInstallUrl = grokCliInstallUrl();
+  protected readonly grokInstallCommand = computed(
+    () => this.selfImprove.status()?.grokInstallCommand || grokCliInstallCommand(this.selfImprove.status()?.os),
+  );
   protected readonly intelligenceMode = this.llmService.intelligenceMode;
   protected readonly cloudExclusive = this.llmService.isCloudExclusive;
   protected readonly copilotSignedIn = this.copilotAuth.signedIn;
@@ -416,6 +437,28 @@ export class Settings {
 
   openGrokSessions() {
     this.openGrokCli.emit();
+  }
+
+  async openToolLink(url: string) {
+    if (!url) return;
+    try {
+      await openExternal(url);
+    } catch {
+      this.selfImproveError = 'Could not open that link.';
+    }
+  }
+
+  async installGrokCli() {
+    this.selfImproveError = '';
+    await this.grokBuild.install();
+    if (this.grokBuild.phase() === 'ready') this.selfImprove.waitingOnSetup.set(false);
+    await this.selfImprove.refresh();
+  }
+
+  async loginGrokCli() {
+    this.selfImproveError = '';
+    await this.grokBuild.login();
+    if (this.grokBuild.phase() === 'ready') this.selfImprove.waitingOnSetup.set(false);
   }
 
   openDebugConsole() {
@@ -629,6 +672,28 @@ export class Settings {
   @Output() openDebug = new EventEmitter<void>();
   @Output() gardenChanged = new EventEmitter<void>();
   @Output() deleteGarden = new EventEmitter<string>();
+
+  scheduleWhen(job: AvaSchedule): string {
+    return this.scheduleStore.describe(job);
+  }
+
+  toggleSchedule(id: string): void {
+    const job = this.schedules().find(item => item.id === id);
+    if (!job) return;
+    this.scheduleStore.setEnabled(id, !job.enabled);
+  }
+
+  async removeSchedule(id: string): Promise<void> {
+    const job = this.schedules().find(item => item.id === id);
+    const ok = await this.confirm.ask({
+      title: job ? `Remove ${job.title}?` : 'Remove this schedule?',
+      message: 'It will not run again unless you ask me to schedule it.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
+    this.scheduleStore.remove(id);
+  }
 
   gardenHomeLabel(id: string): string {
     const garden = this.gardens().find(item => item.id === id);

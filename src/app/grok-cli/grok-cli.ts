@@ -4,6 +4,8 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { GardensService } from '../services/gardens';
 import { GrokCliService, RosterItem, TranscriptItem, folderName } from '../services/grok-cli';
+import { SelfImproveService, grokCliInstallCommand, grokCliInstallUrl } from '../services/self-improve';
+import { openExternal } from '../services/mcp/mcp-http';
 import {
   hasAllowAllOption,
   isCommandPermission,
@@ -27,6 +29,7 @@ export class GrokCliOverlay {
   private readonly gardens = inject(GardensService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly selfImprove = inject(SelfImproveService);
 
   @Input() embedded = false;
   @Input() listenMode: ListenMode = 'push';
@@ -54,10 +57,15 @@ export class GrokCliOverlay {
   protected readonly projectHint = this.grok.projectHint;
   protected readonly needsFolder = this.grok.needsFolder;
   protected readonly selfImproving = this.grok.selfImproving;
+  protected readonly selfImproveSetup = this.selfImprove.waitingOnSetup;
+  protected readonly grokInstallCommand = computed(() =>
+    this.selfImprove.status()?.grokInstallCommand || grokCliInstallCommand(this.selfImprove.status()?.os),
+  );
+  protected readonly grokInstallUrl = grokCliInstallUrl();
   protected readonly folderChoices = this.grok.folderChoices;
   protected readonly folderLabel = computed(() => folderName(this.cwd()) || 'Choose a folder');
   protected readonly heading = computed(() => {
-    if (this.selfImproving()) return 'Improving Ava';
+    if (this.selfImproving() || this.selfImproveSetup()) return 'Improving Ava';
     if (this.phase() !== 'ready') return 'Grok';
     if (this.view() === 'roster') return 'Sessions';
     if (!this.cwd().trim()) return 'New session';
@@ -129,12 +137,18 @@ export class GrokCliOverlay {
     return folderName(path);
   }
 
+  protected async openGrokInstallPage(): Promise<void> {
+    await openExternal(this.grokInstallUrl);
+  }
+
   protected async install(): Promise<void> {
     await this.grok.install();
+    if (this.grok.phase() === 'ready') this.selfImprove.waitingOnSetup.set(false);
   }
 
   protected async login(): Promise<void> {
     await this.grok.login();
+    if (this.grok.phase() === 'ready') this.selfImprove.waitingOnSetup.set(false);
   }
 
   protected async cancelLogin(): Promise<void> {

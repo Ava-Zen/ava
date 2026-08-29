@@ -97,8 +97,19 @@ export function peopleAck(count: number): string {
 }
 
 export function identityFact(text: string): string | null {
+  const full = text.match(/\bmy full name is\s+([^.,!?]{3,80})/i);
+  if (full) return `Full name is ${cleanFactTail(full[1])}`;
   const name = text.match(/\bmy name is\s+([^.,!?]{2,40})/i);
-  if (name) return `Name is ${cleanFactTail(name[1])}`;
+  if (name) {
+    const cleaned = cleanFactTail(name[1]);
+    return looksLikeFullName(cleaned) ? `Full name is ${cleaned}` : `Name is ${cleaned}`;
+  }
+  const twitter = text.match(/\bmy (?:x|twitter)(?: handle)? is\s+(@?[\w./-]+)/i);
+  if (twitter) return `X is ${twitter[1]}`;
+  const youtube = text.match(/\bmy youtube(?: channel)? is\s+(\S+)/i);
+  if (youtube) return `YouTube is ${youtube[1]}`;
+  const github = text.match(/\bmy github is\s+(\S+)/i);
+  if (github) return `GitHub is ${github[1]}`;
   const live = text.match(/\bi live in\s+([^.,!?]{2,40})/i);
   if (live) return `Lives in ${cleanFactTail(live[1])}`;
   const work = text.match(/\bi work(?:\s+as|\s+at|\s+for)?\s+([^.,!?]{2,40})/i);
@@ -107,6 +118,55 @@ export function identityFact(text: string): string | null {
     || text.match(/\bmy age is\s+(\d{1,2})\b/i);
   if (age) return `Age is ${age[1]}`;
   return null;
+}
+
+export function looksLikeFullName(value: string): boolean {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return parts.length >= 2 && parts.length <= 4 && parts.every(part => /^[A-Za-z][A-Za-z'.-]{0,30}$/.test(part));
+}
+
+export function titleCaseFullName(value: string): string {
+  return value
+    .replace(/[“”"']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.,;:]+$/, '')
+    .split(' ')
+    .filter(part => part && !/^(and|or|the)$/i.test(part))
+    .slice(0, 4)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+export function fullNameFromPersona(name?: string, identity?: string): string {
+  const hay = identity ?? '';
+  const labeled = hay.match(/\bfull name is\s+([^.\n]{3,80})/i)?.[1]
+    || hay.match(/\bname is\s+([A-Za-z][A-Za-z'.-]+(?:\s+[A-Za-z][A-Za-z'.-]+){1,3})\b/i)?.[1];
+  const candidate = (labeled || name || '').replace(/\s+/g, ' ').trim();
+  return looksLikeFullName(candidate) ? titleCaseFullName(candidate) : '';
+}
+
+export function extractGivenFullName(text: string): string | null {
+  const labeled = text.match(/\b(?:my )?(?:full )?name is\s+([^.,!?\n]{3,80})/i);
+  const raw = (labeled?.[1] || text).replace(/\s+/g, ' ').trim();
+  return looksLikeFullName(raw) ? titleCaseFullName(raw) : null;
+}
+
+export function identitySocials(identity?: string): string[] {
+  if (!identity) return [];
+  const found: string[] = [];
+  const add = (line: string) => {
+    const key = line.toLowerCase();
+    if (found.some(item => item.toLowerCase() === key)) return;
+    found.push(line);
+  };
+  for (const match of identity.matchAll(/\bX is\s+(\S+)/gi)) add(`X: ${match[1]}`);
+  for (const match of identity.matchAll(/\bYouTube is\s+(\S+)/gi)) add(`YouTube: ${match[1]}`);
+  for (const match of identity.matchAll(/\bGitHub is\s+(\S+)/gi)) add(`GitHub: ${match[1]}`);
+  for (const match of identity.matchAll(/https?:\/\/(?:www\.)?(?:x|twitter|youtube|github)\.com\/[^\s)]+/gi)) {
+    add(match[0]);
+  }
+  return found;
 }
 
 export type PersonaGap = 'name' | 'age' | 'work' | 'family' | 'home';
