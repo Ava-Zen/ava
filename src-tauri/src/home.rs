@@ -56,6 +56,18 @@ pub fn home_write_text(root: String, rel: String, contents: String) -> Result<()
 }
 
 #[tauri::command]
+pub fn home_open(root: String) -> Result<(), String> {
+  let path = PathBuf::from(root.trim());
+  if path.as_os_str().is_empty() {
+    return Err("Missing home folder.".into());
+  }
+  if !path.exists() {
+    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+  }
+  tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn home_list(root: String, rel: String) -> Result<Vec<HomeEntry>, String> {
   let path = resolve_inside(&root, &rel)?;
   if !path.exists() {

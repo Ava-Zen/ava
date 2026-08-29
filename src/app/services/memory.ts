@@ -2,7 +2,18 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { HomeService } from './home';
 import { GardensService } from './gardens';
 import { OnboardingService } from './onboarding';
-import { compactNote, durableFact, fullNameFromPersona, identityFact, isExplicitRemember, peopleFromText, type PersonMention } from './presence';
+import { isAskingForGrokWork, isGrokSessionMemory } from '../intents';
+import {
+  compactNote,
+  durableFact,
+  fullNameFromPersona,
+  identityFact,
+  isExplicitRemember,
+  peopleFromText,
+  personaReplyFact,
+  type PersonaGap,
+  type PersonMention,
+} from './presence';
 import {
   OKF_ACTOR,
   OKF_VERSION,
@@ -67,6 +78,8 @@ export interface MemoryPerson {
   notes: string;
 }
 
+export type MemoryNodeFamily = 'companion' | 'person' | 'topic' | 'note' | 'place';
+
 export interface MemoryGraphNode {
   id: string;
   title: string;
@@ -114,6 +127,7 @@ export class MemoryService {
   readonly homeLabel = this.home.label;
   readonly homePath = this.home.root;
   readonly desktop = this.home.desktop;
+  readonly canRevealHome = this.home.canReveal;
   readonly lastNotice = signal('');
   readonly homeError = signal('');
   readonly identityNotes = signal('');
@@ -136,7 +150,12 @@ export class MemoryService {
     const stored = await this.loadConversation();
     if (stored.length) {
       this.lastTurns = stored;
-      const lastTopic = [...stored].reverse().find(turn => turn.topicId)?.topicId;
+      const lastTopic = [...stored].reverse().find(turn => {
+        if (!turn.topicId) return false;
+        const topic = this.topics().find(item => item.id === turn.topicId);
+        if (!topic) return true;
+        return !isGrokSessionMemory(`${topic.title}\n${topic.notes}\n${topic.description}`);
+      })?.topicId;
       if (lastTopic) this.activeTopicId.set(lastTopic);
       await this.recoverPeople(stored);
       return stored;
@@ -237,6 +256,9 @@ export class MemoryService {
   }
 
   route(text: string): TopicRoute {
+    if (isAskingForGrokWork(text)) {
+      return { topic: null, switched: false, created: false };
+    }
     const topics = this.topics();
     const previous = this.activeTopicId();
     const ranked = rankTopics(text, topics, previous);
@@ -277,6 +299,9 @@ export class MemoryService {
   }
 
   contextBlock(topic: MemoryTopic | null): string {
+    if (topic && isGrokSessionMemory(`${topic.title}\n${topic.notes}\n${topic.description}`)) {
+      topic = null;
+    }
     const parts: string[] = [];
     const name = this.onboarding.userName();
     if (name) parts.push(`You are speaking with ${name}.`);
@@ -316,7 +341,7 @@ export class MemoryService {
     return scopeHistoryToTopic(turns, topicId, maxTurns);
   }
 
-  rememberUser(text: string, topic: MemoryTopic | null): RememberResult {
+  rememberUser(text: string, topic: MemoryTopic | null, personaGap?: PersonaGap | null): RememberResult {
     const trimmed = text.trim();
     const explicit = isExplicitRemember(trimmed);
     if (!trimmed) return { kind: 'none', explicit };
@@ -324,16 +349,18 @@ export class MemoryService {
     const people = peopleFromText(trimmed);
     if (people.length) {
       void this.writePeople(people);
-      const line = people.map(person => `${person.role}: ${person.name}`).join(', ');
+      const line = people.map(person => person.notes
+        ? `${person.role}: ${person.name} (${person.notes})`
+        : `${person.role}: ${person.name}`).join(', ');
       this.noteQuietly(line);
       return { kind: 'people', line, explicit: true };
     }
 
-    const identity = identityFact(trimmed);
+    const identity = identityFact(trimmed) || (personaGap ? personaReplyFact(personaGap, trimmed) : null);
     if (identity) {
       void this.writeIdentity(identity);
       this.noteQuietly(identity);
-      return { kind: 'identity', line: identity, explicit };
+      return { kind: 'identity', line: identity, explicit: true };
     }
 
     const fact = durableFact(trimmed);
@@ -469,7 +496,7 @@ export class MemoryService {
         id: person.id,
         title: person.name,
         rel: `person/${person.id}.md`,
-        kind: person.role || 'Person',
+        kind: 'Person',
         weight: 2,
       });
       edges.push({ from: 'you', to: person.id });
@@ -556,6 +583,15 @@ export class MemoryService {
     this.homeError.set('');
     await this.ensureBundle();
     return result.path;
+  }
+
+  async revealHome(): Promise<boolean> {
+    this.homeError.set('');
+    const ok = await this.home.openInExplorer();
+    if (!ok && this.home.canReveal()) {
+      this.homeError.set('Could not open the home folder.');
+    }
+    return ok;
   }
 
   async useSuggestedHome(): Promise<string | null> {
@@ -706,14 +742,19 @@ export class MemoryService {
     const next = [...this.people()];
     for (const mention of mentions) {
       const existing = next.find(person => person.name.toLowerCase() === mention.name.toLowerCase());
+      const base = existing?.notes?.trim() || `${mention.name} is ${mention.role.toLowerCase()}.`;
+      const extra = mention.notes?.trim() || '';
+      const notes = extra && !base.toLowerCase().includes(extra.toLowerCase())
+        ? `${base} ${extra}`.trim()
+        : base;
       const person: MemoryPerson = existing
-        ? { ...existing, role: mention.role, relation: mention.relation }
+        ? { ...existing, role: mention.role, relation: mention.relation, notes }
         : {
           id: uniqueTopicId(slugify(mention.name), next.map(item => item.id).concat(['index', 'profile', 'ava'])),
           name: mention.name,
           role: mention.role,
           relation: mention.relation,
-          notes: `${mention.name} is ${mention.role.toLowerCase()}.`,
+          notes,
         };
       if (existing) {
         const index = next.findIndex(item => item.id === existing.id);
@@ -824,6 +865,17 @@ export class MemoryService {
   }
 }
 
+export function memoryNodeFamily(kind: string, id?: string): MemoryNodeFamily {
+  const key = (kind || '').trim().toLowerCase();
+  if (id === 'ava' || key === 'companion') return 'companion';
+  if (key === 'topic') return 'topic';
+  if (key === 'note' || key === 'conversation' || key === 'report' || key === 'concept' || key === 'doc') {
+    return 'note';
+  }
+  if (key === 'directory' || key === 'bundle' || key === 'place' || key === 'dir') return 'place';
+  return 'person';
+}
+
 export function rankTopics(
   text: string,
   topics: MemoryTopic[],
@@ -865,6 +917,7 @@ export function suggestTopicFromText(text: string): { title: string; seed: strin
   const trimmed = text.trim();
   if (!trimmed || trimmed.length < 18) return null;
   if (STOP_TOPIC.test(trimmed) || GREETING.test(trimmed)) return null;
+  if (isAskingForGrokWork(trimmed)) return null;
   if (peopleFromText(trimmed).length) return null;
   if (/^(what time|what can you|who are you|how are you)/i.test(trimmed)) return null;
 

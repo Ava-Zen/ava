@@ -5,7 +5,9 @@ import {
   MemoryGraph,
   MemoryGraphNode,
   MemoryNode,
+  MemoryNodeFamily,
   MemoryService,
+  memoryNodeFamily,
 } from '../services/memory';
 import { markdownToHtml } from '../services/text-format';
 
@@ -39,6 +41,7 @@ export class MemoryExplorer {
   protected readonly homeLabel = this.memory.homeLabel;
   protected readonly homePath = this.memory.homePath;
   protected readonly desktop = this.memory.desktop;
+  protected readonly canRevealHome = this.memory.canRevealHome;
   protected readonly activeTopic = this.memory.activeTopic;
   protected readonly lastNotice = this.memory.lastNotice;
   protected readonly homeError = this.memory.homeError;
@@ -91,6 +94,14 @@ export class MemoryExplorer {
   protected async pickFolder(): Promise<void> {
     await this.memory.pickHomeFolder();
     await this.open('');
+  }
+
+  protected async revealHome(): Promise<void> {
+    await this.memory.revealHome();
+  }
+
+  protected nodeKind(node: { kind?: string; type?: string; id?: string }): MemoryNodeFamily {
+    return memoryNodeFamily(node.type || node.kind || '', node.id);
   }
 
   protected isActive(node: { rel: string; id?: string }): boolean {

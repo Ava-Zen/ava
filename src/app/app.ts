@@ -39,6 +39,7 @@ import {
   extractGivenFullName,
   isAskingWhatSheRemembers,
   isExplicitRemember,
+  personaGapFromLine,
   pickIdleNudge,
   presenceAside,
   presenceTitle,
@@ -61,6 +62,7 @@ import {
   extractProjectHint,
   isAskingCapabilities,
   isAskingForGrokWork,
+  isGrokSessionMemory,
   isAskingForTime,
   isAskingToStopGrokTurn,
   isAskingToStopListening,
@@ -83,6 +85,15 @@ import {
 } from './services/self-improve';
 import { speakableLine } from './services/grok-cli/transcript';
 import { ListenMode } from './services/tts';
+import {
+  isMessageTarget,
+  isSameMessage,
+  messageSwipeKey,
+  nextMessageId,
+  rubberbandSwipe,
+  swipeCommitAction,
+  swipeIntent,
+} from './message-swipe';
 
 type CopilotGateKind = 'signin' | 'workspace' | 'tools' | 'photo';
 
@@ -115,6 +126,8 @@ interface Message {
   reportRel?: string;
   /** Spoken line that arrived through the local MCP voice server or Copilot. */
   via?: 'mcp' | 'copilot';
+  /** False for Grok CLI session talk — keep it out of companion memory. */
+  persist?: boolean;
 }
 
 interface AudioDownload {
@@ -215,6 +228,12 @@ export function composeManualPrompt(
   const trimmed = text.trim();
   if (trimmed) parts.push(trimmed);
   return parts.join('\n\n');
+}
+
+function jitterMs(min: number, max: number): number {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -342,9 +361,13 @@ export class App {
   protected readonly presenceWhisper = computed(() => {
     if (this.isListening() || this.isThinking() || this.status() === 'speaking') return '';
     const last = this.messages().at(-1)?.timestamp ?? null;
+    const topic = this.memory.activeTopic();
+    const topicTitle = topic && !isGrokSessionMemory(`${topic.title}\n${topic.notes}`)
+      ? topic.title
+      : null;
     return presenceAside({
       lastAt: last,
-      topicTitle: this.memory.activeTopic()?.title ?? null,
+      topicTitle,
     });
   });
 
@@ -408,6 +431,23 @@ export class App {
   protected readonly activeAudioPreviewId = signal<string | null>(null);
   protected readonly audioPreviewPaused = signal(false);
   protected readonly copiedMessageId = signal<string | null>(null);
+  protected readonly swipeKey = signal<string | null>(null);
+  protected readonly swipeDx = signal(0);
+  protected readonly swipeSide = signal<'left' | 'right' | null>(null);
+  protected readonly swipeArmedFlag = signal(false);
+  protected readonly swipeSettling = signal(false);
+  private messageSwipe: {
+    key: string;
+    message: Message;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dx: number;
+    armed: boolean;
+    width: number;
+    sheet: HTMLElement;
+  } | null = null;
+  private swipeTimer: ReturnType<typeof setTimeout> | null = null;
   protected readonly canSubmitManualPrompt = computed(() =>
     !this.isThinking() && (
       this.manualPrompt().trim().length > 0 ||
@@ -447,9 +487,9 @@ export class App {
   private readonly startedAt = Date.now();
   private lastIdleNudgeAt = 0;
   private idleNudgesThisSession = 0;
+  private idleAwaitingReply = false;
   private usedIdleKeys: string[] = [];
-  private readonly IDLE_AFTER_MS = 3 * 60 * 1000;
-  private readonly IDLE_GAP_MS = 8 * 60 * 1000;
+  private nextIdleAt = Date.now() + jitterMs(2 * 60_000, 6 * 60_000);
   private readonly MAX_IDLE_NUDGES = 4;
   protected readonly chatModelLoading = computed(() => this.llm.isLoading());
   protected readonly chatModelLoadStatus = computed(() => this.llm.downloadStatus());
@@ -536,6 +576,7 @@ export class App {
   }
 
   private async maybeIdleNudge() {
+    if (this.idleAwaitingReply) return;
     if (this.idleNudgesThisSession >= this.MAX_IDLE_NUDGES) return;
     if (
       this.showOnboarding() ||
@@ -557,25 +598,33 @@ export class App {
     if (typeof document !== 'undefined' && document.hidden) return;
 
     const now = Date.now();
-    if (now - this.startedAt < this.IDLE_AFTER_MS) return;
-    if (this.lastIdleNudgeAt && now - this.lastIdleNudgeAt < this.IDLE_GAP_MS) return;
+    if (now < this.nextIdleAt) return;
     const lastMsg = this.messages().at(-1)?.timestamp?.getTime() ?? 0;
     const lastActivity = Math.max(this.startedAt, lastMsg, this.lastIdleNudgeAt);
-    if (now - lastActivity < this.IDLE_AFTER_MS) return;
+    if (now - lastActivity < 2 * 60_000) return;
 
     const unfinished = [...this.agentTasks()].reverse().find(task =>
-      task.status === 'error' || task.status === 'queued',
+      (task.status === 'error' || task.status === 'queued') && !isGrokSessionMemory(task.prompt),
+    );
+    const grokTitles = new Set(
+      this.grokCli.roster().map(row => row.title.replace(/\s+/g, ' ').trim().toLowerCase()).filter(Boolean),
     );
     const nudge = pickIdleNudge({
       identity: this.memory.identityNotes(),
       name: this.userName(),
       peopleCount: this.memory.people().filter(person => person.id !== 'ava' && person.id !== 'profile').length,
-      topics: this.memory.topics().map(topic => ({
-        id: topic.id,
-        title: topic.title,
-        notes: topic.notes,
-        updatedAt: topic.updatedAt,
-      })),
+      topics: this.memory.topics()
+        .filter(topic => {
+          const title = topic.title.replace(/\s+/g, ' ').trim().toLowerCase();
+          if (title && grokTitles.has(title)) return false;
+          return !isGrokSessionMemory(`${topic.title}\n${topic.notes}\n${topic.description}`);
+        })
+        .map(topic => ({
+          id: topic.id,
+          title: topic.title,
+          notes: topic.notes,
+          updatedAt: topic.updatedAt,
+        })),
       unfinishedPrompt: unfinished?.prompt ?? null,
       usedKeys: this.usedIdleKeys,
     });
@@ -583,12 +632,19 @@ export class App {
 
     this.usedIdleKeys = [...this.usedIdleKeys, nudge.key];
     this.lastIdleNudgeAt = now;
+    this.idleAwaitingReply = true;
+    this.nextIdleAt = now + jitterMs(5 * 60_000, 14 * 60_000);
     this.idleNudgesThisSession += 1;
     this.debug.log('memory', 'Idle nudge', nudge.key);
 
     const gardenId = this.currentGarden()?.id || this.threadId();
     const seq = this.beginRequest();
     await this.respond(gardenId, nudge.line, undefined, undefined, undefined, seq);
+  }
+
+  private heardUserForIdle() {
+    this.idleAwaitingReply = false;
+    this.nextIdleAt = Date.now() + jitterMs(5 * 60_000, 14 * 60_000);
   }
 
   private watchDebugSnapshot() {
@@ -691,14 +747,16 @@ export class App {
     void this.speak(preview);
   }
 
-  private addAvaNotice(gardenId: string, text: string, via?: Message['via']) {
+  private addAvaNotice(gardenId: string, text: string, via?: Message['via'], persist = true) {
     const chatId = this.chats.chats().some(chat => chat.id === gardenId) ? gardenId : this.threadId();
     const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push({
       role: 'ava',
+      id: nextMessageId(),
       text,
       timestamp: new Date(),
       via,
+      persist,
     });
     this.setChatMessages(chatId, currentMsgs);
     this.scrollToBottom();
@@ -746,6 +804,7 @@ export class App {
     const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push({
       role: 'ava',
+      id: nextMessageId(),
       text: spoken,
       timestamp: new Date(),
       via: 'mcp',
@@ -902,7 +961,7 @@ export class App {
 
   protected onGrokReadyToWork() {
     const line = 'What would you like us to work on together?';
-    this.addAvaNotice(this.threadId(), line);
+    this.addAvaNotice(this.threadId(), line, undefined, false);
     void this.speak(line);
   }
 
@@ -924,7 +983,7 @@ export class App {
               ? `Choose the folder for ${hint}.`
               : 'Choose the folder we should work in.'
             : 'What would you like us to work on together?';
-    this.addAvaNotice(this.threadId(), spoken);
+    this.addAvaNotice(this.threadId(), spoken, undefined, false);
     this.isThinking.set(false);
     this.status.set('speaking');
     await this.speak(spoken);
@@ -1954,13 +2013,29 @@ export class App {
     this.setChatMessages(chatId, msgs);
   }
 
-  private addUserMessage(id: string, text: string, pending = false, images?: GeneratedImage[], topicId?: string): Message {
+  private addUserMessage(
+    id: string,
+    text: string,
+    pending = false,
+    images?: GeneratedImage[],
+    topicId?: string,
+    persist = true,
+  ): Message {
     const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
-    const message: Message = { role: 'user', text, timestamp: new Date(), pending, images, topicId };
+    const message: Message = {
+      role: 'user',
+      id: nextMessageId(),
+      text,
+      timestamp: new Date(),
+      pending,
+      images,
+      topicId,
+      persist,
+    };
     const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     currentMsgs.push(message);
     this.setChatMessages(chatId, currentMsgs);
-    if (!pending) this.chats.touch(chatId, this.titleFromPrompt(text));
+    if (!pending && persist !== false) this.chats.touch(chatId, this.titleFromPrompt(text));
     this.scrollToBottom();
     return message;
   }
@@ -1971,12 +2046,12 @@ export class App {
     return clean.length > 28 ? `${clean.slice(0, 26).trim()}…` : clean;
   }
 
-  private updateMessageText(id: string, target: Message, text: string, pending = false) {
+  private updateMessageText(id: string, target: Message, text: string, pending = false, persist?: boolean) {
     const chatId = this.chats.chats().some(chat => chat.id === id) ? id : this.threadId();
     const currentMsgs = this.messagesByChat()[chatId] || [];
     const nextMsgs = currentMsgs.map(msg =>
-      msg === target || msg.id === target.id || msg.timestamp === target.timestamp
-        ? { ...msg, text, pending }
+      isMessageTarget(msg, target)
+        ? { ...msg, text, pending, persist: persist ?? msg.persist }
         : msg
     );
     this.setChatMessages(chatId, nextMsgs);
@@ -1988,7 +2063,7 @@ export class App {
     const currentMsgs = this.messagesByChat()[chatId] || [];
     this.setChatMessages(
       chatId,
-      currentMsgs.filter(msg => msg !== target && msg.id !== target.id && msg.timestamp !== target.timestamp)
+      currentMsgs.filter(msg => !isSameMessage(msg, target)),
     );
   }
 
@@ -2003,6 +2078,7 @@ export class App {
           key,
           messages.map(msg => ({
             ...msg,
+            id: msg.id || nextMessageId(),
             timestamp: new Date(msg.timestamp as unknown as string)
           }))
         ])
@@ -2028,17 +2104,19 @@ export class App {
       const persisted = Object.fromEntries(
         Object.entries(this.messagesByChat()).map(([chatId, messages]) => [
           chatId,
-          messages.filter(message => !message.pending)
+          messages.filter(message => !message.pending && message.persist !== false)
         ])
       );
       localStorage.setItem('ava-messages-by-chat', JSON.stringify(persisted));
       this.memory.scheduleConversationWrite(
-        Object.values(this.messagesByChat()).flat().map(msg => ({
-          role: msg.role,
-          text: msg.text,
-          timestamp: msg.timestamp,
-          topicId: msg.topicId,
-        })),
+        Object.values(this.messagesByChat()).flat()
+          .filter(msg => !msg.pending && msg.persist !== false)
+          .map(msg => ({
+            role: msg.role,
+            text: msg.text,
+            timestamp: msg.timestamp,
+            topicId: msg.topicId,
+          })),
       );
     } catch {}
   }
@@ -2055,16 +2133,19 @@ export class App {
 
   private async hydrateMemory() {
     const chatId = this.threadId();
-    const fallback = (this.messagesByChat()[chatId] || []).map(msg => ({
-      role: msg.role,
-      text: msg.text,
-      timestamp: msg.timestamp,
-      topicId: msg.topicId,
-    }));
+    const fallback = (this.messagesByChat()[chatId] || [])
+      .filter(msg => msg.persist !== false)
+      .map(msg => ({
+        role: msg.role,
+        text: msg.text,
+        timestamp: msg.timestamp,
+        topicId: msg.topicId,
+      }));
     const stored = await this.memory.hydrate(fallback);
     if (!stored.length) return;
     this.setChatMessages(chatId, stored.map(turn => ({
       role: turn.role,
+      id: nextMessageId(),
       text: turn.text,
       timestamp: turn.timestamp,
       topicId: turn.topicId,
@@ -2928,6 +3009,7 @@ export class App {
 
     this.debug.log('speech', 'Heard you', text);
     if (!text.trim()) return;
+    this.heardUserForIdle();
 
     if (isAskingToSelfImprove(text) || isAskingToResetSelfImprovements(text)) {
       const gardenId = this.currentGarden()?.id;
@@ -3018,6 +3100,28 @@ export class App {
       }
     }
 
+    if (isAskingForGrokWork(text)) {
+      this.debug.log('route', 'Grok CLI work', text);
+      this.status.set('thinking');
+      this.isThinking.set(true);
+      const persist = !this.grokCli.desktop();
+      if (existingUserMessage) this.updateMessageText(gardenId, existingUserMessage, text, false, persist);
+      else this.addUserMessage(gardenId, text, false, undefined, undefined, persist);
+      if (!persist) {
+        await this.openGrokForWork(text, seq);
+        return;
+      }
+      await this.respond(
+        gardenId,
+        'Grok sessions live in the desktop app. Open Ava there and we can work on a project together.',
+        undefined,
+        undefined,
+        undefined,
+        seq,
+      );
+      return;
+    }
+
     this.status.set('thinking');
     this.isThinking.set(true);
 
@@ -3033,7 +3137,8 @@ export class App {
     } else {
       this.addUserMessage(gardenId, text, false, attached, routed.topic?.id);
     }
-    const remembered = this.memory.rememberUser(text, routed.topic);
+    const lastAva = [...this.messages()].reverse().find(msg => msg.role === 'ava' && !msg.pending);
+    const remembered = this.memory.rememberUser(text, routed.topic, lastAva ? personaGapFromLine(lastAva.text) : null);
 
     if (this.pendingFullNameFor) {
       await this.handlePendingFullName(gardenId, text, seq);
@@ -3114,23 +3219,6 @@ export class App {
     if (wantsImage(text)) {
       this.debug.log('route', 'Imagine generate');
       await this.handleImagineGenerate(chatId, text, seq);
-      return;
-    }
-
-    if (isAskingForGrokWork(text)) {
-      this.debug.log('route', 'Grok CLI work', text);
-      if (!this.grokCli.desktop()) {
-        await this.respond(
-          gardenId,
-          'Grok sessions live in the desktop app. Open Ava there and we can work on a project together.',
-          undefined,
-          undefined,
-          undefined,
-          seq,
-        );
-        return;
-      }
-      await this.openGrokForWork(text, seq);
       return;
     }
 
@@ -3438,6 +3526,7 @@ export class App {
     const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
     const avaMsg: Message = {
       role: 'ava',
+      id: nextMessageId(),
       text: response,
       timestamp: new Date(),
       debug,
@@ -4026,6 +4115,162 @@ export class App {
     return this.copiedMessageId() === `${message.role}-${message.timestamp.getTime()}`;
   }
 
+  protected messageTrack(message: Message): string {
+    return message.id || messageSwipeKey(message);
+  }
+
+  protected forgetMessage(message: Message) {
+    if (message.pending) return;
+    this.removeMessage(this.threadId(), message);
+    if (this.isMessageCopied(message)) this.copiedMessageId.set(null);
+  }
+
+  protected editMessageInComposer(message: Message) {
+    const text = message.text.trim();
+    if (!text) return;
+    this.manualPrompt.set(text);
+    this.setManualInputMode(true);
+    setTimeout(() => this.resizeManualInput(), 0);
+  }
+
+  protected swipeTransform(message: Message): string {
+    if (this.swipeKey() !== messageSwipeKey(message)) return '';
+    return `translate3d(${this.swipeDx()}px, 0, 0)`;
+  }
+
+  protected swipeSheetSettling(message: Message): boolean {
+    return this.swipeSettling() && this.swipeKey() === messageSwipeKey(message);
+  }
+
+  protected swipeShows(message: Message, side: 'left' | 'right'): boolean {
+    return this.swipeKey() === messageSwipeKey(message) && this.swipeSide() === side;
+  }
+
+  protected swipeArmed(message: Message): boolean {
+    return this.swipeKey() === messageSwipeKey(message) && this.swipeArmedFlag();
+  }
+
+  protected swipeHint(message: Message): 'delete' | 'edit' | null {
+    if (!this.swipeArmed(message)) return null;
+    return this.swipeSide() === 'left' ? 'delete' : this.swipeSide() === 'right' ? 'edit' : null;
+  }
+
+  protected onMessagePointerDown(event: PointerEvent, message: Message) {
+    if (event.button !== 0 || message.pending) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, textarea, label, .photo-open')) return;
+    this.clearSwipe();
+    const sheet = event.currentTarget as HTMLElement;
+    const width = sheet.closest('.message-swipe')?.clientWidth || sheet.clientWidth || 240;
+    this.messageSwipe = {
+      key: messageSwipeKey(message),
+      message,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dx: 0,
+      armed: false,
+      width,
+      sheet,
+    };
+    this.swipeKey.set(this.messageSwipe.key);
+    this.swipeDx.set(0);
+    this.swipeSide.set(null);
+    this.swipeArmedFlag.set(false);
+    this.swipeSettling.set(false);
+  }
+
+  protected onMessagePointerMove(event: PointerEvent, message: Message) {
+    const swipe = this.messageSwipe;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    if (messageSwipeKey(message) !== swipe.key) return;
+    const dx = event.clientX - swipe.startX;
+    const dy = event.clientY - swipe.startY;
+    if (!swipe.armed) {
+      const intent = swipeIntent(dx, dy, event.pointerType === 'mouse' ? 22 : 10);
+      if (intent === 'vertical') {
+        this.clearSwipe();
+        return;
+      }
+      if (intent !== 'horizontal') return;
+      swipe.armed = true;
+      try {
+        swipe.sheet.setPointerCapture(event.pointerId);
+      } catch {
+        // Capture is best-effort; mouse still tracks while over the sheet.
+      }
+    }
+    event.preventDefault();
+    swipe.dx = dx;
+    this.swipeDx.set(rubberbandSwipe(dx, Math.min(160, swipe.width * 0.72)));
+    this.swipeSide.set(dx < -4 ? 'left' : dx > 4 ? 'right' : null);
+    this.swipeArmedFlag.set(!!swipeCommitAction(dx));
+  }
+
+  protected onMessagePointerUp(event: PointerEvent, message: Message) {
+    const swipe = this.messageSwipe;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    if (messageSwipeKey(message) !== swipe.key) return;
+    if (!swipe.armed) {
+      this.clearSwipe();
+      return;
+    }
+    this.finishSwipe(true);
+  }
+
+  protected onMessagePointerCancel(event: PointerEvent, message: Message) {
+    const swipe = this.messageSwipe;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    if (messageSwipeKey(message) !== swipe.key) return;
+    this.finishSwipe(false);
+  }
+
+  private finishSwipe(commit: boolean) {
+    const swipe = this.messageSwipe;
+    if (!swipe) return;
+    const action = commit && swipe.armed ? swipeCommitAction(swipe.dx) : null;
+    this.swipeSettling.set(true);
+    if (action === 'delete') {
+      this.swipeDx.set(swipe.dx < 0 ? -(swipe.width + 56) : swipe.width + 56);
+      this.swipeTimer = setTimeout(() => {
+        this.forgetMessage(swipe.message);
+        this.clearSwipe();
+      }, 180);
+      return;
+    }
+    if (action === 'edit') {
+      this.swipeDx.set(0);
+      this.editMessageInComposer(swipe.message);
+      this.swipeTimer = setTimeout(() => this.clearSwipe(), 180);
+      return;
+    }
+    this.swipeArmedFlag.set(false);
+    this.swipeDx.set(0);
+    this.swipeTimer = setTimeout(() => this.clearSwipe(), 180);
+  }
+
+  private clearSwipe() {
+    if (this.swipeTimer) {
+      clearTimeout(this.swipeTimer);
+      this.swipeTimer = null;
+    }
+    const sheet = this.messageSwipe?.sheet;
+    const pointerId = this.messageSwipe?.pointerId;
+    if (sheet && pointerId != null) {
+      try {
+        if (sheet.hasPointerCapture(pointerId)) sheet.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
+    }
+    this.messageSwipe = null;
+    this.swipeKey.set(null);
+    this.swipeDx.set(0);
+    this.swipeSide.set(null);
+    this.swipeArmedFlag.set(false);
+    this.swipeSettling.set(false);
+  }
+
   protected isAudioPreviewActive(downloadId: string): boolean {
     return this.activeAudioPreviewId() === downloadId && !this.audioPreviewPaused();
   }
@@ -4185,26 +4430,26 @@ export class App {
   }
 
   private addAvaExportMessage(text: string, exportTaskId: string) {
-    const gardenId = this.currentGarden()?.id;
-    if (!gardenId) return;
+    const chatId = this.threadId();
+    if (!chatId) return;
 
-    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
-    currentMsgs.push({ role: 'ava', text, timestamp: new Date(), exportTaskId });
-    this.setGardenMessages(gardenId, currentMsgs);
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
+    currentMsgs.push({ role: 'ava', id: nextMessageId(), text, timestamp: new Date(), exportTaskId });
+    this.setChatMessages(chatId, currentMsgs);
     this.scrollToBottom();
   }
 
   private updateAvaExportMessage(exportTaskId: string, text: string, downloadId?: string) {
-    const gardenId = this.currentGarden()?.id;
-    if (!gardenId) return;
+    const chatId = this.threadId();
+    if (!chatId) return;
 
-    const currentMsgs = this.messagesByChat()[gardenId] || [];
+    const currentMsgs = this.messagesByChat()[chatId] || [];
     const nextMsgs = currentMsgs.map(msg =>
       msg.exportTaskId === exportTaskId
         ? { ...msg, text, downloadId: downloadId ?? msg.downloadId }
         : msg
     );
-    this.setGardenMessages(gardenId, nextMsgs);
+    this.setChatMessages(chatId, nextMsgs);
     this.scrollToBottom();
   }
 
@@ -4217,12 +4462,12 @@ export class App {
   }
 
   private addAvaMessage(text: string) {
-    const gardenId = this.currentGarden()?.id;
-    if (!gardenId) return;
+    const chatId = this.threadId();
+    if (!chatId) return;
 
-    const currentMsgs = [...(this.messagesByChat()[gardenId] || [])];
-    currentMsgs.push({ role: 'ava', text, timestamp: new Date() });
-    this.setGardenMessages(gardenId, currentMsgs);
+    const currentMsgs = [...(this.messagesByChat()[chatId] || [])];
+    currentMsgs.push({ role: 'ava', id: nextMessageId(), text, timestamp: new Date() });
+    this.setChatMessages(chatId, currentMsgs);
     this.scrollToBottom();
   }
 

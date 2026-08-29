@@ -14,9 +14,11 @@ export const BROWSER_HOME = 'browser';
 @Injectable({ providedIn: 'root' })
 export class HomeService {
   readonly desktop = signal(isTauriDesktop());
+  readonly native = signal(isTauriHost());
   readonly root = signal<string | null>(this.loadStoredRoot());
   readonly ready = signal(false);
   readonly label = computed(() => this.folderLabel(this.root()));
+  readonly canReveal = computed(() => canRevealHomePath(this.root(), this.native()));
 
   private readyWaiters: Array<() => void> = [];
   private browserFs: Record<string, string> = this.loadBrowserFs();
@@ -57,6 +59,19 @@ export class HomeService {
     if (!path) return null;
     await this.setRoot(path);
     return path;
+  }
+
+  async openInExplorer(): Promise<boolean> {
+    const root = this.root();
+    if (!canRevealHomePath(root, this.native()) || !root) return false;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('home_open', { root });
+      return true;
+    } catch (error) {
+      console.warn('Could not open home folder', error);
+      return false;
+    }
   }
 
   async useSuggested(): Promise<string | null> {
@@ -220,6 +235,14 @@ export class HomeService {
 export function isBrowserHome(path: string | null | undefined): boolean {
   if (!path) return true;
   return path === BROWSER_HOME || path.startsWith(`${BROWSER_HOME}:`);
+}
+
+export function canRevealHomePath(path: string | null | undefined, native: boolean): boolean {
+  return native && !!path && !isBrowserHome(path);
+}
+
+function isTauriHost(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 function browserFsKey(root: string): string {

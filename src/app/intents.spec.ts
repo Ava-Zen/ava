@@ -7,6 +7,7 @@ import {
   isAskingAboutSchedules,
   isAskingCapabilities,
   isAskingForGrokWork,
+  isGrokSessionMemory,
   isAskingForTime,
   isAskingToCancelSchedule,
   isAskingToPickFolder,
@@ -89,6 +90,16 @@ describe('isAskingForGrokWork', () => {
     expect(isAskingForGrokWork('work on that')).toBeFalse();
     expect(isAskingForGrokWork('what time is it')).toBeFalse();
     expect(extractProjectHint('open grok')).toBeNull();
+  });
+});
+
+describe('isGrokSessionMemory', () => {
+  it('treats Grok CLI work as session memory, not companion memory', () => {
+    expect(isGrokSessionMemory('I want to do some work on my Ava app to do some improvements')).toBeTrue();
+    expect(isGrokSessionMemory('My Ava App To Do Some Improvements\n- work on my Ava app to do some improvements')).toBeTrue();
+    expect(isGrokSessionMemory('open grok')).toBeTrue();
+    expect(isGrokSessionMemory('Name is Sondre\nAge is 42')).toBeFalse();
+    expect(isGrokSessionMemory('The kids are with my sister tonight')).toBeFalse();
   });
 });
 

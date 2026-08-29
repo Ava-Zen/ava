@@ -163,13 +163,44 @@
             @if (!messages().length) {
               <p class="chat-empty">I am listening.</p>
             }
-            @for (msg of messages(); track msg.timestamp) {
+            @for (msg of messages(); track messageTrack(msg)) {
               <article
                 class="message"
                 [class.user]="msg.role === 'user'"
                 [class.ava]="msg.role === 'ava'"
                 [class.pending]="msg.pending"
+                [class.swipe-left]="swipeShows(msg, 'left')"
+                [class.swipe-right]="swipeShows(msg, 'right')"
+                [class.swipe-armed]="swipeArmed(msg)"
+                [class.swipe-delete]="swipeHint(msg) === 'delete'"
+                [class.swipe-edit]="swipeHint(msg) === 'edit'"
               >
+                <div class="message-swipe">
+                  <div class="message-swipe-rail" aria-hidden="true">
+                    <span class="swipe-hint swipe-hint-edit">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+                      </svg>
+                      Edit
+                    </span>
+                    <span class="swipe-hint swipe-hint-delete">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M6 6l12 12"></path>
+                        <path d="M18 6L6 18"></path>
+                      </svg>
+                      Remove
+                    </span>
+                  </div>
+                  <div
+                    class="message-swipe-sheet"
+                    [class.settle]="swipeSheetSettling(msg)"
+                    [style.transform]="swipeTransform(msg)"
+                    (pointerdown)="onMessagePointerDown($event, msg)"
+                    (pointermove)="onMessagePointerMove($event, msg)"
+                    (pointerup)="onMessagePointerUp($event, msg)"
+                    (pointercancel)="onMessagePointerCancel($event, msg)"
+                  >
                 <div class="message-bubble">
                   <div class="message-meta">
                     <span class="message-role">
@@ -183,18 +214,32 @@
                     </span>
                     <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
                   </div>
-                  <button
-                    class="message-copy"
-                    type="button"
-                    [attr.aria-label]="'Copy ' + (msg.role === 'ava' ? 'Ava' : 'your') + ' message'"
-                    (click)="copyMessage(msg)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <rect x="9" y="9" width="11" height="11" rx="2"></rect>
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                    <span>{{ isMessageCopied(msg) ? 'Copied' : 'Copy' }}</span>
-                  </button>
+                  <div class="message-tools">
+                    <button
+                      class="message-tool"
+                      type="button"
+                      [attr.aria-label]="'Copy ' + (msg.role === 'ava' ? 'Ava' : 'your') + ' message'"
+                      (click)="copyMessage(msg)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                      <span>{{ isMessageCopied(msg) ? 'Copied' : 'Copy' }}</span>
+                    </button>
+                    <button
+                      class="message-tool message-tool-icon"
+                      type="button"
+                      title="Remove"
+                      [attr.aria-label]="'Remove ' + (msg.role === 'ava' ? 'Ava' : 'your') + ' message from history'"
+                      (click)="forgetMessage(msg)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 6l12 12"></path>
+                        <path d="M18 6L6 18"></path>
+                      </svg>
+                    </button>
+                  </div>
                   @if (msg.role === 'ava') {
                     <div class="message-text markdown" [innerHTML]="formatMessage(msg.text)"></div>
                     @if (msg.gate?.status === 'open') {
@@ -407,6 +452,8 @@
                       </div>
                     }
                   }
+                </div>
+                  </div>
                 </div>
               </article>
             }

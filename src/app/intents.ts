@@ -94,6 +94,15 @@ export function isAskingForGrokWork(text: string): boolean {
   );
 }
 
+/** True when a memory note or topic is leftover Grok CLI work, not companion talk. */
+export function isGrokSessionMemory(text: string): boolean {
+  const hay = text.replace(/\s+/g, ' ').trim();
+  if (!hay) return false;
+  if (/\bgrok(?:\s+cli)?(?:\s+session)?\b/i.test(hay)) return true;
+  if (isAskingForGrokWork(hay)) return true;
+  return text.split(/[\n.;]+/).some(part => isAskingForGrokWork(part));
+}
+
 /** True when the user wants to leave the Grok session and return to Ava. */
 export function isLeavingGrokWork(text: string): boolean {
   const q = peelWant(text);

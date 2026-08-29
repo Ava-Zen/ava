@@ -1,6 +1,7 @@
 import {
   formatConversation,
   looksLikeTopicShift,
+  memoryNodeFamily,
   parseConversation,
   rankTopics,
   scopeHistoryToTopic,
@@ -41,6 +42,12 @@ describe('topic routing', () => {
     expect(suggestTopicFromText('How are you')).toBeNull();
   });
 
+  it('does not file Grok CLI work as a subject', () => {
+    expect(suggestTopicFromText('I want to do some work on my Ava app to do some improvements')).toBeNull();
+    expect(suggestTopicFromText('open grok')).toBeNull();
+    expect(suggestTopicFromText('work on my Nostria project')).toBeNull();
+  });
+
   it('notices an explicit subject change', () => {
     expect(looksLikeTopicShift('Anyway, talking about the kids now')).toBeTrue();
   });
@@ -75,6 +82,20 @@ describe('topic-scoped history', () => {
     const history = scopeHistoryToTopic([work, avaWork, family, current], 'family', 6);
     expect(history.some(turn => turn.topicId === 'work')).toBeFalse();
     expect(history.some(turn => /kids/i.test(turn.text))).toBeTrue();
+  });
+});
+
+describe('memory map node families', () => {
+  it('keeps people apart from Ava, topics, and notes', () => {
+    expect(memoryNodeFamily('Companion', 'ava')).toBe('companion');
+    expect(memoryNodeFamily('Person', 'you')).toBe('person');
+    expect(memoryNodeFamily('Person', 'sarah')).toBe('person');
+    expect(memoryNodeFamily('Sister', 'maya')).toBe('person');
+    expect(memoryNodeFamily('Topic', 'work')).toBe('topic');
+    expect(memoryNodeFamily('Note')).toBe('note');
+    expect(memoryNodeFamily('Directory')).toBe('place');
+    expect(memoryNodeFamily('dir')).toBe('place');
+    expect(memoryNodeFamily('Directory', 'person')).toBe('place');
   });
 });
 

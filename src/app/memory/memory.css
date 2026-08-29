@@ -87,7 +87,8 @@ h2 {
 .ghost-btn,
 .crumbs button,
 .room,
-.timeline button {
+.timeline button,
+.home-reveal {
   border: 0;
   background: transparent;
   color: inherit;
@@ -142,7 +143,8 @@ h2 {
 .close-btn:hover,
 .ghost-btn:hover,
 .room:hover,
-.timeline button:hover {
+.timeline button:hover,
+.home-reveal:hover {
   background: rgba(196, 92, 78, 0.1);
 }
 
@@ -190,6 +192,22 @@ h2 {
   text-transform: uppercase;
 }
 
+.room[data-kind='person'] .room-kind {
+  color: var(--sage);
+}
+
+.room[data-kind='companion'] .room-kind {
+  color: var(--coral);
+}
+
+.room[data-kind='topic'] .room-kind {
+  color: var(--amber);
+}
+
+.room[data-kind='note'] .room-kind {
+  color: var(--salmon);
+}
+
 .room span {
   color: var(--muted);
   font-size: 0.92rem;
@@ -201,10 +219,29 @@ h2 {
   background: rgba(232, 148, 112, 0.22);
 }
 
-.room.topic {
+.room.topic,
+.room[data-kind='topic'] {
   background:
     radial-gradient(120% 80% at 12% 0%, rgba(232, 130, 96, 0.22), transparent 62%),
     rgba(255, 255, 255, 0.52);
+}
+
+.room[data-kind='person'] {
+  background:
+    radial-gradient(120% 80% at 12% 0%, color-mix(in srgb, var(--sage) 26%, transparent), transparent 62%),
+    var(--surface);
+}
+
+.room[data-kind='companion'] {
+  background:
+    radial-gradient(120% 80% at 12% 0%, color-mix(in srgb, var(--coral) 24%, transparent), transparent 62%),
+    var(--surface);
+}
+
+.room[data-kind='note'] {
+  background:
+    radial-gradient(120% 80% at 12% 0%, color-mix(in srgb, var(--peach) 28%, transparent), transparent 62%),
+    var(--surface);
 }
 
 .constellation {
@@ -238,13 +275,56 @@ h2 {
   stroke-width: 1.6;
 }
 
+.star[data-kind='companion'] .glow,
+.star.hub .glow {
+  fill: color-mix(in srgb, var(--coral) 28%, transparent);
+}
+
+.star[data-kind='companion'] .body,
 .star.hub .body {
   fill: var(--coral);
   stroke: var(--rust);
 }
 
+.star[data-kind='person'] .glow {
+  fill: color-mix(in srgb, var(--sage) 32%, transparent);
+}
+
+.star[data-kind='person'] .body {
+  fill: var(--sage);
+  stroke: color-mix(in srgb, var(--sage) 55%, var(--text));
+}
+
+.star[data-kind='topic'] .glow {
+  fill: color-mix(in srgb, var(--amber) 28%, transparent);
+}
+
+.star[data-kind='topic'] .body {
+  fill: var(--amber);
+  stroke: color-mix(in srgb, var(--amber) 55%, var(--text));
+}
+
+.star[data-kind='note'] .glow {
+  fill: color-mix(in srgb, var(--peach) 30%, transparent);
+}
+
+.star[data-kind='note'] .body {
+  fill: var(--peach);
+  stroke: var(--salmon);
+}
+
+.star[data-kind='place'] .glow {
+  fill: color-mix(in srgb, var(--rust) 16%, transparent);
+}
+
+.star[data-kind='place'] .body {
+  fill: var(--surface-strong);
+  stroke: var(--rust);
+}
+
 .star.active .body {
   fill: var(--salmon);
+  stroke: var(--coral);
 }
 
 .star text {
@@ -305,6 +385,34 @@ h2 {
   display: block;
   max-width: 46ch;
   overflow-wrap: anywhere;
+}
+
+.home-reveal {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 4px 8px 4px 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-reveal .overline {
+  display: block;
+  color: var(--coral);
+}
+
+.home-reveal:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--coral) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.home-reveal small {
+  max-width: 46ch;
 }
 
 .ghost-btn {

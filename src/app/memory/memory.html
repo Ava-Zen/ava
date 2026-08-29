@@ -54,6 +54,7 @@
             @for (node of placed(); track node.id) {
               <g
                 class="star"
+                [attr.data-kind]="nodeKind(node)"
                 [class.active]="isActive(node)"
                 [class.hub]="node.id === 'ava'"
                 (click)="openRel(node.rel)"
@@ -98,6 +99,7 @@
               <button
                 type="button"
                 class="room"
+                [attr.data-kind]="nodeKind(node)"
                 [class.topic]="node.type === 'Topic' || node.rel.startsWith('topics/')"
                 [class.active]="isActive(node)"
                 (click)="openChild(node)"
@@ -122,8 +124,21 @@
 
     <footer class="memory-footer">
       <div>
-        <p class="overline">Home folder</p>
-        <small>{{ homePath() === 'browser' ? 'Kept in this browser until you pick a folder in the desktop app.' : (homePath() || 'Not set yet') }}</small>
+        @if (canRevealHome()) {
+          <button
+            type="button"
+            class="home-reveal"
+            (click)="revealHome()"
+            aria-label="Open home folder on this device"
+            title="Open in file explorer"
+          >
+            <span class="overline">Home folder</span>
+            <small>{{ homePath() }}</small>
+          </button>
+        } @else {
+          <p class="overline">Home folder</p>
+          <small>{{ homePath() === 'browser' ? 'Kept in this browser until you pick a folder in the desktop app.' : (homePath() || 'Not set yet') }}</small>
+        }
         @if (homeError()) {
           <small class="memory-home-error">{{ homeError() }}</small>
         }

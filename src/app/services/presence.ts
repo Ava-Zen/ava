@@ -54,6 +54,7 @@ export interface PersonMention {
   name: string;
   relation: 'partner' | 'child' | 'person';
   role: string;
+  notes?: string;
 }
 
 const NAME_STOP =
@@ -68,7 +69,8 @@ export function peopleFromText(text: string): PersonMention[] {
     const key = name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    found.push({ name, relation, role });
+    const notes = ageNote(raw);
+    found.push({ name, relation, role, notes: notes || undefined });
   };
 
   const partner = text.match(
@@ -76,11 +78,28 @@ export function peopleFromText(text: string): PersonMention[] {
   );
   if (partner) add(partner[2], 'partner', titleCaseName(partner[1]) || 'Partner');
 
+  const havePartner = text.match(
+    /\bi(?:'ve| have)\s+a\s+(girlfriend|boyfriend|partner|wife|husband)(?:[,.]?\s+(?:and\s+)?(?:her|his|their)\s+name\s+is|\s+(?:named|called))\s+([A-Za-z][A-Za-z'-]{1,30})/i,
+  );
+  if (havePartner) add(havePartner[2], 'partner', titleCaseName(havePartner[1]) || 'Partner');
+
+  const namedPartner = text.match(
+    /\b(girlfriend|boyfriend|partner|wife|husband)[,.]?\s+(?:her|his|their)\s+name\s+is\s+([A-Za-z][A-Za-z'-]{1,30})/i,
+  );
+  if (namedPartner) add(namedPartner[2], 'partner', titleCaseName(namedPartner[1]) || 'Partner');
+
   const kids = text.match(
     /\b(?:my|our)\s+(?:kids?|children)(?:'s\s+names?\s+are|'s\s+name\s+is|\s+are\s+called|\s+are\s+named|\s+named|\s+are)\s+([^.?!]+)/i,
   );
   if (kids) {
     for (const part of splitNames(kids[1])) add(part, 'child', 'Child');
+  }
+
+  const haveKids = text.match(
+    /\b(?:we|i)\s+have\s+(?:(?:a|two|three|four|\d+)\s+)?(?:kids?|children)(?:\s+(?:named|called)|\s*[:\-–])\s+([^.?!]+)/i,
+  );
+  if (haveKids) {
+    for (const part of splitNames(haveKids[1])) add(part, 'child', 'Child');
   }
 
   for (const match of text.matchAll(
@@ -211,7 +230,10 @@ export function missingPersona(input: {
 }
 
 /** One quiet spoken line for when nothing has happened for a while. */
-export function pickIdleNudge(input: IdleNudgeInput): IdleNudge | null {
+export function pickIdleNudge(
+  input: IdleNudgeInput,
+  random: () => number = Math.random,
+): IdleNudge | null {
   const used = new Set(input.usedKeys ?? []);
   const candidates: IdleNudge[] = [];
 
@@ -224,24 +246,19 @@ export function pickIdleNudge(input: IdleNudgeInput): IdleNudge | null {
   }
 
   const topics = input.topics ?? [];
-  const research = topics.find(topic =>
-    /\b(research|look into|investigat|find out)\b/i.test(`${topic.title} ${topic.notes}`),
-  );
-  if (research) {
-    candidates.push({
-      key: `research:${research.id}`,
-      line: `I could go back to ${research.title} if you want to keep looking into it.`,
-    });
-  }
-
-  const stale = [...topics]
-    .filter(topic => topic.notes.trim() && topic.id !== research?.id)
-    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))[0];
-  if (stale) {
-    candidates.push({
-      key: `topic:${stale.id}`,
-      line: `We never finished ${stale.title}. Want to pick that up?`,
-    });
+  for (const topic of topics) {
+    const hay = `${topic.title} ${topic.notes}`;
+    if (/\b(research|look into|investigat|find out)\b/i.test(hay)) {
+      candidates.push({
+        key: `research:${topic.id}`,
+        line: `I could go back to ${topic.title} if you want to keep looking into it.`,
+      });
+    } else if (topic.notes.trim()) {
+      candidates.push({
+        key: `topic:${topic.id}`,
+        line: `We never finished ${topic.title}. Want to pick that up?`,
+      });
+    }
   }
 
   for (const gap of missingPersona(input)) {
@@ -253,7 +270,46 @@ export function pickIdleNudge(input: IdleNudgeInput): IdleNudge | null {
     line: 'I am here. What would you like to do next?',
   });
 
-  return candidates.find(item => !used.has(item.key)) ?? null;
+  const unused = candidates.filter(item => !used.has(item.key));
+  if (!unused.length) return null;
+  const roll = random();
+  const index = Math.min(unused.length - 1, Math.max(0, Math.floor(roll * unused.length)));
+  return unused[index] ?? null;
+}
+
+export function personaGapFromLine(text: string): PersonaGap | null {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return null;
+  for (const gap of Object.keys(PERSONA_LINES) as PersonaGap[]) {
+    const line = PERSONA_LINES[gap];
+    if (trimmed === line || trimmed.startsWith(line)) return gap;
+  }
+  return null;
+}
+
+const THROWAWAY_REPLY = /^(yes|no|yeah|yep|yup|nope|ok|okay|sure|nah|thanks|thank you)[.!?]*$/i;
+
+export function personaReplyFact(gap: PersonaGap, text: string): string | null {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  if (!trimmed || THROWAWAY_REPLY.test(trimmed)) return null;
+  if (gap === 'family' || gap === 'name') return null;
+  if (gap === 'age') {
+    const n = trimmed.match(/\b(\d{1,2})\b/);
+    return n ? `Age is ${n[1]}` : null;
+  }
+  if (gap === 'work') {
+    const known = identityFact(trimmed);
+    if (known?.startsWith('Works')) return known;
+    const cleaned = compactNote(trimmed.replace(/^(i(?:'m| am)?(?:\s+a(?:n)?)?|i work(?:\s+as|\s+at|\s+for)?)\s+/i, ''));
+    return cleaned ? `Works ${cleaned}` : null;
+  }
+  if (gap === 'home') {
+    const known = identityFact(trimmed);
+    if (known?.startsWith('Lives')) return known;
+    const cleaned = compactNote(trimmed.replace(/^(i live in|we live in|in|from)\s+/i, ''));
+    return cleaned ? `Lives in ${cleaned}` : null;
+  }
+  return null;
 }
 
 function clipSpoken(text: string): string {
@@ -285,17 +341,25 @@ function splitNames(value: string): string[] {
     .replace(/\s*&\s*/g, ',')
     .split(',')
     .map(part => part.trim())
-    .filter(Boolean);
+    .filter(part => part && !/^\d+(\s+years?)?$/i.test(part.replace(/[()]/g, '').trim()));
+}
+
+function ageNote(value: string): string {
+  const match = value.match(/\((\d{1,2})\s*(?:years?|yrs?|yo)?\)/i)
+    || value.match(/\b(\d{1,2})\s*(?:years?|yrs?|yo)\s*old\b/i);
+  if (!match) return '';
+  return match[1] === '1' ? '1 year old' : `${match[1]} years old`;
 }
 
 function titleCaseName(value: string): string {
   const parts = value
+    .replace(/\([^)]*\)/g, ' ')
     .replace(/[“”"']/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.,;:]+$/, '')
     .split(' ')
-    .filter(part => part && !/^(and|or|our|my|the|&)$/i.test(part) && !NAME_STOP.test(part));
+    .filter(part => part && !/^(and|or|our|my|the|&)$/i.test(part) && !NAME_STOP.test(part) && !/^\d+$/.test(part));
   const cleaned = parts[0] || '';
   if (!cleaned) return '';
   return cleaned.replace(/\b\w/g, ch => ch.toUpperCase());

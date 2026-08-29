@@ -8,6 +8,8 @@ import {
   isExplicitRemember,
   missingPersona,
   peopleFromText,
+  personaGapFromLine,
+  personaReplyFact,
   pickIdleNudge,
   presenceAside,
   presenceTitle,
@@ -50,6 +52,17 @@ describe('what to keep', () => {
     expect(people[0].relation).toBe('partner');
     expect(people.filter(person => person.relation === 'child').length).toBe(2);
   });
+
+  it('files a girlfriend and kids from ordinary speech', () => {
+    const people = peopleFromText(
+      'I have a girlfriend, her name is Tania. We have two kids: Mira (6 years) and Erik (1 year).',
+    );
+    expect(people.map(person => person.name)).toEqual(['Tania', 'Mira', 'Erik']);
+    expect(people[0].relation).toBe('partner');
+    expect(people[0].role).toBe('Girlfriend');
+    expect(people.find(person => person.name === 'Mira')?.notes).toBe('6 years old');
+    expect(people.find(person => person.name === 'Erik')?.notes).toBe('1 year old');
+  });
 });
 
 describe('idle presence', () => {
@@ -60,30 +73,36 @@ describe('idle presence', () => {
       'family',
       'home',
     ]);
-    const nudge = pickIdleNudge({ name: 'Sondre', identity: 'Sondre talks with Ava here.' });
+    const nudge = pickIdleNudge({ name: 'Sondre', identity: 'Sondre talks with Ava here.' }, () => 0);
     expect(nudge?.key).toBe('persona:age');
   });
 
-  it('picks unfinished work, then old research, and does not repeat', () => {
+  it('picks among idle thoughts at random and does not repeat', () => {
     const topics = [
       { id: 'cameras', title: 'Cameras', notes: '- research best cameras under 800', updatedAt: '2026-08-01T00:00:00Z' },
     ];
-    const first = pickIdleNudge({
+    const input = {
       name: 'Sondre',
       identity: 'Name is Sondre\nAge is 42\nWorks as a designer\nLives in Oslo',
       peopleCount: 2,
       unfinishedPrompt: 'Look into the camera options we started',
       topics,
-    });
+    };
+    const first = pickIdleNudge(input, () => 0);
     expect(first?.line).toMatch(/unfinished work/i);
-    const second = pickIdleNudge({
-      name: 'Sondre',
-      identity: 'Name is Sondre\nAge is 42\nWorks as a designer\nLives in Oslo',
-      peopleCount: 2,
-      unfinishedPrompt: 'Look into the camera options we started',
-      topics,
-      usedKeys: [first!.key],
-    });
+    const last = pickIdleNudge(input, () => 0.99);
+    expect(last?.key).toBe('next');
+    const second = pickIdleNudge({ ...input, usedKeys: [first!.key] }, () => 0);
     expect(second?.key).toBe('research:cameras');
+    expect(second?.key).not.toBe(first?.key);
+  });
+
+  it('reads a persona question so a short reply can be kept', () => {
+    expect(personaGapFromLine('Where do you live these days?')).toBe('home');
+    expect(personaGapFromLine('How old are you? I would like to know you a little better.')).toBe('age');
+    expect(personaReplyFact('age', '42')).toBe('Age is 42');
+    expect(personaReplyFact('home', 'Oslo')).toBe('Lives in Oslo');
+    expect(personaReplyFact('work', 'I am a designer')).toBe('Works designer');
+    expect(personaReplyFact('work', 'yes')).toBeNull();
   });
 });

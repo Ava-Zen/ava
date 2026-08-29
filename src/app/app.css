@@ -414,6 +414,9 @@
   .orb-ring {
     animation: none;
   }
+  .message-swipe-sheet.settle {
+    transition: none;
+  }
 }
 @keyframes colorPulse {
   0%,
@@ -689,6 +692,8 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: scroll;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -711,9 +716,107 @@
 .message.user {
   justify-content: flex-end;
 }
-.message-bubble {
+.message-swipe {
   position: relative;
   max-width: min(84%, 640px);
+  min-width: 0;
+  overflow: visible;
+  border-radius: 24px;
+}
+.message.swipe-left .message-swipe,
+.message.swipe-right .message-swipe {
+  overflow: hidden;
+}
+.message.ava .message-swipe {
+  border-top-left-radius: 8px;
+}
+.message.user .message-swipe {
+  border-top-right-radius: 8px;
+}
+.message-swipe-rail {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  pointer-events: none;
+  background: transparent;
+  transition: background 0.16s ease;
+}
+.message.swipe-left .message-swipe-rail,
+.message.swipe-delete .message-swipe-rail {
+  background: color-mix(in srgb, var(--danger) 22%, var(--bubble));
+}
+.message.swipe-right .message-swipe-rail,
+.message.swipe-edit .message-swipe-rail {
+  background: color-mix(in srgb, var(--gold) 18%, var(--bubble));
+}
+.message.user.swipe-left .message-swipe-rail,
+.message.user.swipe-delete .message-swipe-rail {
+  background: color-mix(in srgb, var(--danger) 22%, var(--bubble-user));
+}
+.message.user.swipe-right .message-swipe-rail,
+.message.user.swipe-edit .message-swipe-rail {
+  background: color-mix(in srgb, var(--gold) 18%, var(--bubble-user));
+}
+.swipe-hint {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 76px;
+  padding: 0 14px;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+}
+.swipe-hint svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.swipe-hint-delete {
+  color: var(--danger);
+}
+.swipe-hint-edit {
+  color: var(--gold);
+}
+.message.swipe-left .swipe-hint-delete,
+.message.swipe-right .swipe-hint-edit {
+  visibility: visible;
+  opacity: 0.62;
+}
+.message.swipe-armed.swipe-delete .swipe-hint-delete,
+.message.swipe-armed.swipe-edit .swipe-hint-edit {
+  opacity: 1;
+  transform: scale(1);
+}
+.message-swipe-sheet {
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y;
+  will-change: transform;
+}
+.message-swipe-sheet.settle {
+  transition: transform 0.2s ease;
+}
+.message.swipe-left .message-swipe-sheet,
+.message.swipe-right .message-swipe-sheet {
+  user-select: none;
+}
+.message-bubble {
+  position: relative;
   padding: 13px 18px 14px;
   border-radius: 24px;
   background: var(--bubble);
@@ -753,10 +856,21 @@
   gap: 14px;
   margin-bottom: 5px;
 }
-.message-copy {
+.message-tools {
   position: absolute;
   top: 10px;
   right: 10px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.message-tool {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -769,22 +883,35 @@
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
-  opacity: 0;
-  transform: translateY(4px);
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
 }
-.message-bubble:hover .message-copy,
-.message-bubble:focus-within .message-copy {
+.message-bubble:hover .message-tools,
+.message-bubble:focus-within .message-tools {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
 }
-.message-copy:hover {
+.message-bubble:hover .message-time,
+.message-bubble:focus-within .message-time {
+  opacity: 0;
+}
+.message.pending .message-tools,
+.message.swipe-left .message-tools,
+.message.swipe-right .message-tools {
+  opacity: 0;
+  pointer-events: none;
+}
+.message-tool:hover {
   border-color: var(--line-strong);
   background: var(--surface-strong);
 }
-.message-copy svg {
+.message-tool-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-content: center;
+}
+.message-tool svg {
   width: 15px;
   height: 15px;
   stroke: currentColor;
@@ -924,6 +1051,9 @@
     opacity: 1;
     transform: none;
     pointer-events: auto;
+  }
+  .message-tools {
+    display: none;
   }
 }
 .audio-download {
