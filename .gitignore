@@ -1,5 +1,8 @@
 # See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
+# Ava writes this so Grok can reach the local MCP server. Recreated at runtime.
+.grok/config.toml
+
 # Compiled output
 /dist
 /tmp

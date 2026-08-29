@@ -326,10 +326,14 @@ export class App {
   private readonly MOONSHINE_BASE_MODEL = 'onnx-community/moonshine-base-ONNX';
   private readonly MOONSHINE_TINY_MODEL = 'onnx-community/moonshine-tiny-ONNX';
 
-  /** Reactive: the conversation card is shown while there is content or active voice. */
-  protected readonly chatStarted = computed(() =>
-    this.messages().length > 0 || this.voiceEnabled() || this.isListening() || this.isModelLoading() || this.showGrokCli()
-  );
+  /** Reactive: the conversation card is shown while there is content or an open voice channel. */
+  protected readonly chatStarted = computed(() => {
+    if (this.messages().length > 0 || this.showGrokCli()) return true;
+    // Push-to-talk must not open this panel on press: the layout jump cancels
+    // the pointer and the release never commits audio.
+    if (this.pushToTalk()) return false;
+    return this.voiceEnabled() || this.isListening() || this.isModelLoading();
+  });
   protected readonly showChatPanel = computed(() => this.chatStarted());
   protected readonly activeTopicLabel = computed(() => this.memory.activeTopic()?.title || 'Here');
   protected readonly presenceLine = computed(() => presenceTitle({
@@ -1089,12 +1093,21 @@ export class App {
   @HostListener('document:keyup', ['$event'])
   protected onGlobalKeyup(event: KeyboardEvent) {
     if (event.code !== 'Space' || !this.pushToTalk() || !this.pushTalkHeld()) return;
-    const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-      return;
-    }
     event.preventDefault();
     this.endPushTalk();
+  }
+
+  @HostListener('document:pointerup', ['$event'])
+  @HostListener('document:pointercancel', ['$event'])
+  protected onDocumentPointerEnd(event: PointerEvent) {
+    if (!this.pushToTalk() || !this.pushTalkHeld()) return;
+    if (event.type === 'pointerup' && event.button !== 0) return;
+    this.endPushTalk();
+  }
+
+  @HostListener('window:blur')
+  protected onWindowBlur() {
+    if (this.pushTalkHeld()) this.endPushTalk();
   }
 
   @HostListener('document:mousedown', ['$event'])
@@ -1965,9 +1978,11 @@ export class App {
   private readonly CHUNK_SIZE = 4096;
   private readonly SPEECH_THRESHOLD = 0.007; // adaptive energy VAD floor
   private readonly MIN_SPEECH_SAMPLES = 16000 * 0.35; // ~0.35s min
+  private readonly PTT_MIN_SAMPLES = 16000 * 0.18; // ~0.18s; release is the commit, not VAD
   private readonly SILENCE_FOR_COMMIT = 16000 * 0.7; // ~0.7s silence to commit
   private readonly SPEECH_ONSET_SAMPLES = 16000 * 0.16; // ~0.16s of sustained energy before wake
   private readonly SPEECH_COOLDOWN_MS = 1200;
+  private listenEpoch = 0;
   private noiseFloor = 0.003;
   private speechSamples = 0;
   private speechCandidateSamples = 0;
@@ -2079,6 +2094,7 @@ export class App {
     this.voiceEnabled.set(true);
     this.setBackgroundVoiceSession(false);
     if (this.status() === 'speaking') this.stopSpeaking();
+    this.debug.log('speech', 'Push-to-talk start');
     if (!this.isListening()) await this.startMoonshineListening();
   }
 
@@ -2087,7 +2103,9 @@ export class App {
     this.pushTalkHeld.set(false);
     this.voiceEnabled.set(false);
     this.setBackgroundVoiceSession(false);
-    this.stopMoonshineListening({ commitPending: true, submitPartial: true });
+    this.listenEpoch += 1;
+    this.debug.log('speech', 'Push-to-talk release');
+    this.stopMoonshineListening({ commitPending: true, submitPartial: true, fromPushTalk: true });
   }
 
   private async enableVoiceChannel() {
@@ -2104,6 +2122,7 @@ export class App {
     this.pushTalkHeld.set(false);
     this.voiceEnabled.set(false);
     this.setBackgroundVoiceSession(false);
+    this.listenEpoch += 1;
     this.stopMoonshineListening();
   }
 
@@ -2322,6 +2341,7 @@ export class App {
 
   private async startMoonshineListening() {
     if (this.isListening() || this.manualInputEnabled()) return;
+    const epoch = this.listenEpoch;
 
     try {
       this.currentTranscript.set('');
@@ -2331,11 +2351,14 @@ export class App {
       this.speechSamples = 0;
       this.speechCandidateSamples = 0;
       this.speechCooldownUntil = 0;
-      this.isCommitInProgress = false;
       this.isLiveTranscriptInProgress = false;
       this.noiseFloor = 0.003;
 
       const stream = await this.requestMicrophoneStream();
+      if (epoch !== this.listenEpoch) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
 
       this.mediaStream = stream;
 
@@ -2345,6 +2368,10 @@ export class App {
       });
       if (this.audioContext.state === 'suspended') {
         await this.audioContext.resume().catch(() => {});
+      }
+      if (epoch !== this.listenEpoch) {
+        this.teardownAudioGraph();
+        return;
       }
 
       // Some browsers ignore sampleRate in getUserMedia; we resample in processor if needed.
@@ -2361,20 +2388,17 @@ export class App {
       this.processor.connect(gain);
       gain.connect(this.audioContext.destination);
 
-      if (!this.usesGrokSpeech()) {
-        await this.ensureTranscriberLoaded();
-      } else {
-        this.speechModelName.set('Grok Voice');
-        this.modelLoadInfo.set('cloud');
-      }
-
       this.isListening.set(true);
       this.status.set('listening');
-
       this.processor.onaudioprocess = (event) => {
-        if (this.isCommitInProgress) return;
-
         const inputBuffer = event.inputBuffer.getChannelData(0);
+        if (this.pushTalkHeld()) {
+          const held = new Float32Array(inputBuffer);
+          this.appendToBuffer(held);
+          this.speechSamples += held.length;
+          return;
+        }
+        if (this.isCommitInProgress) return;
 
         // Convert to mono float32 (already should be)
         const samples = new Float32Array(inputBuffer);
@@ -2430,7 +2454,15 @@ export class App {
         }
       };
 
+      if (!this.usesGrokSpeech()) {
+        await this.ensureTranscriberLoaded();
+        if (epoch !== this.listenEpoch) return;
+      } else {
+        this.speechModelName.set('Grok Voice');
+        this.modelLoadInfo.set('cloud');
+      }
     } catch (err: any) {
+      if (epoch !== this.listenEpoch) return;
       console.error('Moonshine STT start error', err);
       this.voiceEnabled.set(false);
       this.stopMoonshineListening({ commitPending: false, submitPartial: false });
@@ -2539,20 +2571,29 @@ export class App {
   }
 
   private async commitCurrentUtterance() {
+    const live = this.currentTranscript();
+    const buffer = this.moonshineBuffer;
+    const spokenSamples = this.speechSamples;
+    this.moonshineBuffer = new Float32Array(0);
+    this.isSpeechActive = false;
+    this.silenceSamples = 0;
+    this.speechSamples = 0;
+    await this.commitCapturedAudio(buffer, spokenSamples, live, this.MIN_SPEECH_SAMPLES);
+  }
+
+  private async commitCapturedAudio(
+    buffer: Float32Array,
+    spokenSamples: number,
+    live: string,
+    minSamples: number,
+  ) {
     if (this.isCommitInProgress) return;
     this.isCommitInProgress = true;
     this.speechCooldownUntil = Date.now() + this.SPEECH_COOLDOWN_MS;
     await this.waitForLiveTranscriptToSettle();
 
-    const bufferToTranscribe = this.moonshineBuffer;
-    this.moonshineBuffer = new Float32Array(0);
-    this.isSpeechActive = false;
-    this.silenceSamples = 0;
-    const spokenSamples = this.speechSamples;
-    this.speechSamples = 0;
-
-    const live = this.currentTranscript();
-    if (!live && spokenSamples < this.MIN_SPEECH_SAMPLES) {
+    const spoken = live.trim();
+    if (!spoken && spokenSamples < minSamples && buffer.length < minSamples) {
       this.isCommitInProgress = false;
       return;
     }
@@ -2561,11 +2602,15 @@ export class App {
     let pendingUserMessage: Message | undefined;
 
     try {
-      if (live) {
+      if (spoken) {
         this.currentTranscript.set('');
         this.lastLiveUpdate = 0;
-        this.handleUserSpeech(live);
+        this.handleUserSpeech(spoken);
         return;
+      }
+
+      if (!this.usesGrokSpeech() && !this.transcriber) {
+        await this.ensureTranscriberLoaded();
       }
 
       if (gardenId) {
@@ -2574,8 +2619,8 @@ export class App {
       this.currentTranscript.set('Transcribing...');
       this.status.set('thinking');
 
-      const result: any = await this.transcribeWithRecovery(bufferToTranscribe);
-      let finalText = (result?.text || '').trim();
+      const result: any = await this.transcribeWithRecovery(buffer);
+      const finalText = (result?.text || '').trim();
 
       if (finalText) {
         this.currentTranscript.set('');
@@ -2615,23 +2660,7 @@ export class App {
     }
   }
 
-  private stopMoonshineListening(
-    options: { commitPending?: boolean; submitPartial?: boolean } = {}
-  ) {
-    const commitPending = options.commitPending ?? true;
-    const submitPartial = options.submitPartial ?? true;
-    const wasListening = this.isListening();
-    this.isListening.set(false);
-
-    // Attempt to commit any remaining speech
-    const canTranscribe = !!this.transcriber || this.usesGrokSpeech();
-    const willCommit = commitPending && wasListening && canTranscribe && this.speechSamples >= this.MIN_SPEECH_SAMPLES;
-    if (willCommit) {
-      // fire and forget
-      this.commitCurrentUtterance().catch(() => {});
-    }
-
-    // Cleanup audio graph
+  private teardownAudioGraph() {
     try {
       if (this.processor) {
         this.processor.onaudioprocess = null;
@@ -2644,7 +2673,7 @@ export class App {
       if (this.mediaStream) {
         this.mediaStream.getTracks().forEach(t => t.stop());
       }
-    } catch (e) {
+    } catch {
       // ignore cleanup errors
     }
 
@@ -2657,17 +2686,28 @@ export class App {
     this.silenceSamples = 0;
     this.speechSamples = 0;
     this.isLiveTranscriptInProgress = false;
+    this.isListening.set(false);
+  }
+
+  private stopMoonshineListening(
+    options: { commitPending?: boolean; submitPartial?: boolean; fromPushTalk?: boolean } = {}
+  ) {
+    const commitPending = options.commitPending ?? true;
+    const wasListening = this.isListening();
+    const buffer = this.moonshineBuffer;
+    const spokenSamples = this.speechSamples;
+    const live = options.fromPushTalk ? '' : (this.currentTranscript() || '').trim();
+    const minSamples = options.fromPushTalk ? this.PTT_MIN_SAMPLES : this.MIN_SPEECH_SAMPLES;
+    const hasAudio = spokenSamples >= minSamples || buffer.length >= minSamples;
+
+    this.teardownAudioGraph();
 
     if (this.status() === 'listening') {
       this.status.set('idle');
     }
 
-    // If there is a live partial when stopping, commit it
-    const partial = this.currentTranscript();
-    if (submitPartial && partial) {
-      const text = partial;
-      this.currentTranscript.set('');
-      this.handleUserSpeech(text);
+    if (commitPending && wasListening && (hasAudio || live)) {
+      void this.commitCapturedAudio(buffer, spokenSamples, live, minSamples);
     }
   }
 

@@ -36,6 +36,7 @@ tokio = { version = "1", features = ["macros", "time", "sync"] }
 rfd = "0.15"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-window-state = "2"
 dirs = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 

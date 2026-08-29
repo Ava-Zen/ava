@@ -188,6 +188,13 @@ pub fn run() {
   #[cfg(desktop)]
   let builder = builder.manage(std::sync::Mutex::new(grok::GrokAppState::default()));
 
+  #[cfg(desktop)]
+  let builder = builder.plugin(
+    tauri_plugin_window_state::Builder::default()
+      .with_filter(|label| label == "main")
+      .build(),
+  );
+
   let builder = builder
     .setup(|app| {
       if cfg!(debug_assertions) {
