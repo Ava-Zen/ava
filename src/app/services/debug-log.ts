@@ -69,6 +69,7 @@ const TAURI_EVENT = 'ava://debug';
 const MAX_EVENTS = 400;
 const DETAIL_LIMIT = 4000;
 const WINDOW_QUERY = 'debug';
+const ENABLED_STORAGE_KEY = 'ava-debug-window';
 
 export function isDebugWindow(): boolean {
   if (typeof window === 'undefined') return false;
@@ -85,6 +86,22 @@ export function extractThinkBlock(text: string): string | null {
   const open = text.match(/<think>([\s\S]*)$/i);
   if (open?.[1]?.trim()) return open[1].trim();
   return null;
+}
+
+function loadDebugWindowEnabled(): boolean {
+  try {
+    return localStorage.getItem(ENABLED_STORAGE_KEY) === 'on';
+  } catch {
+    return false;
+  }
+}
+
+function persistDebugWindowEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(ENABLED_STORAGE_KEY, enabled ? 'on' : 'off');
+  } catch {
+    // ignore
+  }
 }
 
 export function clipDebugText(text: string, max = DETAIL_LIMIT): string {
@@ -109,6 +126,7 @@ export class DebugLogService {
   readonly snapshot = signal<DebugSnapshot | null>(null);
   readonly overlayOpen = signal(false);
   readonly available = signal(false);
+  readonly enabled = signal(false);
   readonly liveCommand = signal('');
   readonly liveThink = signal('');
 
@@ -123,6 +141,7 @@ export class DebugLogService {
 
   constructor() {
     this.available.set(isDebugWindow() || isDevMode());
+    this.enabled.set(loadDebugWindowEnabled());
     this.bindChannel();
     void this.bindTauri();
     if (this.role === 'viewer') this.startHello();
@@ -186,8 +205,26 @@ export class DebugLogService {
     this.overlayOpen.set(true);
   }
 
+  async setEnabled(enabled: boolean): Promise<void> {
+    this.enabled.set(enabled);
+    persistDebugWindowEnabled(enabled);
+    if (enabled) await this.open();
+    else await this.close();
+  }
+
   closeOverlay(): void {
     this.overlayOpen.set(false);
+  }
+
+  async close(): Promise<void> {
+    this.overlayOpen.set(false);
+    if (!isTauriDesktop() || isDebugWindow()) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('close_debug_window');
+    } catch {
+      // ignore
+    }
   }
 
   popOut(): void {
@@ -197,8 +234,8 @@ export class DebugLogService {
     if (popup) this.overlayOpen.set(false);
   }
 
-  shouldAutoOpenOverlay(): boolean {
-    return isDevMode() && !isTauriDesktop() && !isDebugWindow();
+  shouldAutoOpen(): boolean {
+    return this.available() && this.enabled() && !isDebugWindow();
   }
 
   private append(event: DebugEvent): void {

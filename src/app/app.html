@@ -1,4 +1,4 @@
-<main class="ava-root">
+<main class="ava-root" [class.orb-chrome]="orbChrome()">
   <div class="app-frame" [class.chat-active]="showChatPanel()" [attr.inert]="showStartup() ? '' : null">
     <section class="companion-grid" [class.chat-active]="showChatPanel()">
       <section class="voice-console" [class.mini]="showChatPanel()" aria-labelledby="voice-title">
@@ -58,6 +58,7 @@
           (click)="onOrbClick($event)"
           (contextmenu)="onMicContextMenu($event)"
           (pointerdown)="onMicPointerDown($event)"
+          (pointermove)="onOrbPointerMove($event)"
           (pointerup)="onMicPointerUp($event)"
           (pointercancel)="onMicPointerUp($event)"
           (keydown.enter)="toggleVoice()"
@@ -87,6 +88,7 @@
               (canplay)="playAvaFace($event)"
             ></video>
           </span>
+          <span class="orb-edge" aria-hidden="true"></span>
         </button>
 
         <div class="voice-status">
@@ -846,6 +848,39 @@
       >
         Open channel
       </button>
+      @if (chromeDesktop) {
+        <div class="menu-divider"></div>
+        <button
+          class="menu-action"
+          [class.active]="alwaysOnTop()"
+          type="button"
+          role="menuitemcheckbox"
+          [attr.aria-checked]="alwaysOnTop()"
+          (click)="toggleAlwaysOnTopFromMenu()"
+        >
+          Keep on top
+        </button>
+        <button
+          class="menu-action"
+          [class.active]="orbChromePref()"
+          type="button"
+          role="menuitemcheckbox"
+          [attr.aria-checked]="orbChromePref()"
+          (click)="toggleOrbChromeFromMenu()"
+        >
+          {{ orbChromePref() ? 'Show window' : 'Show only the orb' }}
+        </button>
+        @if (orbChrome()) {
+          <button
+            class="menu-action"
+            type="button"
+            role="menuitem"
+            (click)="openSettingsFromOrbMenu()"
+          >
+            Settings
+          </button>
+        }
+      }
     </div>
   }
 

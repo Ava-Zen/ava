@@ -38,6 +38,13 @@ describe('what to keep', () => {
     expect(identityFact('My name is Sondre Larsen')).toBe('Full name is Sondre Larsen');
     expect(identityFact('My twitter is @sondr')).toBe('X is @sondr');
     expect(identityFact('I am 42 years old')).toBe('Age is 42');
+    expect(identityFact('Remember this, my age is forty-five')).toBe('Age is 45');
+    expect(identityFact('my age is 45')).toBe('Age is 45');
+    expect(isExplicitRemember('Remember this, my age is forty-five')).toBeTrue();
+    expect(isExplicitRemember('Keep this: I live in Oslo')).toBeTrue();
+    expect(isExplicitRemember('I remember when we met')).toBeFalse();
+    expect(durableFact('Remember this, my age is forty-five')).toBe('Age is 45');
+    expect(personaReplyFact('age', 'forty-five')).toBe('Age is 45');
     expect(fullNameFromPersona('Sondre', 'Full name is Sondre Larsen')).toBe('Sondre Larsen');
     expect(extractGivenFullName('Sondre Larsen')).toBe('Sondre Larsen');
     expect(identitySocials('X is @sondr\nYouTube is @ava')).toEqual(['X: @sondr', 'YouTube: @ava']);
@@ -62,6 +69,20 @@ describe('what to keep', () => {
     expect(people[0].role).toBe('Girlfriend');
     expect(people.find(person => person.name === 'Mira')?.notes).toBe('6 years old');
     expect(people.find(person => person.name === 'Erik')?.notes).toBe('1 year old');
+  });
+
+  it('keeps a partner location and a named son from ordinary speech', () => {
+    const partner = peopleFromText('Keep this. My partner lives in Montenegro.');
+    expect(partner).toEqual([jasmine.objectContaining({
+      relation: 'partner',
+      role: 'Partner',
+      livesIn: 'Montenegro',
+    })]);
+    const son = peopleFromText('I have a son and his name is Leo');
+    expect(son.map(person => person.name)).toEqual(['Leo']);
+    expect(son[0].relation).toBe('child');
+    expect(son[0].role).toBe('Son');
+    expect(peopleFromText("My son's name is Leo")[0].name).toBe('Leo');
   });
 });
 

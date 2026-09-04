@@ -26,6 +26,25 @@
       <button type="button" [class.active]="themePreference() === 'auto'" (click)="setTheme('auto')">Auto</button>
     </div>
     <p class="hint">Now using {{ resolvedTheme() }}.</p>
+    @if (chromeDesktop) {
+      <p class="hint">Float just the orb on the desktop. Drag it anywhere. Keep it above other windows if you like.</p>
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          [checked]="orbChrome()"
+          (change)="setOrbChrome($any($event.target).checked)"
+        />
+        <span>Show only the orb</span>
+      </label>
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          [checked]="alwaysOnTop()"
+          (change)="setAlwaysOnTop($any($event.target).checked)"
+        />
+        <span>Keep Ava on top</span>
+      </label>
+    }
   </section>
 
   <section class="section">
@@ -432,6 +451,22 @@
         </div>
       </div>
 
+      @if (cloudExclusive()) {
+        <p class="speaker-label">Grok thinking</p>
+        <p class="hint">Low answers quickly. Higher thinks longer before speaking.</p>
+        <div class="segmented intelligence-toggle" aria-label="Grok thinking">
+          @for (effort of grokReasoningEfforts; track effort) {
+            <button
+              type="button"
+              [class.active]="grokReasoningEffort() === effort"
+              (click)="setGrokReasoning(effort)"
+            >
+              {{ grokReasoningLabel(effort) }}
+            </button>
+          }
+        </div>
+      }
+
       @if (!cloudExclusive() && !(agentRuntime() === 'copilot' && copilotSignedIn())) {
       <div>
         <p class="speaker-label">Background Agent</p>
@@ -501,11 +536,25 @@
     </div>
     <p class="hint">
       @if (listenMode() === 'push') {
-        Hold Space, Right Ctrl, or the mic, then release to send.
+        Hold Space, Right Ctrl, the listen key, or the mic, then release to send.
       } @else {
         The mic stays on until you turn it off.
       }
     </p>
+    @if (chromeDesktop) {
+      <p class="hint">A key that starts listening even when another app is focused. F8 is unused by most programs.</p>
+      <div class="segmented intelligence-toggle" aria-label="Listen key">
+        @for (key of listenHotkeyOptions; track key) {
+          <button
+            type="button"
+            [class.active]="listenHotkeyKey() === key"
+            (click)="setListenHotkey(key)"
+          >
+            {{ listenHotkeyLabel(key) }}
+          </button>
+        }
+      </div>
+    }
 
     <div class="voice-list">
       @for (voice of voices; track voice.id) {
@@ -862,11 +911,16 @@
         </div>
       </div>
       <p class="hint">
-        Watch routing, thinking, and commands while Ava is running in debug mode. Ctrl+Shift+D.
+        Off by default. Turn it on to watch routing, thinking, and commands. Ctrl+Shift+D also opens it.
       </p>
-      <div class="auth-row">
-        <button class="save-btn" type="button" (click)="openDebugConsole()">Open debug console</button>
-      </div>
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          [checked]="debugWindowEnabled()"
+          (change)="setDebugWindow($any($event.target).checked)"
+        />
+        <span>Show debug window</span>
+      </label>
     </section>
   }
 

@@ -47,7 +47,7 @@ export function isAskingCapabilities(text: string): boolean {
 }
 
 export const AVA_CAPABILITIES_REPLY =
-  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background. Ask me to research you or a topic and I will write a report you can open. You can schedule a task once or every morning, as long as I am still running. On the desktop app, say Ava, improve yourself, and I will change my own source, compile, and come back.';
+  'I can talk with you by voice or text. I keep what we discuss as files, one subject at a time, so you stay in one conversation. Ask me the time or the weather, attach a file for me to summarize, or have me draft a reply. On the desktop app, click a field in another app, then say write about Vikings or generate a text, and I will put it there. I can also generate or edit images with Grok, work on a project with Grok in this window, and work on files or GitHub in the background. Ask me to research you or a topic and I will write a report you can open. You can schedule a task once or every morning, as long as I am still running. On the desktop app, say Ava, improve yourself, and I will change my own source, compile, and come back.';
 
 const PROJECT_STOP =
   /^(this|that|it|them|myself|me|us|something|stuff|things|nothing|everything|grok|grok cli|a grok session|grok session|session)$/i;
@@ -101,6 +101,100 @@ export function isGrokSessionMemory(text: string): boolean {
   if (/\bgrok(?:\s+cli)?(?:\s+session)?\b/i.test(hay)) return true;
   if (isAskingForGrokWork(hay)) return true;
   return text.split(/[\n.;]+/).some(part => isAskingForGrokWork(part));
+}
+
+export type InsertRequest =
+  | { kind: 'last' }
+  | { kind: 'literal'; text: string }
+  | { kind: 'generate'; prompt: string };
+
+const INSERT_VERBS = 'type|insert|paste|dictate';
+const WRITE_VERBS = 'generate|author|draft|compose|write|type|insert|paste|dictate|make|create|fill';
+const TEXT_KINDS = 'text|paragraph|passage|blurb|note|message|email|reply|caption|sentence|poem|story|summary|bio';
+
+export interface InsertParseOptions {
+  /** Orb-only mode: treat write/generate asks as paste-into-field. */
+  intoField?: boolean;
+}
+
+/** True when the user wants text placed in the focused field of another app. */
+export function parseInsertRequest(text: string, options: InsertParseOptions = {}): InsertRequest | null {
+  const q = peelWant(text);
+  if (!q) return null;
+
+  if (
+    /^(?:type|insert|paste|put|write) (?:that|this|it)(?:\s+in(?:to)?(?:\s+(?:the\s+)?(?:field|box|app|window))?)?$/.test(q) ||
+    /^(?:paste|insert|put) that(?:\s+in)?$/.test(q)
+  ) {
+    return { kind: 'last' };
+  }
+
+  if (/^(tell me|talk(?: to me)? about|what|who|when|where|why|how|do you|remember|research)\b/.test(q)) {
+    return null;
+  }
+
+  const intoField =
+    options.intoField === true ||
+    /\b(?:in(?:to)? the (?:field|box|app|window)|type (?:it|that) in|fill (?:it|that|this) in)\b/.test(q);
+
+  let match = q.match(
+    new RegExp(`^(?:${WRITE_VERBS})\\b[\\s\\S]*\\b(?:about|regarding|on)\\s+(.+)$`),
+  );
+  if (match?.[1]) return { kind: 'generate', prompt: recoverPhrase(text, match[1]) };
+
+  match = q.match(
+    new RegExp(
+      `^(?:${WRITE_VERBS})\\s+(?:me\\s+)?(?:(?:a|an|some|the)\\s+)?(?:short\\s+)?(?:${TEXT_KINDS}|something|anything)?\\s*(?:about|on|for|regarding)\\s+(.+)$`,
+    ),
+  );
+  if (match?.[1]) return { kind: 'generate', prompt: recoverPhrase(text, match[1]) };
+
+  match = q.match(
+    new RegExp(
+      `^(?:generate|author|draft|compose)\\s+(?:me\\s+)?(?:(?:a|an|some|the)\\s+)?(?:short\\s+)?(?:${TEXT_KINDS})\\s+(?:that\\s+|to\\s+)?(.+)$`,
+    ),
+  );
+  if (match?.[1]) return { kind: 'generate', prompt: recoverPhrase(text, match[1]) };
+
+  match = q.match(
+    /^(?:type|insert|paste|dictate|put|write)\s+(?:this|the following)(?:\s+in(?:to)?(?:\s+the\s+(?:field|box))?)?\s+(.+)$/,
+  );
+  if (match?.[1]) return classifyInsertBody(text, match[1]);
+
+  match = q.match(/^fill (?:this|it|the (?:field|box|input))(?: in)?(?: with)?\s+(.+)$/);
+  if (match?.[1]) return classifyInsertBody(text, match[1]);
+
+  match = q.match(new RegExp(`^(?:${INSERT_VERBS})\\s+(.+)$`));
+  if (match?.[1]) return classifyInsertBody(text, match[1]);
+
+  if (intoField) {
+    match = q.match(new RegExp(`^(?:${WRITE_VERBS})\\s+(?:me\\s+)?(.+)$`));
+    if (match?.[1]) return { kind: 'generate', prompt: recoverPhrase(text, match[1]) };
+  }
+
+  return null;
+}
+
+/** Prompt that asks the model for paste-ready copy only. */
+export function buildInsertPrompt(topic: string): string {
+  return `Write text to paste into another app. Output only that text, with no title, quotes, or preamble.\n\n${topic.trim()}`;
+}
+
+function classifyInsertBody(source: string, body: string): InsertRequest {
+  const generateShape = new RegExp(
+    `^(?:about\\b|(?:a|an|some)\\s+(?:short\\s+)?(?:${TEXT_KINDS})\\b)`,
+  );
+  if (generateShape.test(body) || body.split(/\s+/).length > 12) {
+    return { kind: 'generate', prompt: recoverPhrase(source, body) };
+  }
+  return { kind: 'literal', text: recoverPhrase(source, body) };
+}
+
+function recoverPhrase(source: string, needle: string): string {
+  const hay = source.replace(/\s+/g, ' ').trim();
+  const at = hay.toLowerCase().lastIndexOf(needle.toLowerCase());
+  if (at >= 0) return hay.slice(at, at + needle.length).trim();
+  return needle.trim();
 }
 
 /** True when the user wants to leave the Grok session and return to Ava. */

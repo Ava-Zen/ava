@@ -9,6 +9,15 @@ mod mcp;
 mod voice_session;
 
 #[cfg(desktop)]
+mod chrome;
+
+#[cfg(desktop)]
+mod insert_text;
+
+#[cfg(desktop)]
+mod listen_hotkey;
+
+#[cfg(desktop)]
 mod grok;
 
 #[cfg(desktop)]
@@ -168,6 +177,15 @@ async fn open_debug_window(app: tauri::AppHandle) -> Result<(), String> {
   open_debug_window_inner(&app)
 }
 
+#[cfg(desktop)]
+#[tauri::command]
+async fn close_debug_window(app: tauri::AppHandle) -> Result<(), String> {
+  if let Some(existing) = app.get_webview_window("debug") {
+    existing.close().map_err(|error| error.to_string())?;
+  }
+  Ok(())
+}
+
 fn title_case_name_part(part: &str) -> String {
   let mut chars = part.chars();
   match chars.next() {
@@ -189,9 +207,19 @@ pub fn run() {
   let builder = builder.manage(std::sync::Mutex::new(grok::GrokAppState::default()));
 
   #[cfg(desktop)]
+  let builder = builder.manage(insert_text::FocusWatch::default());
+
+  #[cfg(desktop)]
   let builder = builder.plugin(
     tauri_plugin_window_state::Builder::default()
       .with_filter(|label| label == "main")
+      .with_state_flags(
+        tauri_plugin_window_state::StateFlags::POSITION
+          | tauri_plugin_window_state::StateFlags::SIZE
+          | tauri_plugin_window_state::StateFlags::MAXIMIZED
+          | tauri_plugin_window_state::StateFlags::VISIBLE
+          | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+      )
       .build(),
   );
 
@@ -221,12 +249,8 @@ pub fn run() {
 
         // Host the MCP TTS server on desktop so other local agents can borrow Ava's voice.
         mcp::start(app.handle().clone());
-
-        if cfg!(debug_assertions) {
-          if let Err(error) = open_debug_window_inner(app.handle()) {
-            log::warn!("Could not open debug window: {error}");
-          }
-        }
+        insert_text::start(app.handle().clone());
+        listen_hotkey::start(app.handle().clone());
       }
 
       Ok(())
@@ -239,6 +263,12 @@ pub fn run() {
     write_file_bytes,
     reset_app_cache,
     open_debug_window,
+    close_debug_window,
+    chrome::set_companion_chrome,
+    chrome::start_window_drag,
+    insert_text::insert_into_focused_field,
+    insert_text::remember_insert_target,
+    listen_hotkey::set_listen_hotkey,
     home::home_pick_folder,
     home::home_suggested_path,
     home::home_ensure,

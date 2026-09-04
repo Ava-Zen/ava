@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, ViewChild, ElementRef, inject, HostListener } from '@angular/core';
+import { Component, signal, computed, effect, ViewChild, ElementRef, inject, HostBinding, HostListener } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { invoke } from '@tauri-apps/api/core';
@@ -32,6 +32,8 @@ import { AgentsService, AgentTask, AgentToolDef } from './services/agents';
 import { McpService, WEATHER_SERVER_ID } from './services/mcp';
 import { OnboardingService } from './services/onboarding';
 import { ThemeService } from './services/theme';
+import { WindowChromeService } from './services/window-chrome';
+import { ListenHotkeyService } from './services/listen-hotkey';
 import { MemoryService, MemoryTurn } from './services/memory';
 import { SchedulesService } from './services/schedules';
 import { ResearchService } from './services/research';
@@ -74,7 +76,10 @@ import {
   isAskingAboutSchedules,
   isAskingToCancelSchedule,
   isAskingToResearchSelf,
+  parseInsertRequest,
   parseScheduleRequest,
+  buildInsertPrompt,
+  type InsertRequest,
   type ParsedSchedule,
 } from './intents';
 import {
@@ -270,6 +275,11 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   styleUrl: './app.css'
 })
 export class App {
+  @HostBinding('class.orb-chrome')
+  protected get orbChromeHost(): boolean {
+    return this.chrome.active();
+  }
+
   protected readonly title = signal('Ava');
   private readonly MAX_FILE_CHARS = 12000;
   private readonly TEXT_FILE_EXTENSIONS = new Set([
@@ -285,6 +295,8 @@ export class App {
   private readonly onboarding = inject(OnboardingService);
   private readonly memory = inject(MemoryService);
   private readonly theme = inject(ThemeService);
+  private readonly chrome = inject(WindowChromeService);
+  private readonly listenHotkey = inject(ListenHotkeyService);
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly grokCli = inject(GrokCliService);
@@ -329,6 +341,10 @@ export class App {
   protected readonly gardens = this.gardensService.gardens;
   protected readonly currentGarden = this.gardensService.currentGarden;
   protected readonly desktopHome = this.memory.desktop;
+  protected readonly chromeDesktop = this.chrome.desktop;
+  protected readonly orbChrome = this.chrome.active;
+  protected readonly orbChromePref = this.chrome.compact;
+  protected readonly alwaysOnTop = this.chrome.alwaysOnTop;
   protected showSettings = signal(false);
   protected showMemory = signal(false);
   protected showGrokCli = signal(false);
@@ -469,15 +485,20 @@ export class App {
   private pushTalkKeyCode: string | null = null;
   private listenMenuTimer: ReturnType<typeof setTimeout> | null = null;
   private listenMenuSuppressClick = false;
+  private orbDrag: { x: number; y: number; moved: boolean } | null = null;
+
   protected readonly micTitle = computed(() => {
+    const dragHint = this.orbChrome() ? ' · drag to move' : '';
+    const listenKey = this.listenHotkey.key();
+    const keyHint = listenKey === 'off' ? '' : ` or ${listenKey}`;
     if (this.pushToTalk()) {
       return this.isListening()
         ? 'Release to send'
-        : 'Hold Space, Right Ctrl, or the mic · right-click to switch mode';
+        : `Hold Space, Right Ctrl${keyHint}, or the mic · right-click to switch mode` + dragHint;
     }
     return this.voiceEnabled()
-      ? 'Stop listening · right-click to switch mode'
-      : 'Start speaking · right-click to switch mode';
+      ? 'Stop listening · right-click to switch mode' + dragHint
+      : 'Start speaking · right-click to switch mode' + dragHint;
   });
   protected readonly micAriaLabel = computed(() => {
     if (this.pushToTalk()) return this.isListening() ? 'Release to send' : 'Hold to talk';
@@ -564,6 +585,8 @@ export class App {
     this.watchDebugSnapshot();
     this.watchIdlePresence();
     this.watchSchedules();
+    this.watchWindowChrome();
+    this.watchListenHotkey();
     this.debug.log('system', 'Ava started', this.llm.selectedModel().name);
     if (this.onboarding.completed()) {
       this.updates.scheduleAutoCheck();
@@ -1201,7 +1224,7 @@ export class App {
       this.workspaceDraftOpen.set(false);
       this.gardenMenuOpen.set(false);
       this.gardenMenuError.set('');
-      this.listenMenuOpen.set(false);
+      this.closeListenMenu();
       return;
     }
 
@@ -1303,7 +1326,7 @@ export class App {
 
   protected onStartupFinished() {
     this.showStartup.set(false);
-    if (this.debug.shouldAutoOpenOverlay() && this.onboarding.completed()) void this.debug.open();
+    if (this.debug.shouldAutoOpen() && this.onboarding.completed()) void this.debug.open();
   }
 
   protected playAvaFace(event: Event): void {
@@ -1321,7 +1344,7 @@ export class App {
     this.showSettings.set(false);
     void this.hydrateMemory();
     this.updates.scheduleAutoCheck(1200);
-    if (this.debug.shouldAutoOpenOverlay()) void this.debug.open();
+    if (this.debug.shouldAutoOpen()) void this.debug.open();
   }
 
   protected async onResetCache() {
@@ -1350,6 +1373,7 @@ export class App {
       'ava-xai-auth',
       'ava-intelligence-mode',
       'ava-llm-model',
+      'ava-grok-reasoning',
       'ava-llm-uncensored',
       'ava-tts-config',
       'ava-listen-mode',
@@ -1366,6 +1390,9 @@ export class App {
       'ava-home-root',
       'ava-okf-fs',
       'ava-theme',
+      'ava-window-chrome',
+      'ava-debug-window',
+      'ava-listen-hotkey',
       'ava-onboarding-complete',
       'ava-user-profile',
       'ava-messages-by-garden',
@@ -1416,6 +1443,18 @@ export class App {
     void this.toggleVoice();
   }
 
+  protected onOrbPointerMove(event: PointerEvent) {
+    if (!this.orbChrome() || !this.orbDrag || this.orbDrag.moved || event.buttons === 0) return;
+    const dx = event.screenX - this.orbDrag.x;
+    const dy = event.screenY - this.orbDrag.y;
+    if (dx * dx + dy * dy < 36) return;
+    this.orbDrag.moved = true;
+    this.clearListenMenuLongPress();
+    this.listenMenuSuppressClick = true;
+    if (this.pushTalkHeld()) this.endPushTalk();
+    void this.chrome.startDragging();
+  }
+
   protected onStopListeningClick(event: Event) {
     if (this.consumeListenMenuClick()) {
       event.preventDefault();
@@ -1431,13 +1470,25 @@ export class App {
     if (this.pushToTalk() && this.pushTalkHeld() && event.button !== 2) return;
     if (this.pushTalkHeld()) this.endPushTalk();
     if (this.listenMenuOpen()) {
-      this.listenMenuOpen.set(false);
+      this.closeListenMenu();
       return;
     }
-    this.showListenMenuAt(event.clientX, event.clientY);
+    void this.showListenMenuAt(event.clientX, event.clientY);
+  }
+
+  private rememberInsertTarget() {
+    if (!this.chrome.desktop) return;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('remember_insert_target'))
+      .catch(() => undefined);
   }
 
   protected onMicPointerDown(event: PointerEvent) {
+    this.rememberInsertTarget();
+    if (this.orbChrome() && event.button === 0) {
+      this.orbDrag = { x: event.screenX, y: event.screenY, moved: false };
+      (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+    }
     this.armListenMenuLongPress(event);
     this.onPushTalkPointerDown(event);
   }
@@ -1445,6 +1496,7 @@ export class App {
   protected onMicPointerUp(event: PointerEvent) {
     this.clearListenMenuLongPress();
     this.onPushTalkPointerUp(event);
+    this.orbDrag = null;
   }
 
   protected onPushTalkPointerDown(event: PointerEvent) {
@@ -1461,7 +1513,7 @@ export class App {
   }
 
   protected setListenModeFromMenu(mode: ListenMode) {
-    this.listenMenuOpen.set(false);
+    this.closeListenMenu();
     if (this.showGrokCli()) {
       this.onGrokListenMode(mode);
       return;
@@ -1471,6 +1523,21 @@ export class App {
     if (mode === 'push' && (this.voiceEnabled() || this.isListening())) {
       this.stopListening();
     }
+  }
+
+  protected toggleAlwaysOnTopFromMenu() {
+    void this.chrome.setAlwaysOnTop(!this.alwaysOnTop());
+  }
+
+  protected toggleOrbChromeFromMenu() {
+    const next = !this.chrome.compact();
+    this.closeListenMenu();
+    void this.chrome.setCompact(next);
+  }
+
+  protected openSettingsFromOrbMenu() {
+    this.closeListenMenu();
+    this.openSettings();
   }
 
   protected toggleManualInput() {
@@ -2314,7 +2381,7 @@ export class App {
 
   private async beginPushTalk(fromKey?: string) {
     if (this.pushTalkHeld()) return;
-    this.listenMenuOpen.set(false);
+    this.closeListenMenu();
     this.pushTalkKeyCode = fromKey ?? null;
     this.pushTalkHeld.set(true);
     this.voiceEnabled.set(true);
@@ -2351,17 +2418,74 @@ export class App {
     return true;
   }
 
-  private showListenMenuAt(x: number, y: number) {
-    const width = 228;
-    const height = 148;
-    const pad = 12;
-    this.listenMenuX.set(Math.max(pad, Math.min(x, window.innerWidth - width - pad)));
-    this.listenMenuY.set(Math.max(pad, Math.min(y, window.innerHeight - height - pad)));
-    this.listenMenuOpen.set(true);
+  private watchListenHotkey() {
+    if (!this.listenHotkey.desktop) return;
+    void this.listenHotkey.start();
+    void import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('listen-hotkey-down', () => this.onListenHotkeyDown());
+      listen('listen-hotkey-up', () => this.onListenHotkeyUp());
+    }).catch(() => undefined);
+  }
+
+  private onListenHotkeyDown() {
+    void this.rememberInsertTarget();
+    if (this.showStartup() || this.showOnboarding() || this.confirm.open()) {
+      return;
+    }
+    if (this.pushToTalk()) {
+      void this.beginPushTalk('hotkey');
+      return;
+    }
+    void this.toggleVoice();
+  }
+
+  private onListenHotkeyUp() {
+    if (!this.pushToTalk() || this.pushTalkKeyCode !== 'hotkey') return;
+    this.endPushTalk();
+  }
+
+  private watchWindowChrome() {
+    effect(() => {
+      this.chrome.setBlocked(
+        this.showStartup() ||
+        this.showOnboarding() ||
+        this.showSettings() ||
+        this.showMemory() ||
+        this.showGrokCli() ||
+        this.showDebugOverlay() ||
+        !!this.viewerImage() ||
+        this.updates.dialogOpen() ||
+        this.confirm.open(),
+      );
+    });
+  }
+
+  private closeListenMenu() {
+    if (!this.listenMenuOpen() && !this.chrome.menuOpen()) return;
+    this.listenMenuOpen.set(false);
+    void this.chrome.setMenuOpen(false);
+  }
+
+  private async showListenMenuAt(x: number, y: number) {
     this.composerMenuOpen.set(false);
     this.modelMenuOpen.set(false);
     this.workspaceMenuOpen.set(false);
     this.gardenMenuOpen.set(false);
+    this.listenMenuOpen.set(true);
+    if (this.orbChrome() || this.chrome.compact()) {
+      await this.chrome.setMenuOpen(true);
+    }
+    const compact = this.orbChrome();
+    const width = 228;
+    const height = this.chromeDesktop ? (compact ? 308 : 256) : 148;
+    const pad = 12;
+    if (compact) {
+      this.listenMenuX.set(Math.max(pad, (window.innerWidth - width) / 2));
+      this.listenMenuY.set(Math.max(pad, Math.min(168, window.innerHeight - height - pad)));
+      return;
+    }
+    this.listenMenuX.set(Math.max(pad, Math.min(x, window.innerWidth - width - pad)));
+    this.listenMenuY.set(Math.max(pad, Math.min(y, window.innerHeight - height - pad)));
   }
 
   private armListenMenuLongPress(event: PointerEvent) {
@@ -2397,7 +2521,7 @@ export class App {
     if (menu && node && menu.contains(node)) return;
     const el = target instanceof HTMLElement ? target : null;
     if (el?.closest('.mic-control')) return;
-    this.listenMenuOpen.set(false);
+    this.closeListenMenu();
   }
 
   private async enableVoiceChannel() {
@@ -3048,6 +3172,15 @@ export class App {
 
     const seq = this.beginRequest();
 
+    const insertAsk = parseInsertRequest(text, { intoField: this.chrome.compact() });
+    if (insertAsk) {
+      this.debug.log('route', 'Insert into field', insertAsk.kind);
+      this.status.set('thinking');
+      this.isThinking.set(true);
+      await this.handleInsertIntoField(gardenId, text, insertAsk, seq, existingUserMessage);
+      return;
+    }
+
     if (this.isNewConversationCommand(text)) {
       this.debug.log('route', 'New conversation');
       this.resetCurrentConversation();
@@ -3519,6 +3652,7 @@ export class App {
     images?: GeneratedImage[],
     requestSeq = this.requestSeq,
     reportRel?: string,
+    spoken?: string,
   ) {
     if (!this.isCurrentRequest(requestSeq)) return;
 
@@ -3542,11 +3676,109 @@ export class App {
     this.status.set('speaking');
     this.scrollToBottom();
 
-    await this.speak(response);
+    await this.speak(spoken ?? response);
 
     if (!this.isCurrentRequest(requestSeq)) return;
     if (this.status() === 'speaking') this.status.set('idle');
     this.resumeVoiceCaptureIfEnabled();
+  }
+
+  private async handleInsertIntoField(
+    gardenId: string,
+    spoken: string,
+    request: InsertRequest,
+    requestSeq: number,
+    existingUserMessage?: Message,
+  ) {
+    if (existingUserMessage) this.updateMessageText(gardenId, existingUserMessage, spoken);
+    else this.addUserMessage(gardenId, spoken);
+
+    if (!this.chrome.desktop) {
+      await this.respond(
+        gardenId,
+        'I can only type into other apps in the desktop app.',
+        undefined,
+        undefined,
+        undefined,
+        requestSeq,
+      );
+      return;
+    }
+
+    let body = '';
+    let debug: Message['debug'] | undefined;
+    if (request.kind === 'last') {
+      body = [...this.messages()].reverse().find(msg => msg.role === 'ava' && !msg.pending)?.text?.trim() ?? '';
+      if (!body) {
+        await this.respond(gardenId, 'I do not have anything to insert yet.', undefined, undefined, undefined, requestSeq);
+        return;
+      }
+    } else if (request.kind === 'literal') {
+      body = request.text.trim();
+    } else {
+      this.status.set('speaking');
+      this.speak(this.pickThinkingFiller());
+      try {
+        const startedAt = performance.now();
+        const topic = this.memory.activeTopic();
+        const result = await this.llm.generate(
+          buildInsertPrompt(request.prompt),
+          this.buildChatHistory(gardenId, topic?.id),
+          [],
+          this.memory.contextBlock(topic),
+        );
+        if (!this.isCurrentRequest(requestSeq)) return;
+        body = result.text.trim();
+        debug = {
+          model: this.llm.activeModel()?.name ?? (this.llm.isCloudExclusive() ? 'Grok' : 'local model'),
+          durationMs: performance.now() - startedAt,
+        };
+      } catch (error) {
+        if (!this.isCurrentRequest(requestSeq) || isAbortError(error)) return;
+        const friendly = this.llm.friendlyError(error);
+        await this.respond(
+          gardenId,
+          friendly ?? 'Sorry, I could not write that just now.',
+          undefined,
+          spoken,
+          undefined,
+          requestSeq,
+        );
+        return;
+      }
+    }
+
+    if (!body) {
+      await this.respond(gardenId, 'I could not write that just now.', debug, spoken, undefined, requestSeq);
+      return;
+    }
+
+    let inserted = false;
+    let insertError = '';
+    try {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('remember_insert_target');
+      await invoke('insert_into_focused_field', { text: body });
+      inserted = true;
+    } catch (error) {
+      insertError = error instanceof Error ? error.message : String(error);
+      console.warn('Insert into field failed', error);
+    }
+    if (!this.isCurrentRequest(requestSeq)) return;
+
+    const ack = inserted
+      ? 'It is in.'
+      : /click the field/i.test(insertError)
+        ? 'Click the field you want, then ask me again.'
+        : 'I have the text. Click the field you want, then say insert that.';
+
+    if (request.kind === 'last') {
+      await this.respond(gardenId, ack, undefined, undefined, undefined, requestSeq);
+      return;
+    }
+
+    await this.respond(gardenId, body, debug, undefined, undefined, requestSeq, undefined, ack);
   }
 
   /** Routes an open-ended question to the local LLM, speaking a filler line first. */
@@ -4754,6 +4986,8 @@ export class App {
 
   private resetCurrentConversation(_gardenId?: string) {
     this.memory.markConversationCleared();
+    this.memory.clearConversationFocus();
+    this.chats.touch(this.threadId(), 'New chat');
     this.setChatMessages(this.threadId(), []);
     this.currentTranscript.set('');
     this.manualPrompt.set('');

@@ -106,6 +106,10 @@ const SYSTEM_PROMPT =
   'If a subject was left unfinished you may offer to pick it up. If you barely know them, you may ask one quiet question about their life. Do not interview them.';
 
 const INTELLIGENCE_KEY = 'ava-intelligence-mode';
+const REASONING_KEY = 'ava-grok-reasoning';
+
+export type GrokReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export const GROK_REASONING_EFFORTS: GrokReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 
 /** Conversation options for the in-WebView (transformers.js) engine. */
 const WEB_CHAT_MODELS: LlmModelOption[] = [
@@ -127,6 +131,7 @@ export class LlmService {
   /** True when the Tauri host provides the native llama.cpp engine. */
   private readonly nativeEngine = signal(false);
   readonly intelligenceMode = signal<IntelligenceMode>(this.loadIntelligenceMode());
+  readonly reasoningEffort = signal<GrokReasoningEffort>(loadReasoningEffort());
   readonly isCloudExclusive = computed(
     () => this.intelligenceMode() === 'grok' && this.xai.signedIn() && !isCloudBlocked()
   );
@@ -196,6 +201,15 @@ export class LlmService {
       this.modelId.set(this.nativeEngine() ? NATIVE_DEFAULT_MODELS.medium.id : DEFAULT_MODELS.medium.id);
     }
     this.resetBackend();
+  }
+
+  setReasoningEffort(effort: GrokReasoningEffort): void {
+    this.reasoningEffort.set(effort);
+    try {
+      localStorage.setItem(REASONING_KEY, effort);
+    } catch {
+      // ignore
+    }
   }
 
   /** Picks the best default model for this device unless the user has overridden it. */
@@ -365,6 +379,7 @@ export class LlmService {
         topP: 0.9,
         modelId: this.selectedModel().id,
         images,
+        reasoningEffort: this.reasoningEffort(),
         signal,
       });
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -409,6 +424,7 @@ export class LlmService {
         topP: options?.topP ?? 0.95,
         modelId: this.selectedModel().id,
         research: options?.research,
+        reasoningEffort: options?.research ? 'high' : this.reasoningEffort(),
         signal,
       });
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -522,4 +538,17 @@ export class LlmService {
       return false;
     }
   }
+}
+
+export function loadReasoningEffort(): GrokReasoningEffort {
+  try {
+    return parseGrokReasoningEffort(localStorage.getItem(REASONING_KEY));
+  } catch {
+    return 'low';
+  }
+}
+
+export function parseGrokReasoningEffort(raw: string | null): GrokReasoningEffort {
+  if (raw === 'medium' || raw === 'high' || raw === 'xhigh') return raw;
+  return 'low';
 }

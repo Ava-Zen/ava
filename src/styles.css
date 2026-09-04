@@ -104,6 +104,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html[data-orb-chrome='on'],
+html[data-orb-chrome='on'] body {
+  background: #080605;
+  overflow: hidden;
+}
+
 app-debug-console {
   display: flex;
   flex-direction: column;

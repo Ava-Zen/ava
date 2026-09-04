@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { LlmService } from './llm';
+import { LlmService, parseGrokReasoningEffort } from './llm';
 
 describe('LlmService', () => {
   const createService = () => {
@@ -26,5 +26,19 @@ describe('LlmService', () => {
     const output = 'Sure!<think>reasoning that never ends';
 
     expect(service.sanitizeModelOutput(output)).toBe('Sure!');
+  });
+});
+
+describe('parseGrokReasoningEffort', () => {
+  it('defaults to low', () => {
+    expect(parseGrokReasoningEffort(null)).toBe('low');
+    expect(parseGrokReasoningEffort('')).toBe('low');
+    expect(parseGrokReasoningEffort('fast')).toBe('low');
+  });
+
+  it('keeps supported levels', () => {
+    expect(parseGrokReasoningEffort('medium')).toBe('medium');
+    expect(parseGrokReasoningEffort('high')).toBe('high');
+    expect(parseGrokReasoningEffort('xhigh')).toBe('xhigh');
   });
 });

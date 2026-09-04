@@ -63,6 +63,8 @@ export interface ChatGenerateOptions {
   signal?: AbortSignal;
   /** Longer written reply. Grok should use web_search when it can. */
   research?: boolean;
+  /** Grok 4.6 reasoning depth. Low is fastest; high is the API default. */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 /** Result of a successful backend load. */

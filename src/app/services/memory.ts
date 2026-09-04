@@ -9,8 +9,11 @@ import {
   fullNameFromPersona,
   identityFact,
   isExplicitRemember,
+  looksLikeSelfFact,
   peopleFromText,
   personaReplyFact,
+  selfFactLine,
+  stripRememberPrefix,
   type PersonaGap,
   type PersonMention,
 } from './presence';
@@ -78,6 +81,7 @@ export interface MemoryPerson {
   role: string;
   relation: string;
   notes: string;
+  location?: string;
 }
 
 export type MemoryNodeFamily = 'companion' | 'person' | 'topic' | 'note' | 'place';
@@ -319,7 +323,10 @@ export class MemoryService {
     const people = this.people().filter(person => person.id !== 'ava' && person.id !== 'profile');
     if (people.length) {
       parts.push('People in their life:');
-      parts.push(people.map(person => `${person.name} (${person.role})`).join(', '));
+      parts.push(people.map(person => {
+        const where = person.location ? `, lives in ${person.location}` : '';
+        return `${person.name} (${person.role}${where})`;
+      }).join('; '));
     }
     if (!topic) {
       parts.push(
@@ -348,7 +355,9 @@ export class MemoryService {
     const explicit = isExplicitRemember(trimmed);
     if (!trimmed) return { kind: 'none', explicit };
 
-    const people = peopleFromText(trimmed);
+    const people = peopleFromText(trimmed).length
+      ? peopleFromText(trimmed)
+      : peopleFromText(stripRememberPrefix(trimmed));
     if (people.length) {
       void this.writePeople(people);
       const line = people.map(person => person.notes
@@ -358,14 +367,18 @@ export class MemoryService {
       return { kind: 'people', line, explicit: true };
     }
 
-    const identity = identityFact(trimmed) || (personaGap ? personaReplyFact(personaGap, trimmed) : null);
+    const stripped = stripRememberPrefix(trimmed);
+    const identity = identityFact(trimmed)
+      || identityFact(stripped)
+      || (personaGap ? personaReplyFact(personaGap, stripped) : null)
+      || (explicit && looksLikeSelfFact(stripped) ? selfFactLine(stripped) : null);
     if (identity) {
       void this.writeIdentity(identity);
       this.noteQuietly(identity);
       return { kind: 'identity', line: identity, explicit: true };
     }
 
-    const fact = durableFact(trimmed);
+    const fact = durableFact(trimmed) || (explicit ? compactNote(stripped) : null);
     if (!fact || !topic) return { kind: 'none', explicit };
 
     const next: MemoryTopic = {
@@ -380,6 +393,10 @@ export class MemoryService {
     this.noteQuietly(fact);
     void this.appendLog(`**Update**: Kept a note in [${topic.title}](/topics/${topic.id}/).`);
     return { kind: 'topic', line: fact, explicit };
+  }
+
+  clearConversationFocus(): void {
+    this.activeTopicId.set(null);
   }
 
   markConversationCleared(): void {
@@ -753,21 +770,38 @@ export class MemoryService {
 
   private async writePeople(mentions: PersonMention[]): Promise<void> {
     const next = [...this.people()];
+    const reserved = ['index', 'profile', 'ava'];
     for (const mention of mentions) {
-      const existing = next.find(person => person.name.toLowerCase() === mention.name.toLowerCase());
-      const base = existing?.notes?.trim() || `${mention.name} is ${mention.role.toLowerCase()}.`;
-      const extra = mention.notes?.trim() || '';
-      const notes = extra && !base.toLowerCase().includes(extra.toLowerCase())
-        ? `${base} ${extra}`.trim()
+      const existing = matchPerson(next, mention);
+      const name = mention.name.trim() || existing?.name || mention.role || 'Person';
+      const location = mention.livesIn?.trim() || existing?.location || '';
+      const base = existing?.notes?.trim() || `${name} is ${mention.role.toLowerCase()}.`;
+      const extra = mention.notes?.trim() || (location ? `Lives in ${location}` : '');
+      let notes = extra && !base.toLowerCase().includes(extra.toLowerCase())
+        ? `${base.replace(/\.*$/, '')}. ${extra.replace(/\.*$/, '')}.`.trim()
         : base;
+      if (location && !/lives in/i.test(notes)) {
+        notes = `${notes.replace(/\.*$/, '')}. Lives in ${location}.`;
+      }
       const person: MemoryPerson = existing
-        ? { ...existing, role: mention.role, relation: mention.relation, notes }
+        ? {
+          ...existing,
+          name,
+          role: mention.role || existing.role,
+          relation: mention.relation || existing.relation,
+          notes,
+          location: location || existing.location,
+        }
         : {
-          id: uniqueTopicId(slugify(mention.name), next.map(item => item.id).concat(['index', 'profile', 'ava'])),
-          name: mention.name,
+          id: uniqueTopicId(
+            mention.name.trim() ? slugify(mention.name) : mention.relation || 'person',
+            next.map(item => item.id).concat(reserved),
+          ),
+          name,
           role: mention.role,
           relation: mention.relation,
           notes,
+          location: location || undefined,
         };
       if (existing) {
         const index = next.findIndex(item => item.id === existing.id);
@@ -782,7 +816,8 @@ export class MemoryService {
         description: person.role,
         role: person.role,
         relation: person.relation,
-        tags: ['person', person.relation],
+        ...(person.location ? { location: person.location } : {}),
+        tags: ['person', person.relation].filter(Boolean),
         generated: generatedNow(),
       }, `${person.notes.trim()}\n`));
     }
@@ -803,6 +838,7 @@ export class MemoryService {
         role: String(doc?.frontmatter['role'] || (id === 'ava' ? 'Companion' : id === 'profile' ? 'You' : 'Person')),
         relation: String(doc?.frontmatter['relation'] || ''),
         notes: doc?.body.trim() ?? '',
+        location: String(doc?.frontmatter['location'] || '') || undefined,
       });
     }
     this.people.set(people);
@@ -815,7 +851,7 @@ export class MemoryService {
       .map(person => ({
         href: `${person.id}.md`,
         title: person.name,
-        description: person.role,
+        description: person.location ? `${person.role} · ${person.location}` : person.role,
       }));
     await this.home.writeText('person/index.md', directoryIndex('People', [
       { href: 'profile.md', title: user, description: 'Who Ava is speaking with' },
@@ -835,7 +871,7 @@ export class MemoryService {
     const name = this.onboarding.userName() || 'You';
     const existing = (await this.home.readText('person/profile.md')) ?? personDoc(name);
     const parsed = parseOkf(existing);
-    const body = appendNote(parsed.body, line);
+    const body = upsertIdentityLine(parsed.body, line);
     this.identityNotes.set(body);
     await this.home.writeText('person/profile.md', stringifyOkf({
       ...parsed.frontmatter,
@@ -1027,11 +1063,32 @@ export function formatConversation(turns: MemoryTurn[]): string {
   }).join('\n\n')}\n`;
 }
 
+function matchPerson(people: MemoryPerson[], mention: PersonMention): MemoryPerson | undefined {
+  const name = mention.name.trim().toLowerCase();
+  if (name) {
+    const byName = people.find(person => person.name.toLowerCase() === name);
+    if (byName) return byName;
+  }
+  if (mention.relation === 'partner') {
+    return people.find(person => person.relation === 'partner' && person.id !== 'profile' && person.id !== 'ava');
+  }
+  return undefined;
+}
+
 function appendNote(existing: string, line: string): string {
   const bullet = line.startsWith('- ') ? line : `- ${line}`;
   const current = existing.trim();
   if (current.includes(line)) return current;
   return current ? `${current}\n${bullet}` : bullet;
+}
+
+function upsertIdentityLine(existing: string, line: string): string {
+  const kind = line.match(/^(Age is|Name is|Full name is|Lives in|Works|X is|GitHub is|YouTube is)\b/i)?.[1];
+  if (!kind) return appendNote(existing, line);
+  const re = new RegExp(`^-\\s*${kind}\\b.*$`, 'im');
+  const current = existing.trim();
+  if (re.test(current)) return current.replace(re, `- ${line}`);
+  return appendNote(current, line);
 }
 
 function mergeAliases(current: string[], extra: string[]): string[] {

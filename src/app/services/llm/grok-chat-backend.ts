@@ -124,10 +124,12 @@ export class GrokChatBackend implements ChatBackend {
       input: Array<{ role: ChatTurn['role']; content: string }>;
       max_output_tokens: number;
       tools?: Array<{ type: string }>;
+      reasoning?: { effort: 'low' | 'medium' | 'high' | 'xhigh' };
     } = {
       model: options.modelId || 'grok-4.6',
       input: messages.map(turn => ({ role: turn.role, content: turn.content })),
       max_output_tokens: Math.max(64, options.maxNewTokens),
+      reasoning: { effort: options.reasoningEffort || 'low' },
     };
     if (tools.length) payload.tools = tools;
 

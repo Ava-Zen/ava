@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run pack:source && npm run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -19,7 +20,9 @@
         "resizable": true,
         "fullscreen": false,
         "minWidth": 360,
-        "minHeight": 600
+        "minHeight": 600,
+        "transparent": true,
+        "backgroundColor": [0, 0, 0, 0]
       },
       {
         "label": "debug",

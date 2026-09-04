@@ -6,7 +6,7 @@ import { MemoryService } from '../services/memory';
 import { TtsService, TtsEngine, ListenMode } from '../services/tts';
 import { MCP_PRESETS, McpService, GITHUB_OAUTH_DEFAULTS } from '../services/mcp';
 import { McpAuthMethod, McpServerConfig, McpServerStatus } from '../services/mcp/mcp-types';
-import { LlmService } from '../services/llm';
+import { GrokReasoningEffort, GROK_REASONING_EFFORTS, LlmService } from '../services/llm';
 import { AgentsService } from '../services/agents';
 import { HardwareDiagnosticsService } from '../services/hardware-diagnostics';
 import { XaiAuthService } from '../services/xai/xai-auth';
@@ -14,6 +14,8 @@ import { CopilotAuthService } from '../services/copilot/copilot-auth';
 import { UpdateService } from '../services/updates';
 import { ConfirmDialogService } from '../services/confirm-dialog';
 import { ThemePreference, ThemeService } from '../services/theme';
+import { WindowChromeService } from '../services/window-chrome';
+import { ListenHotkey, ListenHotkeyService, LISTEN_HOTKEY_OPTIONS } from '../services/listen-hotkey';
 import { GardensService } from '../services/gardens';
 import { GrokCliService } from '../services/grok-cli';
 import { DebugLogService } from '../services/debug-log';
@@ -50,6 +52,8 @@ export class Settings {
   private readonly updates = inject(UpdateService);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly theme = inject(ThemeService);
+  private readonly chrome = inject(WindowChromeService);
+  private readonly listenHotkey = inject(ListenHotkeyService);
   private readonly gardensService = inject(GardensService);
   private readonly grokBuild = inject(GrokCliService);
   private readonly debugLog = inject(DebugLogService);
@@ -57,6 +61,7 @@ export class Settings {
   private readonly scheduleStore = inject(SchedulesService);
   protected readonly schedules = this.scheduleStore.items;
   protected readonly debugAvailable = this.debugLog.available;
+  protected readonly debugWindowEnabled = this.debugLog.enabled;
   protected readonly selfImproveDesktop = this.selfImprove.desktop;
   protected readonly selfImproveStatus = this.selfImprove.status;
   protected selfImproveError = '';
@@ -66,6 +71,11 @@ export class Settings {
   protected newGardenName = '';
   protected readonly themePreference = this.theme.preference;
   protected readonly resolvedTheme = this.theme.resolved;
+  protected readonly chromeDesktop = this.chrome.desktop;
+  protected readonly listenHotkeyKey = this.listenHotkey.key;
+  protected readonly listenHotkeyOptions = LISTEN_HOTKEY_OPTIONS;
+  protected readonly orbChrome = this.chrome.compact;
+  protected readonly alwaysOnTop = this.chrome.alwaysOnTop;
   protected readonly homePath = this.memory.homePath;
   protected readonly homeLabel = this.memory.homeLabel;
   protected readonly desktopHome = this.memory.desktop;
@@ -250,6 +260,8 @@ export class Settings {
   protected readonly conversationLoadInfo = this.llmService.loadInfo;
   protected readonly conversationReady = this.llmService.isReady;
   protected readonly conversationLoading = this.llmService.isLoading;
+  protected readonly grokReasoningEffort = this.llmService.reasoningEffort;
+  protected readonly grokReasoningEfforts = GROK_REASONING_EFFORTS;
 
   // Local model storage (Tauri: GGUF files in the app data dir).
   protected readonly modelFiles = signal<ModelFileInfo[]>([]);
@@ -421,6 +433,14 @@ export class Settings {
     this.ttsService.setListenMode(mode);
   }
 
+  setListenHotkey(key: ListenHotkey) {
+    void this.listenHotkey.setKey(key);
+  }
+
+  listenHotkeyLabel(key: ListenHotkey): string {
+    return key === 'off' ? 'Off' : key;
+  }
+
   selectVoice(id: TtsEngine) {
     this.ttsService.setVoice(id);
   }
@@ -465,6 +485,21 @@ export class Settings {
     this.openDebug.emit();
   }
 
+  setDebugWindow(enabled: boolean) {
+    void this.debugLog.setEnabled(enabled);
+  }
+
+  setGrokReasoning(effort: GrokReasoningEffort) {
+    this.llmService.setReasoningEffort(effort);
+  }
+
+  grokReasoningLabel(effort: GrokReasoningEffort): string {
+    if (effort === 'xhigh') return 'Extra high';
+    if (effort === 'high') return 'High';
+    if (effort === 'medium') return 'Medium';
+    return 'Low';
+  }
+
   setIntelligenceMode(mode: 'local' | 'grok') {
     this.llmService.setIntelligenceMode(mode);
     if (mode === 'grok') {
@@ -476,6 +511,15 @@ export class Settings {
 
   setTheme(preference: ThemePreference) {
     this.theme.setPreference(preference);
+  }
+
+  setOrbChrome(enabled: boolean) {
+    if (enabled) this.close.emit();
+    void this.chrome.setCompact(enabled);
+  }
+
+  setAlwaysOnTop(enabled: boolean) {
+    void this.chrome.setAlwaysOnTop(enabled);
   }
 
   async signInWithGrok() {

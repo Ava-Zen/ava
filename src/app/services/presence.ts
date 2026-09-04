@@ -41,8 +41,40 @@ export function rememberAck(): string {
 }
 
 export function isExplicitRemember(text: string): boolean {
-  return /\b(?:please\s+)?remember(?:\s+that)?\s+\S/i.test(text.trim())
-    || /\bplease keep\b/i.test(text.trim());
+  const t = text.trim();
+  if (/^(?:(?:hey|hi|hello)\s+)?(?:ava[, ]+)?(?:please\s+)?remember(?:\s+(?:that|this|it))?[,:]?\s+\S/i.test(t)) {
+    return true;
+  }
+  if (/\b(?:please\s+)?remember(?:\s+(?:that|this))\s+\S/i.test(t)) return true;
+  if (/\b(?:please\s+)?(?:keep|store|save|note)\s+(?:that|this)\b/i.test(t)) return true;
+  if (/\bdon'?t forget\b/i.test(t)) return true;
+  if (/\bplease keep\b/i.test(t)) return true;
+  return false;
+}
+
+export function stripRememberPrefix(text: string): string {
+  return text
+    .replace(
+      /^(?:(?:hey|hi|hello)\s+)?(?:ava[, ]+)?(?:please\s+)?(?:remember(?:\s+(?:that|this|it))?|keep this|store this|save this|note this|don't forget|do not forget)[.,:]?\s*/i,
+      '',
+    )
+    .trim();
+}
+
+export function looksLikeSelfFact(text: string): boolean {
+  const t = text.trim();
+  if (/^my\s+(partner|wife|husband|spouse|girlfriend|boyfriend|son|daughter|kid|child|kids|children)\b/i.test(t)) {
+    return false;
+  }
+  if (/^i have (?:a |an )?(son|daughter|kid|child|partner|wife|husband|girlfriend|boyfriend)\b/i.test(t)) {
+    return false;
+  }
+  return /^(?:i(?:'m| am| have|'ve)|my |i live|i work)\b/i.test(t);
+}
+
+export function selfFactLine(text: string): string | null {
+  const cleaned = compactNote(text);
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : null;
 }
 
 export function isAskingWhatSheRemembers(text: string): boolean {
@@ -55,6 +87,7 @@ export interface PersonMention {
   relation: 'partner' | 'child' | 'person';
   role: string;
   notes?: string;
+  livesIn?: string;
 }
 
 const NAME_STOP =
@@ -108,6 +141,38 @@ export function peopleFromText(text: string): PersonMention[] {
     add(match[2], 'child', titleCaseName(match[1]) || 'Child');
   }
 
+  for (const match of text.matchAll(
+    /\b(?:my|our)\s+(son|daughter|kid|child)'s name is\s+([A-Za-z][A-Za-z'-]{1,30})/gi,
+  )) {
+    add(match[2], 'child', titleCaseName(match[1]) || 'Child');
+  }
+
+  const haveSon = text.match(
+    /\bi have (?:a |an )?(son|daughter|kid|child)(?:[,.]?\s+(?:and\s+)?(?:his|her|their)\s+name\s+is|\s+(?:named|called))\s+([A-Za-z][A-Za-z'-]{1,30})/i,
+  );
+  if (haveSon) add(haveSon[2], 'child', titleCaseName(haveSon[1]) || 'Child');
+
+  const partnerLives = text.match(
+    /\b(?:my|our)\s+(partner|wife|husband|spouse|girlfriend|boyfriend)\s+lives in\s+([^.,!?]+)/i,
+  );
+  if (partnerLives) {
+    const role = titleCaseName(partnerLives[1]) || 'Partner';
+    const livesIn = cleanFactTail(partnerLives[2]);
+    const named = found.find(person => person.relation === 'partner');
+    if (named) {
+      named.livesIn = named.livesIn || livesIn;
+      named.notes = [named.notes, livesIn ? `Lives in ${livesIn}` : ''].filter(Boolean).join('. ');
+    } else {
+      found.push({
+        name: '',
+        relation: 'partner',
+        role,
+        livesIn,
+        notes: livesIn ? `Lives in ${livesIn}` : undefined,
+      });
+    }
+  }
+
   return found;
 }
 
@@ -133,9 +198,49 @@ export function identityFact(text: string): string | null {
   if (live) return `Lives in ${cleanFactTail(live[1])}`;
   const work = text.match(/\bi work(?:\s+as|\s+at|\s+for)?\s+([^.,!?]{2,40})/i);
   if (work) return `Works ${cleanFactTail(work[1])}`;
-  const age = text.match(/\b(?:i(?:'m| am)\s+)?(\d{1,2})\s+years old\b/i)
-    || text.match(/\bmy age is\s+(\d{1,2})\b/i);
-  if (age) return `Age is ${age[1]}`;
+  const age = parseSpokenAge(text);
+  if (age != null) return `Age is ${age}`;
+  return null;
+}
+
+const AGE_ONES: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+};
+const AGE_TEENS: Record<string, number> = {
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+  sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const AGE_TENS: Record<string, number> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+export function parseSpokenAge(text: string): number | null {
+  const hay = text.replace(/-/g, ' ');
+  const labeled = hay.match(/\bmy age is\s+(\d{1,2}|[a-z]+(?:\s+[a-z]+)?)\b/i);
+  if (labeled) return parseAgeToken(labeled[1]);
+  const years = hay.match(/\b(?:i(?:'m| am)\s+)?(\d{1,2}|[a-z]+(?:\s+[a-z]+)?)\s+years old\b/i);
+  if (years) return parseAgeToken(years[1]);
+  const whole = hay.replace(/[.,!?]/g, '').trim();
+  const bare = whole.match(/^(?:i(?:'m| am)\s+)?(\d{1,2}|[a-z]+(?:\s+[a-z]+)?)$/i);
+  if (bare) return parseAgeToken(bare[1]);
+  return null;
+}
+
+function parseAgeToken(raw: string): number | null {
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= 99) return n;
+  return ageFromWords(raw);
+}
+
+function ageFromWords(raw: string): number | null {
+  const n = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (AGE_TEENS[n] != null) return AGE_TEENS[n];
+  if (AGE_ONES[n] != null) return AGE_ONES[n];
+  if (AGE_TENS[n] != null) return AGE_TENS[n];
+  const parts = n.split(' ');
+  if (parts.length === 2 && AGE_TENS[parts[0]] != null && AGE_ONES[parts[1]] != null) {
+    return AGE_TENS[parts[0]] + AGE_ONES[parts[1]];
+  }
   return null;
 }
 
@@ -294,8 +399,8 @@ export function personaReplyFact(gap: PersonaGap, text: string): string | null {
   if (!trimmed || THROWAWAY_REPLY.test(trimmed)) return null;
   if (gap === 'family' || gap === 'name') return null;
   if (gap === 'age') {
-    const n = trimmed.match(/\b(\d{1,2})\b/);
-    return n ? `Age is ${n[1]}` : null;
+    const n = parseSpokenAge(trimmed);
+    return n != null ? `Age is ${n}` : null;
   }
   if (gap === 'work') {
     const known = identityFact(trimmed);
@@ -319,11 +424,16 @@ function clipSpoken(text: string): string {
 }
 
 export function durableFact(text: string): string | null {
-  const identity = identityFact(text);
+  const stripped = stripRememberPrefix(text);
+  const identity = identityFact(text) || identityFact(stripped);
   if (identity) return identity;
-  const remember = text.match(/\bremember(?:\s+that)?\s+(.+)/i);
-  if (remember) return compactNote(remember[1]);
-  if (/\bplease keep\b/i.test(text)) return compactNote(text);
+  const remember = text.match(/\bremember(?:\s+(?:that|this|it))?[,:]?\s+(.+)/i);
+  if (remember) {
+    const rest = compactNote(remember[1].replace(/^(?:this|that|it)[,:]?\s+/i, ''));
+    return identityFact(rest) || rest || null;
+  }
+  if (/\bplease keep\b/i.test(text)) return compactNote(stripped || text);
+  if (isExplicitRemember(text) && stripped) return compactNote(stripped);
   return null;
 }
 

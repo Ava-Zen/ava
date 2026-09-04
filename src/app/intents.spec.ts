@@ -17,7 +17,9 @@ import {
   isAskingToStopGrokTurn,
   isAskingToStopListening,
   isLeavingGrokWork,
+  parseInsertRequest,
   parseScheduleRequest,
+  buildInsertPrompt,
 } from './intents';
 
 describe('isAskingForTime', () => {
@@ -225,5 +227,68 @@ describe('research and schedules', () => {
   it('mentions research and schedules in capabilities', () => {
     expect(AVA_CAPABILITIES_REPLY.toLowerCase()).toContain('research');
     expect(AVA_CAPABILITIES_REPLY.toLowerCase()).toContain('schedule');
+    expect(AVA_CAPABILITIES_REPLY.toLowerCase()).toContain('other app');
+  });
+});
+
+describe('parseInsertRequest', () => {
+  it('treats generate-a-text asks as writing for another field', () => {
+    expect(parseInsertRequest('generate a text about Vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(parseInsertRequest('Hey Ava, generate a text about Vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(parseInsertRequest('write a paragraph about the sea')).toEqual({
+      kind: 'generate',
+      prompt: 'the sea',
+    });
+    expect(parseInsertRequest('type a short note about vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'vikings',
+    });
+    expect(parseInsertRequest('write about Vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(parseInsertRequest('write something about Vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(parseInsertRequest('Can you generate text about Vikings')).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(buildInsertPrompt('Vikings').toLowerCase()).toContain('vikings');
+  });
+
+  it('types short dictation as-is and can replay the last reply', () => {
+    expect(parseInsertRequest('type Hello World')).toEqual({
+      kind: 'literal',
+      text: 'Hello World',
+    });
+    expect(parseInsertRequest('insert thanks')).toEqual({
+      kind: 'literal',
+      text: 'thanks',
+    });
+    expect(parseInsertRequest('insert that')).toEqual({ kind: 'last' });
+    expect(parseInsertRequest('put that in the field')).toEqual({ kind: 'last' });
+  });
+
+  it('leaves questions and spoken explainers as conversation', () => {
+    expect(parseInsertRequest('tell me about Vikings')).toBeNull();
+    expect(parseInsertRequest('what time is it')).toBeNull();
+    expect(parseInsertRequest('talk about Vikings')).toBeNull();
+  });
+
+  it('in orb mode, write and generate asks go into the field', () => {
+    expect(parseInsertRequest('write a few lines on Vikings', { intoField: true })).toEqual({
+      kind: 'generate',
+      prompt: 'Vikings',
+    });
+    expect(parseInsertRequest('make a short bio', { intoField: true })?.kind).toBe('generate');
+    expect(parseInsertRequest('tell me about Vikings', { intoField: true })).toBeNull();
   });
 });
